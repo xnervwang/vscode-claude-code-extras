@@ -7184,7 +7184,7 @@ console.log('\nClaude Code\'s own source');
         readPlan: () => null, titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
         activeChat: () => chat, logo: () => null, canDeliver: (id) => id === 'A',
         hand: (id, text, key) => { handed.push([id, text, key]); return id === 'A'; },
-        reveal: async (id, title, cwd) => { shown.push([id, title, cwd]); return true; } });
+        reveal: async (...a) => { shown.push(a); return false; } });
       const heard = [], notices = [];
       c.source.onDidFocus((e) => heard.push(e.sessionId));
       c.source.onDidChangePlanNotice(() => notices.push(c.source.planNotice()));
@@ -7213,6 +7213,11 @@ console.log('\nClaude Code\'s own source');
       chat = 'X'; out.follow = [c.followChat(), c.followChat()]; chat = ''; out.follow.push(c.followChat());
       c.pageFocus('Y'); c.pageFocus(''); c.pageFocus(42);
       out.focused = [c.source.isFocused('Y'), c.source.isFocused('C'), c.source.isFocused('A2'), c.source.isFocused('Q'), c.source.isFocused('')];
+      const codexTab = { input: { viewType: 'chatgpt.conversationEditor' }, group: { viewColumn: 1 } };
+      const claudeTab = tab('mainThreadWebview-claudeVSCodePanel', 1);
+      c.tabsChanged(claudeTab); out.afterClaudeTab = c.source.isFocused('Y');
+      c.tabsChanged(codexTab); out.afterCodexTab = c.source.isFocused('Y');
+      c.pageFocus('Y'); c.tabsChanged(codexTab); out.sameTabAgain = c.source.isFocused('Y');
       c.refocus();
       out.heard = heard.slice();
       const notice = { title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] };
@@ -7235,6 +7240,9 @@ console.log('\nClaude Code\'s own source');
         c.answered(last(), false, 'error');
         out.error = await odd;
         out.silent = await c.source.deliverAnswer('A', 'nobody answers', { deliveryId: 'd3' });
+        for (let i = 0; i < 300; i++) c.source.deliverAnswer('B', 'other', { deliveryId: 'o' + i });
+        await c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
+        out.handedForD1Later = handed.filter((h) => h[1] === 'yes').length;
         const reasons = {};
         for (const r of ['not-shown', 'no-input', 'insert', 'left-in-input', 'something new']) reasons[r] = C.outcomeOf(false, r).outcome;
         out.reasons = reasons;
@@ -7256,12 +7264,15 @@ console.log('\nClaude Code\'s own source');
     if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, '', '', false]) && o.listeners === 1 && o.afterDispose === '') {
       ok('sessionForTab() gives the panel visible in the tab\'s group, \'\' for a Claude Code tab with no conversation, null for any other tab');
     } else bad(`claims ${JSON.stringify([o.claims, o.listeners, o.afterDispose])}`);
-    if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
+    if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
       ok('each Claude Code focus signal fires onDidFocus, and a panel in front that gets its session id says so');
     } else bad(`focus heard ${JSON.stringify([o.heard, o.follow])}`);
     if (o.focusedA2 === true && JSON.stringify(o.focused) === '[true,true,false,false,false]') {
       ok('isFocused() holds for the latest signal and for a panel in front, and not for one left behind');
     } else bad(`isFocused ${JSON.stringify([o.focusedA2, o.focused])}`);
+    if (o.afterClaudeTab === true && o.afterCodexTab === false && o.sameTabAgain === true) {
+      ok('a focus signal stops counting once another agent\'s tab comes to front after it');
+    } else bad(`focus after a tab change ${JSON.stringify([o.afterClaudeTab, o.afterCodexTab, o.sameTabAgain])}`);
     if (JSON.stringify(o.notices) === JSON.stringify([{ title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] }, null])) {
       ok('the plan notice is reported when it changes, and not when it is set to the same again');
     } else bad(`plan notices ${JSON.stringify(o.notices)}`);
@@ -7272,13 +7283,19 @@ console.log('\nClaude Code\'s own source');
         'left-in-input': 'notReceived', 'something new': 'uncertain' }) && JSON.stringify(o.canDeliver) === '[true,false]') {
       ok('deliverAnswer() reports one of the four outcomes, types an answer once per delivery id, and tries again one that did not get there');
     } else bad(`claude delivery ${JSON.stringify(o).slice(0, 700)}`);
-    if (Array.isArray(o.list) && o.problem === 'no cli' && o.revealed === true && JSON.stringify(o.shown) === JSON.stringify([['Z', 'Z', '']])) {
+    if (o.handedForD1Later === 2) {
+      ok('an answer handed over again after 300 others is still typed only once');
+    } else bad(`answer d1 typed ${o.handedForD1Later} times`);
+    if (Array.isArray(o.list) && o.problem === 'no cli') {
       ok('listConversations() reports a failed `claude agents` as its problem');
-    } else bad(`claude list ${JSON.stringify([o.list, o.problem, o.revealed, o.shown])}`);
+    } else bad(`claude list ${JSON.stringify([o.list, o.problem])}`);
+    if (o.revealed === false && JSON.stringify(o.shown) === JSON.stringify([['Z']])) {
+      ok('reveal() passes the session id to the extension and returns its answer');
+    } else bad(`reveal ${JSON.stringify([o.revealed, o.shown])}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-console.log('\nClaude Code\'s source after its rows are gone');
+console.log('\nClaude Code\'s source and closed panels');
 {
 
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-claude-review-')));
@@ -7290,13 +7307,10 @@ console.log('\nClaude Code\'s source after its rows are gone');
       Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
       const vs = require(${JSON.stringify(stub)});
       const { createClaudeSource } = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'claude-source.js'))});
-      const ws = ${JSON.stringify(home)};
-      let records = [{ sessionId: 'A', id: 'a1', kind: 'interactive', cwd: ws, name: 'proj-1a', status: 'idle' }];
-      const shown = [];
-      const c = createClaudeSource({ planDir: () => '/plans', listAgents: async () => ({ records, error: '' }), folders: () => [ws],
+      const c = createClaudeSource({ planDir: () => '/plans', listAgents: async () => ({ records: [], error: '' }), folders: () => [],
         readPlan: () => null, titles: () => ({ custom: 'Alpha', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
         activeChat: () => '', logo: () => null, canDeliver: () => false, hand: () => false, isBackground: () => false,
-        reveal: async (id, title, cwd) => { shown.push([id, title, cwd]); return true; } });
+        reveal: async () => false });
       const panel = (column) => {
         const p = { viewColumn: column, visible: true, active: true, subs: [] };
         const sub = (fn) => { const d = { fn, disposed: false, dispose() { this.disposed = true; } }; p.subs.push(d); return d; };
@@ -7306,13 +7320,6 @@ console.log('\nClaude Code\'s source after its rows are gone');
       };
       (async () => {
         const out = {};
-        out.first = (await c.source.listConversations()).map((x) => x.sessionId);
-        records = [];
-        c.invalidate();
-        out.second = (await c.source.listConversations()).map((x) => x.sessionId);
-        await c.source.reveal('A');
-        await c.source.reveal('never');
-        out.shown = shown;
         const p1 = panel(1), p2 = panel(2);
         c.track(p1, 'P1'); c.track(p2, 'P2');
         const tab = (column) => ({ input: new vs.TabInputWebview('mainThreadWebview-claudeVSCodePanel'), group: { viewColumn: column } });
@@ -7325,43 +7332,9 @@ console.log('\nClaude Code\'s source after its rows are gone');
     const cr = cp.spawnSync(process.execPath, ['-e', cscript], { encoding: 'utf8', timeout: 30000 });
     let co = {};
     try { co = JSON.parse(cr.stdout); } catch (_) { co = { threw: cr.stdout + cr.stderr }; }
-    if (JSON.stringify(co.first) === '["A"]' && JSON.stringify(co.second) === '[]'
-      && JSON.stringify(co.shown) === JSON.stringify([['A', 'Alpha', home], ['never', 'never', '']])) {
-      ok('reveal() uses the remembered title and folder after the row is gone');
-    } else bad(`remembered conversations: ${JSON.stringify(co)}`);
     if (JSON.stringify(co.afterClose) === JSON.stringify([[true, true], '', 'P2']) && JSON.stringify(co.afterDispose) === JSON.stringify([[true, true], ''])) {
       ok('panel subscriptions are disposed');
     } else bad(`panel subscriptions: ${JSON.stringify([co.afterClose, co.afterDispose, co.threw])}`);
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
-}
-
-console.log('\nClaude Code\'s reveal() with the clicked row');
-{
-
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-reveal-row-')));
-  try {
-    const stub = path.join(home, 'vscode-stub.js');
-    fs.writeFileSync(stub, `module.exports = { TabInputWebview: class {} };`);
-    const script = `
-      const Module = require('module'), realResolve = Module._resolveFilename;
-      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
-      const { createClaudeSource } = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'claude-source.js'))});
-      const shown = [];
-      const c = createClaudeSource({ planDir: () => '/p', listAgents: async () => ({ records: [{ sessionId: 'A', cwd: ${JSON.stringify(home)}, name: 'x-1a', status: 'idle' }], error: '' }),
-        folders: () => [${JSON.stringify(home)}], readPlan: () => null, titles: () => ({ custom: 'Listed', ai: '' }), since: () => 0,
-        live: () => new Map(), unread: () => new Set(), activeChat: () => '', logo: () => null, canDeliver: () => false, hand: () => false,
-        isBackground: () => false, reveal: async (id, title, cwd) => { shown.push([id, title, cwd]); return true; } });
-      (async () => {
-        await c.source.listConversations();
-        await c.source.reveal('A', { title: 'Row', cwd: '/row' });
-        await c.source.reveal('B', { title: 'Row B', cwd: '/row-b' });
-        await c.source.reveal('C', { title: 7 });
-        process.stdout.write(JSON.stringify(shown));
-      })();`;
-    const r = cp.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 });
-    if (r.stdout === JSON.stringify([['A', 'Listed', home], ['B', 'Row B', '/row-b'], ['C', 'C', '']])) {
-      ok('Claude Code\'s reveal() falls back to the clicked row');
-    } else bad(`reveal with a row: ${r.stdout} ${r.stderr.slice(0, 300)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 

@@ -626,27 +626,26 @@ function start(context, log, renamed) {
       try { return typeof globalThis.__cceAnswer === 'function' && globalThis.__cceAnswer(sessionId) === true; } catch (_) { return false; }
     },
     hand: (sessionId, text, key) => globalThis.__cceAnswer(sessionId, text, key) === true,
-    /*
-     * An extension cannot raise another window, and opening the conversation here as well would start a second process on
-     * it, so a conversation not open in this window gets a message saying where it is. Returns true after the message so
-     * the host does not add its own.
-     */
-    reveal: async (sessionId, title, cwd) => {
+    /* An extension cannot raise another window, and opening the conversation here as well would start a second process on
+       it, so only one shown in this window is brought to front. */
+    reveal: async (sessionId) => {
       const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
       const elsewhere = list('__cceSessionsElsewhere');
       const here = list('__cceSessionsShown').filter((id) => !elsewhere.includes(id));
-      if (here.includes(sessionId)) {
-        await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId);
-        return true;
-      }
-      const where = cwd ? ` (folder ${cwd})` : '';
-      vscode.window.showInformationMessage(elsewhere.includes(sessionId)
-        ? `"${title}" is open in another VS Code window${where}.`
-        : `"${title}" is not open in this window${where}. It is running outside it, so it is not opened here as well.`);
+      if (!here.includes(sessionId)) return false;
+      await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId);
       return true;
     },
   });
   context.subscriptions.push(claude);
+  {
+    const groups = vscode.window.tabGroups;
+    const activeTab = () => { const g = groups && groups.activeTabGroup; return g ? g.activeTab : undefined; };
+    claude.tabsChanged(activeTab());
+    for (const name of ['onDidChangeTabs', 'onDidChangeTabGroups']) {
+      if (groups && typeof groups[name] === 'function') context.subscriptions.push(groups[name](() => claude.tabsChanged(activeTab())));
+    }
+  }
 
   globalThis.__cceAnswerHook = (key, sent, reason) => claude.answered(key, sent, reason);
   context.subscriptions.push({ dispose: () => { if (globalThis.__cceAnswerHook) delete globalThis.__cceAnswerHook; } });

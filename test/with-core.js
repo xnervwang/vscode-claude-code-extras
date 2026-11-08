@@ -151,6 +151,29 @@ async function run() {
     await until(() => !plan.provider.shown(), 3000);
     eq(plan.provider.shown(), null, 'a Claude Code tab with no conversation yet shows no plan');
 
+    /* A page reports focus and a Codex tab comes to front before Agent Work Plan takes the report. */
+    const codexTab = { label: 'Codex', input: new vscode.TabInputCustom(vscode.Uri.file('/codex/thread'), 'chatgpt.conversationEditor') };
+    globalThis.__cceFocusHook(SID);
+    control.setTabs([codexTab]);
+    control.fireTabs();
+    await wait(200);
+    eq(plan.provider.shown(), null, 'a focus report overtaken by another agent\'s tab leaves the view where it was');
+    globalThis.__cceFocusHook(SID);
+    await until(() => plan.provider.shown(), 3000);
+    eq(plan.provider.shown() && plan.provider.shown().file, path.join(plans, SID + '.json'),
+      'a sidebar conversation that gets focus while a Codex tab is open moves the view to its plan');
+
+    /* Opening the conversation from its row: only one shown in this window is brought to front. */
+    const open = () => control.state.handlers['agentWorkPlan.openConversation']({ sourceId: 'claude-code', sessionId: SID, title: 'Asks two questions', cwd: ws });
+    const said = control.state.said.length;
+    await open();
+    eq(control.state.said.slice(said).map((m) => /could not be brought to front/.test(m.message)), [true],
+      'a conversation not shown in this window gets Agent Work Plan\'s message that it could not be brought to front');
+    globalThis.__cceSessionsShown = () => [SID];
+    await open();
+    eq([control.state.said.length - said, control.state.commands.some((c) => c[0] === 'claude-vscode.editor.open' && c[1] === SID)], [1, true],
+      'a conversation shown in this window is brought to front with no message');
+
     /* Answers: the first is sent by the panel, the second finds the input already holding text. */
     const conv = () => tree.getChildren().find((e) => e.kind === 'conversation');
     const view = control.state.webviews['agentWorkPlan.answer'];
@@ -174,6 +197,7 @@ async function run() {
     for (const c of [selfContext, coreContext]) for (const d of c.subscriptions.splice(0)) { try { d.dispose(); } catch (_) { /* gone */ } }
     try { self.deactivate(); } catch (_) { /* closing */ }
     delete globalThis.__cceAnswer;
+    delete globalThis.__cceSessionsShown;
     undo();
   }
 }

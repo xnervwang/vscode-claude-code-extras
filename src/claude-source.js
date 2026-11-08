@@ -33,9 +33,6 @@ const AGENTS_FRESH_MS = 30000;
 /* Agent Work Plan waits 20 seconds for an outcome and then reports it as uncertain; a "not received" arriving after
    that would be dropped, so the panel's report is waited for a shorter time. */
 const ANSWER_WAIT_MS = 15000;
-const REMEMBERED = 500;
-/* Delivery ids already handled, so an answer handed over twice is typed once. */
-const DELIVERIES = 200;
 
 /*
  * What the panel's script (src/page/91-answer.js) reports, in the protocol's outcomes. Every reason it gives for not
@@ -87,7 +84,7 @@ const isPanelTab = (tab) => !!tab && tab.input instanceof vscode.TabInputWebview
  *   activeChat()                    the host's activeSessionId, or ''
  *   canDeliver(sessionId)           whether a panel in this window shows it
  *   hand(sessionId, text, key)      gives the answer to the panel; its result comes back through answered()
- *   reveal(sessionId, title, cwd)   Promise<boolean>
+ *   reveal(sessionId)               Promise<boolean>
  *   logo()                          { light, dark } Uris, or null
  *   timeZone()                      the zone a panel reported, or ''
  *   isBackground(id, cwd)           optional, for tests
@@ -97,21 +94,15 @@ function createClaudeSource(deps) {
   let stale = true, agentsAt = 0, agentsLast = { records: null, error: '' }, stoppedLast = new Map(), pidsAsk = null;
   let lastChat = null;
   /* The session id of the latest focus signal: Agent Work Plan asks isFocused() a moment after each one, and only the
-     latest is still in front. */
+     latest is still in front. Another tab coming to front after it, such as a Codex one, clears it. */
   let front = '';
+  let frontTab;
   let notice = null;
-  /* Kept after a conversation leaves the list: a question in the Answer view can outlive its row, and reveal() still
-     needs the title and folder for its message. */
-  const listed = new Map();
-  const remember = (c) => {
-    listed.delete(c.sessionId);
-    listed.set(c.sessionId, { title: c.title, cwd: c.cwd });
-    if (listed.size > REMEMBERED) listed.delete(listed.keys().next().value);
-  };
   /* panel -> { sessionId, subs } */
   const panels = new Map();
   const unsubscribe = (subs) => { for (const d of subs) { try { d.dispose(); } catch (_) { /* already disposed */ } } };
   const pending = new Map();
+  /* Kept for as long as the source is registered: one entry per answer typed into this window. */
   const deliveries = new Map();
   let keys = 0;
   const enabled = () => { try { return deps.enabled ? deps.enabled() !== false : true; } catch (_) { return true; } };
@@ -188,18 +179,11 @@ function createClaudeSource(deps) {
         hasPlan: false,
       });
       const out = [...running.values()].map((s) => one(s, true)).concat([...stoppedLast.values()].map((s) => one(s, false)));
-      for (const c of out) remember(c);
       if (!records) out.problem = error;
       return out;
     },
 
-    /* `row` is the clicked row's { title, cwd }, used when this conversation is no longer remembered. */
-    async reveal(sessionId, row) {
-      const c = listed.get(sessionId);
-      const title = c ? c.title : row && typeof row.title === 'string' && row.title ? row.title : sessionId;
-      const cwd = c ? c.cwd : row && typeof row.cwd === 'string' ? row.cwd : '';
-      return deps.reveal(sessionId, title, cwd);
-    },
+    reveal: (sessionId) => deps.reveal(sessionId),
 
     canDeliver: (sessionId) => deps.canDeliver(sessionId) === true,
 
@@ -211,7 +195,6 @@ function createClaudeSource(deps) {
       const p = deliver(sessionId, text);
       if (id) {
         deliveries.set(id, p);
-        if (deliveries.size > DELIVERIES) deliveries.delete(deliveries.keys().next().value);
         p.then((r) => { if (r.outcome === 'notReceived' && deliveries.get(id) === p) deliveries.delete(id); });
       }
       return p;
@@ -246,6 +229,12 @@ function createClaudeSource(deps) {
     },
     pageFocus(sessionId) {
       if (typeof sessionId === 'string' && sessionId) say(sessionId);
+    },
+    /* Called with the active tab whenever tabs change. */
+    tabsChanged(tab) {
+      if (tab === frontTab) return;
+      frontTab = tab;
+      if (tab && !isPanelTab(tab)) front = '';
     },
     /* Says again which conversation is in front, for a listener that was not there when it was first said. */
     refocus() {
@@ -298,4 +287,4 @@ function createClaudeSource(deps) {
   };
 }
 
-module.exports = { createClaudeSource, isPanelTab, outcomeOf, emitter, PROTOCOL, ID, EXTENSION_ID, ANSWER_WAIT_MS, REMEMBERED };
+module.exports = { createClaudeSource, isPanelTab, outcomeOf, emitter, PROTOCOL, ID, EXTENSION_ID, ANSWER_WAIT_MS };
