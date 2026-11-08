@@ -7482,6 +7482,24 @@ console.log('\nRestricted Mode');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
+/* ── with Agent Work Plan ──
+   test/with-core.js activates Agent Work Plan from its checkout beside this one, then this extension, in Agent Work
+   Plan's stand-in VS Code. It runs as a child with an empty home folder, since both extensions write under it. Without
+   that checkout it notes so, which is not a failure. */
+console.log('\nwith Agent Work Plan');
+{
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-with-core-')));
+  try {
+    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, AGENT_WORK_PLAN_HOME: path.join(home, 'shared') });
+    delete env.CLAUDE_CONFIG_DIR;
+    const r = cp.spawnSync(process.execPath, [path.join(__dirname, 'with-core.js')], { encoding: 'utf8', timeout: 120000, env, cwd: home });
+    let verdicts = null;
+    try { verdicts = JSON.parse(r.stdout); } catch (_) { verdicts = null; }
+    if (!Array.isArray(verdicts) || !verdicts.length) bad(`the run with Agent Work Plan did not report: ${(r.stderr || r.stdout || '').slice(0, 400)}`);
+    else for (const [kind, msg] of verdicts) (kind === 'ok' ? ok : kind === 'note' ? note : bad)(msg);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+}
+
 const ran = `${passed} passed` + (skipped ? `, ${skipped} skipped for want of an install here` : '');
 console.log(failures ? `\n${failures} check(s) failed (${ran})` : `\nall checks passed (${ran})`);
 process.exit(failures ? 1 : 0);
