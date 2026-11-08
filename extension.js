@@ -188,9 +188,8 @@ async function renameSettings(context) {
 }
 
 /*
- * In Restricted Mode nothing starts until the workspace is trusted: everything this extension does writes Claude Code's
- * files, settings or the files beside the plans, or runs Claude Code's command line. Claude Code itself does not run in
- * Restricted Mode. deactivate() still puts Claude Code back on an uninstall, which is the person's own request.
+ * In Restricted Mode nothing starts until the workspace is trusted: everything this extension does writes files or runs
+ * Claude Code's command line. deactivate() still restores Claude Code's files on an uninstall, in Restricted Mode too.
  */
 async function activate(context) {
   selfPath = context.extensionPath;
@@ -627,7 +626,7 @@ function start(context, log, renamed) {
     },
     hand: (sessionId, text, key) => globalThis.__cceAnswer(sessionId, text, key) === true,
     /* An extension cannot raise another window, and opening the conversation here as well would start a second process on
-       it, so only one shown in this window is brought to front. */
+       it. */
     reveal: async (sessionId) => {
       const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
       const elsewhere = list('__cceSessionsElsewhere');
@@ -1070,7 +1069,6 @@ function start(context, log, renamed) {
     description: canDownload ? 'click to download it' : 'click to try again',
     command: canDownload ? PREFIX + 'downloadPython' : '',
   };
-  /* What Agent Work Plan draws above the plan while nothing can write one (planNotice in src/claude-source.js). */
   const showProblem = (problem) => claude.setNotice(problem ? {
     title: problem.title || 'The plugin that writes work plans is not installed',
     description: problem.description || 'click to try again',

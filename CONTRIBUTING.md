@@ -2,8 +2,9 @@
 
 ## Layout
 
-The work plan, Conversations and Answer views are Agent Work Plan's (`xnervwang.agent-work-plan`), a separate extension this
-one depends on. This one gives it Claude Code's conversations; the interface is Agent Work Plan's `docs/protocol.md`.
+Agent Work Plan (`xnervwang.agent-work-plan`) provides the work plan view, the Conversations tab with its Answer view, and
+the status bar entry. This extension lists Agent Work Plan in `extensionDependencies` and registers Claude Code with it as a
+conversation source. Agent Work Plan's `docs/protocol.md` describes the interface.
 
 - `extension.js` handles activation, settings, commands, and the status bar toggle.
 - `src/adapters.js` lists patch targets for both the entry point and the uninstall hook.
@@ -34,7 +35,7 @@ one depends on. This one gives it Claude Code's conversations; the interface is 
 - `test/page-harness.js` runs the injected script in a headless browser against a stand-in panel, for the checks on what the page costs.
 - `test/reply-shape.js` reads what a reply element holds out of a real bundle, which the stand-in panel cannot contradict.
 - `test/with-core.js` runs this extension with Agent Work Plan from its checkout beside this one, in Agent Work Plan's
-  stand-in VS Code. Without that checkout its checks are skipped.
+  fake VS Code (`test/fake-vscode.js`). Without that checkout its checks are skipped.
 - `build/pack.sh` produces the `.vsix` without npm.
 - `build/supported.js`, `build/update-versions.js`, and `supported-versions.json` maintain the record of verified Claude Code builds.
 

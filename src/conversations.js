@@ -3,13 +3,6 @@
 // All rights reserved.
 
 'use strict';
-/*
- * What Claude Code's source (src/claude-source.js) lists besides the running conversations: the stopped ones whose plan,
- * written in the last week, still has open rows, and a conversation's title and state as Claude Code knows them.
- *
- * A conversation's state (turn running, permission prompt, unread reply, idle) is Claude Code's. Agent Work Plan adds
- * "needs you" from the questions in its plan.
- */
 const fs = require('fs');
 const path = require('path');
 const waiting = require('./waiting');

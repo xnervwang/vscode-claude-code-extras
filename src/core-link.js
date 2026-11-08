@@ -4,12 +4,12 @@
 
 'use strict';
 /*
- * Registering Claude Code's conversation source (src/claude-source.js) with Agent Work Plan (xnervwang.agent-work-plan),
- * which draws the work plan, Conversations and Answer views; its docs/protocol.md is the contract.
+ * Registering Claude Code's conversation source (src/claude-source.js) with Agent Work Plan (xnervwang.agent-work-plan);
+ * its docs/protocol.md is the contract.
  *
  * Agent Work Plan is in extensionDependencies, so VS Code activates it before this extension and its exports are there
- * at once. When it does not take the source, one line is logged and nothing is shown: when the protocol majors differ,
- * Agent Work Plan itself tells the user which extension to update, since it knows its own versions and the gallery's.
+ * at once. A refusal is only logged: when the protocol majors differ, Agent Work Plan itself tells the user which
+ * extension to update.
  */
 const CORE_ID = 'xnervwang.agent-work-plan';
 

@@ -53,7 +53,7 @@ async function run() {
   {
     const pick = (m) => [m.STATES, m.OPEN_STATES, m.WAITING_ON, m.MAX_DETAIL_LINES, m.MAX_DETAIL_CHARS, m.MAX_QUESTION_CHARS];
     eq(pick(require(path.join(core, 'src', 'workplan.js'))), pick(require(path.join(root, 'src', 'workplan.js'))),
-      'Agent Work Plan reads plans with the states, parties and description limits the plugin writes them with');
+      'Agent Work Plan and the plugin agree on plan states, waiting parties and description limits');
   }
   const home = os.homedir();
   const ws = fs.realpathSync(fs.mkdtempSync(path.join(home, 'ws-')));
@@ -111,8 +111,8 @@ async function run() {
   try {
     const exported = require(path.join(core, 'extension.js')).activate(coreContext);
     Object.assign(coreEntry, { isActive: true, exports: exported });
-    eq([control.state.context['agentWorkPlan.active'], exported.agentWorkPlan.protocol], [true, selfPkg.agentWorkPlan.protocol],
-      'Agent Work Plan sees this extension depends on it, and speaks the protocol its manifest declares');
+    eq([control.state.context['agentWorkPlan.alone'] === true, exported.agentWorkPlan.protocol], [false, selfPkg.agentWorkPlan.protocol],
+      'Agent Work Plan accepts this extension\'s protocol and does not report being installed alone');
     await self.activate(selfContext);
     const registered = await until(() => control.state.log.some((l) => /conversation source registered: Claude Code \(claude-code\)/.test(l)), 5000);
     eq(!!registered, true, 'the Claude Code source is registered with Agent Work Plan');
@@ -126,7 +126,7 @@ async function run() {
     const status = control.state.status.find((i) => i.id === 'agentWorkPlan.conversations');
     eq([rows.map((r) => r.id), rows[0] && rows[0].label, rows[0] && rows[0].description.split(' · ')[0], !!status && status.text.endsWith('2 to decide')],
       [[`conversations/claude-code/${SID}`], 'Asks two questions', 'needs you', true],
-      'the Claude Code conversation in this workspace is drawn in the Conversations tree, needing two answers');
+      'the Claude Code conversation in this workspace shows in the Conversations tree with its two questions');
 
     /* The tab icon hook is how the patched host says which conversation a panel shows. */
     const panel = { title: 'Asks two questions', visible: true, active: true, viewColumn: 1,
@@ -143,7 +143,7 @@ async function run() {
     const item = top && plan.provider.getTreeItem(top);
     eq([top && top.kind, item && item.label, item && item.command && item.command.command],
       ['problem', 'The plugin that writes work plans is not installed', 'claudeCodeWorkPlan.installWorkPlanPlugin'],
-      'the plan notice, the plugin that did not install, is drawn on top of the work plan');
+      'the failed plugin install is shown as a notice above the plan');
     /* A new conversation's tab in the same group, which hides the first one's panel. */
     Object.assign(panel, { visible: false, active: false });
     control.setTabs([{ label: 'New', input: new vscode.TabInputWebview('mainThreadWebview-claudeVSCodePanel') }]);
@@ -187,12 +187,12 @@ async function run() {
     };
     const first = await answer('1', 'Yes.');
     eq([first.kind, handed.length, /Merge it\?/.test(handed[0] || '') && /Yes\.$/.test(handed[0] || '')], ['submitted', 1, true],
-      'an answer is handed to the panel showing the conversation, once, and comes back submitted');
+      'an answer reaches the panel once and comes back submitted');
     report = { sent: false, reason: 'draft' };
     control.state.clipboard = '';
     const second = await answer('2', 'Not yet.');
     eq([second.kind, typeof second.reason === 'string' && second.reason.length > 0, /Not yet\.$/.test(control.state.clipboard)],
-      ['notReceived', true, true], 'one the panel could not type comes back not received, with why, and is copied to the clipboard');
+      ['notReceived', true, true], 'an answer the panel could not type comes back not received and goes to the clipboard');
   } finally {
     for (const c of [selfContext, coreContext]) for (const d of c.subscriptions.splice(0)) { try { d.dispose(); } catch (_) { /* gone */ } }
     try { self.deactivate(); } catch (_) { /* closing */ }

@@ -2,9 +2,9 @@
 
 Claude can lose track of unfinished work when you switch topics before the work is done, or when compaction summarizes older turns. Claude starts a plan when there is work to track and updates it as you talk. The plan lists numbered rows, one piece of work each, with states like `discussing`, `todo`, `doing`, or `done`.
 
-The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. Agent Work Plan, an extension this one depends on and installs, shows the plan next to the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
+The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. Agent Work Plan, a separate extension installed along with this one, shows the plan in a view beside the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
 
-Its Conversations tab lists the conversations in this workspace and their plans' questions, which you can answer there.
+Agent Work Plan's Conversations tab in the VS Code panel lists running Claude Code conversations in this window's workspace folders. Stopped conversations also appear while their plan, written in the last 7 days, still has open rows. Each plan's questions appear under its conversation, and an answer entered in the Answer view goes into the conversation's message input.
 
 Requires Anthropic's Claude Code extension, Agent Work Plan and VS Code 1.96 or later. The work plan also needs Python 3.7 or later. On Windows without Python, the extension offers to download it from python.org (11 MB).
 
@@ -118,7 +118,7 @@ Open `Work Plan for Claude Code: Settings` for all 36 settings. Most apply witho
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `claudeCodeWorkPlan.workPlan` | on | Off adds nothing about the plan to turns, refuses writes to plan files, and leaves Agent Work Plan no plan to show. |
+| `claudeCodeWorkPlan.workPlan` | on | Off stops the work plan: turns carry nothing about it, and Claude cannot write one. |
 | `claudeCodeWorkPlan.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
 | `claudeCodeWorkPlan.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
 | `claudeCodeWorkPlan.workPlanQuietWhenReplyMatches` | empty | Regular expression tested on the latest reply. A match silences the prompts before and after compaction, for conversations relaying another model's replies word for word. Empty matches nothing. |

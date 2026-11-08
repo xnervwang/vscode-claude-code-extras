@@ -1,7 +1,7 @@
 {
   "name": "claude-code-extras",
   "displayName": "Work Plan for Claude Code",
-  "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk, and Agent Work Plan, which this extension installs, shows it beside the Claude Code panel; answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
+  "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk; Agent Work Plan installs with this extension and shows the plan beside the Claude Code panel, and you can answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
   "version": "1.0.22",
   "publisher": "xnervwang",
   "license": "BSD-3-Clause",
@@ -58,7 +58,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In Restricted Mode nothing starts until the workspace is trusted: Claude Code is not patched, the work plan plugin is not installed, no file is written, and Claude Code conversations are not listed in Agent Work Plan. Claude Code itself does not run in Restricted Mode."
+      "description": "In Restricted Mode, this extension does nothing. It starts when the workspace is trusted. Anthropic's Claude Code extension is also disabled in Restricted Mode."
     }
   },
   "activationEvents": [
@@ -286,7 +286,7 @@
         "claudeCodeWorkPlan.workPlan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Keep a work plan for each conversation: the open rows put in front of the model every turn, and the reminder to reconcile them at the end of one. Agent Work Plan shows the plans. Turned off, nothing is put in front of the model, a write to a plan file is refused so one is not kept where nobody can see it, and Agent Work Plan shows no plan for Claude Code conversations.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Work Plan for Claude Code: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
+          "markdownDescription": "Hooks put the plan's open rows in front of Claude every turn and remind it to reconcile them at the end of a turn. With the setting off, Claude is told nothing about the plan and plan files cannot be written.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Work Plan for Claude Code: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
         },
         "claudeCodeWorkPlan.tellClaudeYourTimeZone": {
           "type": "boolean",

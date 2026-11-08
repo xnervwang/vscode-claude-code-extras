@@ -17,8 +17,7 @@
  *
  * A session id is unique across every project on a machine, so it is the whole name and no grouping directory is needed.
  *
- * Agent Work Plan draws them. This extension reads one by session id, for a conversation's title and for the stopped
- * conversations it lists, and never the whole directory's plans at once.
+ * Agent Work Plan draws them.
  *
  * Nothing here writes those files. The shape below is the whole contract between the two halves:
  *

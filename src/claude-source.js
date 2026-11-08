@@ -4,8 +4,7 @@
 
 'use strict';
 /*
- * Claude Code as a conversation source of Agent Work Plan (xnervwang.agent-work-plan, protocol 1; its docs/protocol.md),
- * which draws the work plan, Conversations and Answer views.
+ * Claude Code as a conversation source of Agent Work Plan (xnervwang.agent-work-plan, protocol 1; its docs/protocol.md).
  *
  *   conversations    `claude agents --json` for the running ones (src/waiting.js), recent plans with open rows for the
  *                    stopped ones (src/conversations.js), states from the patched host (src/host.js)
@@ -13,7 +12,7 @@
  *   focus            a change of the host's activeSessionId; a panel's onDidChangeViewState; sessionForTab(); and the
  *                    page getting focus (src/page/92-focus.js), the only signal a sidebar conversation gives
  *   answers          typed into the panel showing the conversation (src/page/91-answer.js)
- *   plan notice      the plugin that writes plans failed to install, or no Python 3 runs the hooks
+ *   plan notice      the plugin that writes plans failed to install, or there is no Python 3 to run the hooks
  *
  * The host also writes activeSessionId back unchanged, for example when a background panel's state changes, so only a
  * change counts; otherwise the view would jump away from a Codex tab. Switching back to the same Claude Code tab from a
@@ -30,14 +29,13 @@ const PROTOCOL = 1;
 const ID = 'claude-code';
 const EXTENSION_ID = 'xnervwang.claude-code-extras';
 const AGENTS_FRESH_MS = 30000;
-/* Agent Work Plan waits 20 seconds for an outcome and then reports it as uncertain; a "not received" arriving after
-   that would be dropped, so the panel's report is waited for a shorter time. */
+/* Shorter than Agent Work Plan's 20-second wait, after which it reports the answer as uncertain and drops a late
+   "not received". */
 const ANSWER_WAIT_MS = 15000;
 
 /*
- * What the panel's script (src/page/91-answer.js) reports, in the protocol's outcomes. Every reason it gives for not
- * sending is one where it typed nothing or took back what it typed, so the answer is not there; 'error' is an exception
- * part-way, after which the input may or may not hold it.
+ * The reasons the panel script (src/page/91-answer.js) gives for not sending. In each of these the answer is not in the
+ * message input. Any other reason, such as 'error', maps to uncertain, since the input may still hold the answer.
  */
 const NOT_RECEIVED = {
   'not-shown': 'the panel had switched to another conversation',
@@ -94,7 +92,7 @@ function createClaudeSource(deps) {
   let stale = true, agentsAt = 0, agentsLast = { records: null, error: '' }, stoppedLast = new Map(), pidsAsk = null;
   let lastChat = null;
   /* The session id of the latest focus signal: Agent Work Plan asks isFocused() a moment after each one, and only the
-     latest is still in front. Another tab coming to front after it, such as a Codex one, clears it. */
+     latest is still in front. It is cleared when another tab, such as a Codex one, becomes active after it. */
   let front = '';
   let frontTab;
   let notice = null;
@@ -102,7 +100,7 @@ function createClaudeSource(deps) {
   const panels = new Map();
   const unsubscribe = (subs) => { for (const d of subs) { try { d.dispose(); } catch (_) { /* already disposed */ } } };
   const pending = new Map();
-  /* Kept for as long as the source is registered: one entry per answer typed into this window. */
+  /* Never trimmed, so a repeated delivery id is always recognized. */
   const deliveries = new Map();
   let keys = 0;
   const enabled = () => { try { return deps.enabled ? deps.enabled() !== false : true; } catch (_) { return true; } };
@@ -187,8 +185,6 @@ function createClaudeSource(deps) {
 
     canDeliver: (sessionId) => deps.canDeliver(sessionId) === true,
 
-    /* Asked again with a delivery id it is handling or has handled, it types nothing and gives the same outcome; one that
-       did not get there may be tried again. */
     deliverAnswer(sessionId, text, opts) {
       const id = opts && typeof opts.deliveryId === 'string' ? opts.deliveryId : '';
       if (id && deliveries.has(id)) return deliveries.get(id);
@@ -236,12 +232,13 @@ function createClaudeSource(deps) {
       frontTab = tab;
       if (tab && !isPanelTab(tab)) front = '';
     },
-    /* Says again which conversation is in front, for a listener that was not there when it was first said. */
+    /* Fires onDidFocus again for the conversation in front; called once registration with Agent Work Plan completes, which
+       can be after the first signal. */
     refocus() {
       if (front) focused.fire({ sessionId: front });
     },
-    /* Called from the tab icon hook (src/host.js). A panel in front whose conversation changes, as a new one gets its
-       session id, is reported as the conversation in front. */
+    /* Called from the tab icon hook (src/host.js). When the active panel gets a new session id, as a new conversation does,
+       that session is reported as the conversation in front. */
     track(panel, sessionId) {
       if (!panel || typeof panel !== 'object') return;
       const id = typeof sessionId === 'string' ? sessionId : '';

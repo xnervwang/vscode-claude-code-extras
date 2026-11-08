@@ -2519,7 +2519,7 @@ console.log('\nwhat is left to do, drawn first');
   const N = (title, state) => ({ title, state });
 
   if (plan.OPEN_STATES.includes('doing') && plan.OPEN_STATES.includes('waiting')) {
-    ok('a row being worked on, or waiting on somebody, counts as open');
+    ok('doing and waiting rows count as open');
   } else bad(`open states ${plan.OPEN_STATES.join()}`);
 
   if (plan.STATES.length === 7 && plan.STATES.includes('doing') && plan.STATES.includes('waiting')) {
@@ -3452,7 +3452,7 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
     if (setting && setting.default === true && /enabled: WORK_PLAN_SETTING,/.test(ext)
       && /enabled: \(\) => cfg\(\)\.get\(WORK_PLAN_SETTING, true\) !== false,/.test(ext)) {
-      ok('the switch the hooks read is the one Claude Code\'s source reads, and starts on');
+      ok('the hooks and the source read the same work plan switch, on by default');
     } else bad(`setting ${JSON.stringify(setting && setting.default)}, or extension.js reads another switch`);
   }
 }
@@ -5269,7 +5269,7 @@ console.log('\na panel whose bundle never arrives says so');
   }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   if (/globalThis\.__cceTzHook = /.test(ext) && /timeZone: \(\) => clientZone\(\),/.test(ext)) {
-    ok('the extension writes a reported zone for the hooks and gives it to Agent Work Plan as the source\'s timeZone()');
+    ok('the panel\'s time zone reaches both the hooks and timeZone()');
   } else bad('extension.js does not pass on the reported time zone');
   if (/globalThis\.__cceTabIcon = \(panel, state, run, home, sessionId\) =>/.test(ext)
       && /if \(run !== 'running' && bgWorking\.has\(sessionId\)\) run = 'running';/.test(ext)
@@ -6824,7 +6824,7 @@ console.log('\nconversations');
     const states = [S(1), S(2), S(3), S(4), S(5)].map((id) => conv.stateOf(merged.get(id), live, unread));
     const asked = conv.stateOf({ sessionId: S(6) }, live, unread);
     if (states.join() === 'prompt,idle,working,unread,working' && asked === 'prompt') {
-      ok('a conversation takes its state from Claude Code: a prompt, a running turn, an unread reply, or idle');
+      ok('a conversation\'s state comes from Claude Code');
     } else bad(`states ${states.join()}, ${asked}`);
   }
 
@@ -7130,7 +7130,7 @@ console.log('\nplan rows in unknown states');
       && plan.readPlanAt(path.join(dir, 'missing.json'), 'abc12345') === null && plan.readPlanAt(file, '') === null) {
       ok('readPlanAt() reads the given path and keeps unknown states');
     } else bad(`readPlanAt: ${JSON.stringify(p)}`);
-    if (conv.openCount(p.nodes) === 3) ok('rows in unknown states are not counted as open, so they keep no stopped conversation listed');
+    if (conv.openCount(p.nodes) === 3) ok('openCount() leaves out rows in unknown states');
     else bad(`open rows counted: ${conv.openCount(p.nodes)}`);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -7149,12 +7149,12 @@ console.log('\nwhat the manifest declares for Agent Work Plan');
   if ((pkg.extensionDependencies || []).includes('xnervwang.agent-work-plan') && pkg.agentWorkPlan && pkg.agentWorkPlan.protocol === protocol
     && JSON.stringify(pkg.extensionKind) === '["workspace"]' && trust.supported === 'limited' && typeof trust.description === 'string'
     && trust.description.length > 40) {
-    ok(`it depends on Agent Work Plan, declares protocol ${protocol} as its source does, runs on the workspace side, and says what Restricted Mode leaves out`);
+    ok('the manifest has what Agent Work Plan requires of a source');
   } else bad(`manifest for Agent Work Plan: ${JSON.stringify([pkg.extensionDependencies, pkg.agentWorkPlan, pkg.extensionKind, trust, protocol])}`);
   const props = Object.keys(c.configuration.properties);
   if (!c.views && !c.viewsContainers && !c.viewsWelcome && !c.menus
     && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodeWorkPlan.workPlan')) {
-    ok('it has no view, container, menu or view setting of its own; the work plan switch stays, since the hooks read it');
+    ok('the manifest has no views, menus or view settings left');
   } else bad(`left over in the manifest: ${JSON.stringify({ views: c.views, containers: c.viewsContainers, menus: c.menus, props })}`);
   const declared = c.commands.map((x) => x.command.replace(/^claudeCodeWorkPlan\./, ''));
   const missing = declared.filter((n) => !ext.includes(`registerCommand('${n}'`));
@@ -7259,32 +7259,32 @@ console.log('\nClaude Code\'s own source');
     const SID = 'abababab-1111-4222-8333-444444444444';
     if (JSON.stringify(o.shape) === JSON.stringify([1, 'claude-code', 'Claude Code', '[]', 'xnervwang.claude-code-extras',
       path.join('/plans', SID + '.json'), null, '/plans', null, 'Asia/Tokyo']) && o.planOff === null) {
-      ok('Claude Code\'s source is protocol 1, names its extension, keeps plans in the plugin directory, and has none with the work plan off');
+      ok('Claude Code\'s source has the protocol 1 members and plan paths');
     } else bad(`claude source shape ${JSON.stringify(o.shape || o)}, with the plan off ${JSON.stringify(o.planOff)}`);
     if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, '', '', false]) && o.listeners === 1 && o.afterDispose === '') {
-      ok('sessionForTab() gives the panel visible in the tab\'s group, \'\' for a Claude Code tab with no conversation, null for any other tab');
+      ok('sessionForTab() claims only Claude Code tabs');
     } else bad(`claims ${JSON.stringify([o.claims, o.listeners, o.afterDispose])}`);
     if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
-      ok('each Claude Code focus signal fires onDidFocus, and a panel in front that gets its session id says so');
+      ok('every Claude Code focus signal fires onDidFocus, including a front panel getting its session id');
     } else bad(`focus heard ${JSON.stringify([o.heard, o.follow])}`);
     if (o.focusedA2 === true && JSON.stringify(o.focused) === '[true,true,false,false,false]') {
-      ok('isFocused() holds for the latest signal and for a panel in front, and not for one left behind');
+      ok('isFocused() is true only for the latest signal or an active panel');
     } else bad(`isFocused ${JSON.stringify([o.focusedA2, o.focused])}`);
     if (o.afterClaudeTab === true && o.afterCodexTab === false && o.sameTabAgain === true) {
-      ok('a focus signal stops counting once another agent\'s tab comes to front after it');
+      ok('a focus signal is dropped once another agent\'s tab becomes active');
     } else bad(`focus after a tab change ${JSON.stringify([o.afterClaudeTab, o.afterCodexTab, o.sameTabAgain])}`);
     if (JSON.stringify(o.notices) === JSON.stringify([{ title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] }, null])) {
-      ok('the plan notice is reported when it changes, and not when it is set to the same again');
+      ok('the plan notice fires only when it changes');
     } else bad(`plan notices ${JSON.stringify(o.notices)}`);
     const is = (x, outcome) => !!x && x.outcome === outcome && (outcome === 'submitted' || (typeof x.reason === 'string' && x.reason.length > 0));
     if (is(o.notShown, 'notReceived') && is(o.draft, 'notReceived') && o.retried === 3 && is(o.sent, 'submitted') && is(o.again, 'submitted')
       && o.handedForD1 === 2 && is(o.error, 'uncertain') && is(o.silent, 'uncertain')
       && JSON.stringify(o.reasons) === JSON.stringify({ 'not-shown': 'notReceived', 'no-input': 'notReceived', insert: 'notReceived',
         'left-in-input': 'notReceived', 'something new': 'uncertain' }) && JSON.stringify(o.canDeliver) === '[true,false]') {
-      ok('deliverAnswer() reports one of the four outcomes, types an answer once per delivery id, and tries again one that did not get there');
+      ok('deliverAnswer() outcomes and retries follow the protocol');
     } else bad(`claude delivery ${JSON.stringify(o).slice(0, 700)}`);
     if (o.handedForD1Later === 2) {
-      ok('an answer handed over again after 300 others is still typed only once');
+      ok('a delivery id is still recognized after 300 other deliveries');
     } else bad(`answer d1 typed ${o.handedForD1Later} times`);
     if (Array.isArray(o.list) && o.problem === 'no cli') {
       ok('listConversations() reports a failed `claude agents` as its problem');
@@ -7447,10 +7447,10 @@ console.log('\nRestricted Mode');
     catch (e) { r = { threw: e.message }; }
     const b = r.before || {}, a = r.after || {};
     if (!r.threw && JSON.stringify(b) === JSON.stringify({ timers: [], hooks: [], registered: 0, written: [] })) {
-      ok('in Restricted Mode nothing starts: no timer, no hook for the patched host, no registration, no file written');
+      ok('nothing starts in Restricted Mode');
     } else bad(`before the workspace is trusted: ${JSON.stringify(r).slice(0, 500)}`);
     if (!r.threw && a.timers.includes(30000) && a.hooks.length === 3 && a.registered === 1) {
-      ok('trusting the workspace starts it, once, and registers the source with Agent Work Plan');
+      ok('trusting the workspace starts it once and registers the source');
     } else bad(`after the workspace is trusted: ${JSON.stringify(r).slice(0, 500)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
