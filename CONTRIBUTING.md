@@ -23,9 +23,10 @@
 - `src/conversations-view.js` draws that tab; `src/conversations-text.js` and `src/l10n/` hold its words in each language.
 - `src/answer-view.js` is the Answer view beside it. `src/answers.js` carries an answer to the window showing its conversation,
   through a folder all windows on the machine read, and `src/page/91-answer.js` types it into that conversation's input.
-- `src/sources.js` is the registry behind `workPlanHost`, the object `activate()` returns. It also tracks which conversation
-  the work plan view shows. Claude Code's own source is in `src/claude-source.js`. `src/sourceicons.js` draws a source's
-  logo with a state dot; `src/bounded.js` reads a plan or logo file only if it is a regular file under a size limit.
+- `src/sources.js` is the registry behind `workPlanHost`, the object `activate()` returns (protocol:
+  `docs/work-plan-host.md`). It also tracks which conversation the work plan view shows. Claude Code's own source is in
+  `src/claude-source.js`. `src/sourceicons.js` draws a source's logo with a state dot; `src/bounded.js` reads a plan or
+  logo file only if it is a regular file under a size limit.
 - `build/plan-health.js` counts how current the plans on this machine are: stale `doing` rows, `waiting` rows that name nobody.
 - `src/python-runtime.js` downloads Python from python.org for a Windows machine that has none.
 - `src/webview-limit.js` finds the client's VS Code installation and changes its webview request limit.
