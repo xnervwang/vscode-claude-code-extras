@@ -433,11 +433,11 @@ The row command and the extension (when a row is changed from the tree) both rea
 write it all back, so two at once would silently lose the first write. Each holds <plan file>.lock for that whole span,
 by the same rules. The lock is a directory because mkdir is atomic on every file system.
 
-A lock older than LOCK_STALE was left by a process that died holding it and is removed. If the lock is still held after
-LOCK_WAIT, the write goes ahead without it: losing a change is less harmful than blocking an agent or a manual edit.
+A lock older than LOCK_STALE was left by a process that died holding it and is removed. LOCK_WAIT is longer than
+LOCK_STALE; a lock still held after it belongs to a live writer, and the caller refuses to write.
 """
 LOCK_STALE = 10
-LOCK_WAIT = 2.0
+LOCK_WAIT = LOCK_STALE + 1.0
 LOCK_POLL = 0.025
 
 

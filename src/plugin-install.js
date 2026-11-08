@@ -259,35 +259,38 @@ To use them again: install the extension, which registers the plugin again, then
  *
  * A copy rather than a move, so that a failure halfway leaves the original untouched; the platform removes it moments
  * later anyway.
+ *
+ * Returns { to, failed }: where they went ('' when there was nothing to copy), and whether any may be left uncopied.
  */
 function rescuePlans(stamp) {
   const from = dataPath();
   let names;
-  try { names = fs.readdirSync(from); } catch (_) { return ''; }
-  if (!names.length) return '';
+  try { names = fs.readdirSync(from); } catch (e) { return { to: '', failed: !(e && e.code === 'ENOENT') }; }
+  if (!names.length) return { to: '', failed: false };
   const to = path.join(os.homedir(), '.claude', PLUGIN + '-plans-' + stamp);
   try {
     fs.mkdirSync(to, { recursive: true });
     fs.cpSync(from, to, { recursive: true });
     fs.writeFileSync(path.join(to, 'WHAT-THIS-IS.txt'), RESCUE_NOTE, 'utf8');
-  } catch (_) { return ''; }
-  return to;
+  } catch (_) { return { to: '', failed: true }; }
+  return { to, failed: false };
 }
 
 /**
  * Undo both halves of the registration, synchronously, for the uninstall hook - which runs as a plain Node script that
  * exits when it is done, so there is nothing for an asynchronous version to overlap with.
  *
- * The plans are copied out first, because unregistering deletes them. Returns where they went, or an empty string when
- * there was nothing to save.
+ * The plans are copied out first, because unregistering deletes them. When the copy fails (a full disk, a permission),
+ * nothing is unregistered. Returns where they went, or ''.
  */
 function removeSync(claudeBin, stamp) {
   const saved = rescuePlans(stamp);
+  if (saved.failed) return '';
   for (const args of [['plugin', 'uninstall', REF], ['plugin', 'marketplace', 'remove', MARKETPLACE]]) {
     try { cp.execFileSync(claudeBin, args, { timeout: TIMEOUT_MS, stdio: 'ignore' }); }
     catch (_) { /* already gone, or the binary went with the extension it lived in; either way nothing is left to do */ }
   }
-  return saved;
+  return saved.to;
 }
 
 /**

@@ -4117,8 +4117,8 @@ console.log('\nthe row command');
     done(t);
   }
   {
-    /* A lock older than ten seconds belongs to a dead run and is taken over at once. A held lock is waited on for two
-       seconds and then bypassed with a message. Either way the other holder's lock is not removed for it. */
+    /* A dead run's lock is taken over, at once or when it turns ten seconds old during the wait. A lock kept fresh
+       makes the run refuse, and stays where it is. */
     const t = stage(plan());
     const lock = t.file + '.lock';
     fs.mkdirSync(lock);
@@ -4130,14 +4130,27 @@ console.log('\nthe row command');
     const staleGone = !fs.existsSync(lock);
     fs.rmSync(lock, { recursive: true, force: true });
     fs.mkdirSync(lock);
+    const nearly = Date.now() / 1000 - 9;
+    fs.utimesSync(lock, nearly, nearly);
+    at = Date.now();
+    const aging = row(t, 'set', '1', 'waiting', '--waiting-on', 'build');
+    const agingMs = Date.now() - at;
+    const agingGone = !fs.existsSync(lock);
+    fs.rmSync(lock, { recursive: true, force: true });
+    fs.mkdirSync(lock);
+    const ahead = Date.now() / 1000 + 60;
+    fs.utimesSync(lock, ahead, ahead);
     at = Date.now();
     const held = row(t, 'set', '1', 'done');
     const heldMs = Date.now() - at;
-    if (stale.status === 0 && staleGone && staleMs < 1500 && held.status === 0 && heldMs >= 1900
-      && read(t).nodes[0].state === 'done' && fs.existsSync(lock) && /without the plan's lock/.test(held.stderr)) {
-      ok('a lock left behind is taken over at once, and one still held is waited on, then gone around, saying so');
-    } else bad(`left-behind lock: status ${stale.status} in ${staleMs} ms, removed ${staleGone}; held lock: status `
-      + `${held.status} in ${heldMs} ms, said ${JSON.stringify(held.stderr)}`);
+    if (stale.status === 0 && staleGone && staleMs < 1500 && aging.status === 0 && agingGone && agingMs < 4000
+      && held.status !== 0 && heldMs >= 10500 && read(t).nodes[0].state === 'waiting' && fs.existsSync(lock)
+      && /could not be taken/.test(held.stderr + held.stdout)) {
+      ok('a lock left behind is taken over, and one still held after the wait stops the write');
+    } else bad(`left-behind lock: status ${stale.status} in ${staleMs} ms, removed ${staleGone}; aging lock: status `
+      + `${aging.status} in ${agingMs} ms, removed ${agingGone}; held lock: status ${held.status} in ${heldMs} ms, `
+      + `state ${read(t).nodes[0].state}, said ${JSON.stringify(held.stderr + held.stdout)}`);
+    fs.rmSync(lock, { recursive: true, force: true });
     done(t);
   }
   {
@@ -4741,6 +4754,42 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
       ok('stopping the plugin loading finds Claude Code\'s binary in its installs and tells it to disable the plugin');
     } else bad(`disabling the plugin gave ${JSON.stringify(r)}, the binary was told ${JSON.stringify(told)}`);
     fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  /* Unregistering deletes the plugin's data directory, so the uninstall hook unregisters only after the plans are copied
+     out. When the copy fails, nothing is unregistered and the plans stay where they are. */
+  if (process.platform === 'win32') note('the stand-in binary is a shell script, which Windows cannot run as claude.exe');
+  else {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-rescue-'));
+    const bin = path.join(home, 'install', pi.BINARY);
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.writeFileSync(bin, '#!/bin/sh\necho "$@" >> "$(dirname "$0")/told"\n');
+    fs.chmodSync(bin, 0o755);
+    const data = path.join(home, '.claude', 'plugins', 'data', pi.DATA_DIR);
+    fs.mkdirSync(data, { recursive: true });
+    fs.writeFileSync(path.join(data, 'aaaaaaaa-1111-2222-3333-444444444444.json'), '{"nodes":[]}');
+    // Blocks the folder the copy goes to.
+    fs.writeFileSync(path.join(home, '.claude', 'agent-work-plan-plans-blocked'), '');
+    const script = `
+      const pi = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'plugin-install.js'))});
+      const out = { blocked: pi.removeSync(${JSON.stringify(bin)}, 'blocked') };
+      out.toldAfterBlocked = require('fs').existsSync(${JSON.stringify(path.join(path.dirname(bin), 'told'))});
+      out.copied = pi.removeSync(${JSON.stringify(bin)}, 'free');
+      process.stdout.write(JSON.stringify(out));`;
+    let r;
+    try {
+      r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script],
+        { encoding: 'utf8', env: Object.assign({}, process.env, { HOME: home, USERPROFILE: home }) }));
+    } catch (e) { r = { error: e.message }; }
+    let told = '';
+    try { told = fs.readFileSync(path.join(path.dirname(bin), 'told'), 'utf8'); } catch (_) { /* never run */ }
+    const copy = path.join(home, '.claude', 'agent-work-plan-plans-free');
+    if (r.blocked === '' && r.toldAfterBlocked === false && r.copied === copy
+      && fs.existsSync(path.join(copy, 'aaaaaaaa-1111-2222-3333-444444444444.json'))
+      && told.includes(`plugin uninstall ${pi.REF}`) && told.includes(`plugin marketplace remove ${pi.MARKETPLACE}`)) {
+      ok('uninstalling leaves the plugin registered when its plans cannot be copied out');
+    } else bad(`plan rescue: ${JSON.stringify(r)}, the binary was told ${JSON.stringify(told)}`);
+    fs.rmSync(home, { recursive: true, force: true });
   }
 }
 
@@ -7519,6 +7568,21 @@ console.log('\nanswering from the Conversations tab');
         ok('in a browser the panel types an answer into an empty input and sends it, Ctrl+Enter mode included, leaves text of yours alone, and takes back one it could not send');
       } else bad(`answer in the page: ${at === -1 ? 'no result (exit ' + r.status + ')' : JSON.stringify(got)}`);
     }
+  }
+
+  {
+    const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', 'page', f), 'utf8');
+    const posted = [];
+    const box = { out: {}, window: { addEventListener() {} }, document: { querySelector: () => null }, setTimeout,
+      sessionRef: { sessionId: { value: 'B' } }, acquireVsCodeApi: () => ({ postMessage: (m) => posted.push(m) }) };
+    new vm.Script('(function(){var sigValue = function(n){ var s = sessionRef && sessionRef[n]; return s ? s.value : undefined; };'
+      + read('91-answer.js') + '\n;out.sendAnswer = sendAnswer;})()', { filename: 'answer-switch' }).runInNewContext(box);
+    box.out.sendAnswer({ type: 'cce_answer', sessionId: 'A', text: 'hi', id: 'k1' });
+    box.out.sendAnswer({ type: 'cce_answer', sessionId: 'B', text: 'hi', id: 'k2' });
+    const got = posted.map((m) => [m.id, m.sent, m.reason]);
+    if (JSON.stringify(got) === JSON.stringify([['k1', false, 'not-shown'], ['k2', false, 'no-input']])) {
+      ok('an answer for another conversation is not typed into the panel');
+    } else bad(`answer to a switched panel: ${JSON.stringify(got)}`);
   }
 
   {
