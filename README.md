@@ -2,11 +2,11 @@
 
 Claude can lose track of unfinished work when you switch topics before the work is done, or when compaction summarizes older turns. Claude starts a plan when there is work to track and updates it as you talk. The plan lists numbered rows, one piece of work each, with states like `discussing`, `todo`, `doing`, or `done`.
 
-The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. You see the plan in its own view next to the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
+The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. Agent Work Plan, an extension this one depends on and installs, shows the plan next to the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
 
-The Conversations tab shows running conversations, their plan questions and the rows they are working on in this window's workspace. You can answer their questions there.
+Its Conversations tab lists the conversations in this workspace and their plans' questions, which you can answer there.
 
-Requires Anthropic's Claude Code extension and VS Code 1.94 or later. The work plan also needs Python 3.7 or later. On Windows without Python, the extension offers to download it from python.org (11 MB).
+Requires Anthropic's Claude Code extension, Agent Work Plan and VS Code 1.96 or later. The work plan also needs Python 3.7 or later. On Windows without Python, the extension offers to download it from python.org (11 MB).
 
 ## What it looks like
 
@@ -63,35 +63,11 @@ Claude writes the file through a small command shipped with the plugin. To corre
 
 See [How the work plan works](docs/how-the-work-plan-works.md) for the hooks, thresholds and measurements.
 
-### Conversations
-
-Conversations is a tab in VS Code's panel, where the Terminal lives. VS Code keeps one tab per window, and you can drag it elsewhere like any view. Open it from the status bar, the work plan view's title-bar button, or the command "Work Plan for Claude Code: Show Conversations".
-
-The tab lists running conversations started in this window's workspace folders or folders under them. It does not list sessions started with `claude --bg` or `claude -p`. Below the running conversations, a collapsed "Not running, with open rows" group holds stopped conversations whose plans were written in the last 7 days and still have open rows.
-
-Each conversation has one row, titled as in Claude Code's session list. Its icon and first word show its state:
-
-- At a permission prompt
-- Needs you (its plan asks a question)
-- Working (a turn is running)
-- Replied, not read
-- Idle
-
-The rest of the row shows its question and open-row counts, or "no work plan". These states come from Claude Code, not the plan. Under the conversation are its questions, each numbered as in the plan and showing how long ago it was asked. Its `doing` rows follow, with how long they have been `doing`. When the conversation is idle, a `doing` row says so, for example "doing (conversation idle 3h)". Only questions written on plan rows are listed. When a reply ends by asking you something and the turn wrote no question, Claude is reminded to write it.
-
-The Answer view sits to the right of the conversation list in the Conversations tab. Click a question to open it in the Answer view. The view identifies its conversation by title and its row by number and title, and shows how long ago the question was asked. A toggle hides the row's note and description until you open them. Type an answer in the multiline box, then press Ctrl+Enter or click Send. What you type but don't send stays with each question while the window is open. The Answer view shows when an answer was sent. A "Go to the conversation" button takes you there.
-
-The answer is sent through the conversation's message input, as if you had typed it there. This works if the conversation is open in a tab or sidebar in any VS Code window on the same machine. If the conversation is in the middle of a turn, the message waits like a typed message. It names the row and repeats its question, for example, `My answer to row 3 ("Ship it?"):` followed by the answer on the next line. If an answer cannot be sent, it goes to the clipboard instead. This happens if no VS Code window has the conversation open within 15 seconds, including for conversations running in a terminal outside VS Code. It also happens if the conversation's message input has unsent text or the conversation is not taking messages, such as during a permission prompt. Conversations in the "Not running, with open rows" group cannot be answered here. Click a conversation or a `doing` row to go there if it is open in this window; otherwise, the extension says where it is. The list of running conversations comes from `claude agents --json` every 30 seconds. Changes to conversations open in this window, and changes to plans, appear at once.
-
-When running conversations' plans ask N questions, the status bar shows "N to decide" on a warning background. Otherwise it shows "Conversations M", where M is the number of running conversations. The tab's badge also counts those questions. The work plan view's activity-bar icon counts the `discussing` and `todo` rows in the plan it shows; the number disappears when there are none.
-
-The tab follows VS Code's display language when it is English or Simplified Chinese, and uses English otherwise. Row titles, questions and state names such as `doing` appear as written. Rows written before version 1.0.19 name who they wait on only in their note. The work plan view shows them as waiting on "unknown", and Conversations does not list them as questions.
-
 ## Install
 
 Search for **Work Plan for Claude Code** in the Extensions view, or run
-`code --install-extension xnervwang.claude-code-extras`. Anthropic's Claude Code extension installs
-as a dependency.
+`code --install-extension xnervwang.claude-code-extras`. Anthropic's Claude Code extension and
+Agent Work Plan install as dependencies.
 
 Reload the VS Code window twice after installing. Run
 `Work Plan for Claude Code: Show Status` for the patch status. In a Remote SSH window, install on the
@@ -129,7 +105,6 @@ Verified against Claude Code 2.1.319.
 | **Tabs back after a restart:** Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection, are opened again when it starts. Tabs you closed while connected stay closed. | Editor tabs |
 | **Status dots:** a Claude Code tab's logo shows a green dot while Claude works and a red one when it finished while you were away, where Claude Code shows nothing and orange. The session list uses the same green and red. | Editor tabs, session list |
 | **Session information:** See the session ID, Claude's process ID, starting directory, transcript location and size; click a value to copy it. | Footer button |
-| **Request limit for Claude Code tabs:** VS Code allows 32 requests in flight at once across all Claude Code tabs, and a tab can stay blank while it waits. If you agree, it is raised to 1000000 in VS Code's `service-worker.js`, including after updates; restart VS Code afterwards. On Linux, where VS Code added the limit, it asks every time. | VS Code's own files |
 
 With Claude Code's Focus view on, the tool calls are folded:
 
@@ -143,8 +118,7 @@ Open `Work Plan for Claude Code: Settings` for all 36 settings. Most apply witho
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `claudeCodeWorkPlan.workPlan` | on | Off removes the view, adds nothing about the plan to turns, and refuses writes to plan files. |
-| `claudeCodeWorkPlan.conversations` | on | Off removes the Conversations tab and its status bar entry. |
+| `claudeCodeWorkPlan.workPlan` | on | Off adds nothing about the plan to turns, refuses writes to plan files, and leaves Agent Work Plan no plan to show. |
 | `claudeCodeWorkPlan.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
 | `claudeCodeWorkPlan.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
 | `claudeCodeWorkPlan.workPlanQuietWhenReplyMatches` | empty | Regular expression tested on the latest reply. A match silences the prompts before and after compaction, for conversations relaying another model's replies word for word. Empty matches nothing. |
@@ -158,7 +132,6 @@ Open `Work Plan for Claude Code: Settings` for all 36 settings. Most apply witho
 | Work plan plugin, skill description included | Run `Work Plan for Claude Code: Stop Loading the Work Plan Plugin`. |
 | Reopening Claude Code tabs VS Code did not restore | Set `claudeCodeWorkPlan.reopenDroppedTabs` to off. |
 | Pins on the session list | Set `claudeCodeWorkPlan.sessionPins` to off. Pinned conversations are then cleaned up and archived as usual. |
-| Raising VS Code's request limit | Set `claudeCodeWorkPlan.webviewRequestLimit` to `leave`. To also set it back to 32, run `Work Plan for Claude Code: Put Back VS Code's Request Limit`. |
 | Patch and restore Claude Code's files | Run `Work Plan for Claude Code: Remove from Claude Code (restore original files)`, or uninstall. |
 
 Message appearance: `claudeCodeWorkPlan.userMessageColor` and `claudeCodeWorkPlan.userMessageEdge`.
@@ -171,8 +144,6 @@ Settings named `claudeCodeExtras.*` by earlier versions are copied to the same n
 
 | Command | What it does |
 | --- | --- |
-| `Work Plan for Claude Code: Refresh Work Plan` | Refresh the view. |
-| `Work Plan for Claude Code: Open the Work Plan File` | Open this conversation's plan file. |
 | `Work Plan for Claude Code: Install the Work Plan Plugin for Claude Code` | Register the plugin again. |
 | `Work Plan for Claude Code: Stop Loading the Work Plan Plugin` | Remove the plugin from Claude Code's settings. |
 
@@ -192,7 +163,6 @@ Settings named `claudeCodeExtras.*` by earlier versions are copied to the same n
 | `Work Plan for Claude Code: Remove from Claude Code (restore original files)` | Restore Claude Code's files. |
 | `Work Plan for Claude Code: Show Status` | Show patch status and what was patched. |
 | `Work Plan for Claude Code: Show How Long Opening a Panel Took` | Show recorded panel-opening times. |
-| `Work Plan for Claude Code: Put Back VS Code's Request Limit` | Restore VS Code's request limit to 32 and stop raising it. |
 
 ## Known limits
 

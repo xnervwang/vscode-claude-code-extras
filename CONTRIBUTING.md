@@ -2,6 +2,9 @@
 
 ## Layout
 
+The work plan, Conversations and Answer views are Agent Work Plan's (`xnervwang.agent-work-plan`), a separate extension this
+one depends on. This one gives it Claude Code's conversations; the interface is Agent Work Plan's `docs/protocol.md`.
+
 - `extension.js` handles activation, settings, commands, and the status bar toggle.
 - `src/adapters.js` lists patch targets for both the entry point and the uninstall hook.
 - `src/webview.js` holds the panel edits, live stylesheet, and in-page script assembly.
@@ -9,7 +12,6 @@
 - `src/page/*.js` holds the in-page script, one subject per file. The files are concatenated in file-name order.
 - `src/claude-files.js` locates Claude Code's directory, its transcripts and the plan directory, and reads a transcript as it grows. Code that reads Claude Code's files goes through it.
 - `src/workplan.js` reads plan files. Its header defines the contract between the two halves.
-- `src/workplan-view.js` holds the work plan tree view.
 - `src/plugin-install.js` registers the companion Claude Code plugin and unregisters it on uninstall.
 - `src/removal.js` notices an uninstall when VS Code restarts its extensions, and restores Claude Code then rather than when VS Code deletes the folder.
 - `src/openlatency.js` pairs panel-opening times from the official extension's log.
@@ -18,26 +20,21 @@
 - `src/sessionpins.js` keeps the conversations pinned in the session list from Claude Code's transcript cleanup, by giving their files a later modification time before they reach its age, and records when each was really last active.
 - `src/sessioncolors.js` stores the text color picked for each conversation in the session list.
 - `src/bgsessions.js` tells which sessions in the session list are background sessions, so they can be left out.
-- `src/waiting.js` lists the running conversations with `claude agents --json`, merged by session, and reads their plans' questions.
-- `src/conversations.js` puts together the Conversations tab: each conversation's state, questions and `doing` rows.
-- `src/conversations-view.js` draws that tab; `src/conversations-text.js` and `src/l10n/` hold its words in each language.
-- `src/answer-view.js` is the Answer view beside it. `src/answers.js` carries an answer to the window showing its conversation,
-  through a folder all windows on the machine read, and `src/page/91-answer.js` types it into that conversation's input.
-- `src/sources.js` is the registry behind `workPlanHost`, the object `activate()` returns (protocol:
-  `docs/work-plan-host.md`). It also tracks which conversation the work plan view shows. Claude Code's own source is in
-  `src/claude-source.js`. `src/sourceicons.js` draws a source's logo with a state dot; `src/bounded.js` reads a plan or
-  logo file only if it is a regular file under a size limit.
+- `src/claude-source.js` is Claude Code's conversation source for Agent Work Plan, and `src/core-link.js` registers it.
+- `src/waiting.js` lists the running conversations with `claude agents --json`, merged by session.
+- `src/conversations.js` adds the stopped conversations whose plans have open rows, and gives each its title and state.
+- `src/page/91-answer.js` types an answer from Agent Work Plan into the conversation's message input.
+- `src/bounded.js` reads a plan file only if it is a regular file under a size limit.
 - `build/plan-health.js` counts how current the plans on this machine are: stale `doing` rows, `waiting` rows that name nobody.
 - `src/python-runtime.js` downloads Python from python.org for a Windows machine that has none.
-- `src/webview-limit.js` finds the client's VS Code installation and changes its webview request limit.
 - `claude-plugin/` holds the companion plugin: the skill that maintains a plan and the hooks that keep it honest.
 - `test/check.js` is the whole suite. It parses everything and checks every edit against an unpatched bundle. How
   many checks it runs depends on how many Claude Code builds are installed, so the count is not quoted here.
 - `test/against-latest.js` checks the same edits against the current marketplace build.
 - `test/page-harness.js` runs the injected script in a headless browser against a stand-in panel, for the checks on what the page costs.
 - `test/reply-shape.js` reads what a reply element holds out of a real bundle, which the stand-in panel cannot contradict.
-- `test/single-source-trees.js` renders both views for a fixture; with Claude Code as the only source the suite expects the
-  output to equal `test/golden/`, recorded at the commit before sources were added.
+- `test/with-core.js` runs this extension with Agent Work Plan from its checkout beside this one, in Agent Work Plan's
+  stand-in VS Code. Without that checkout its checks are skipped.
 - `build/pack.sh` produces the `.vsix` without npm.
 - `build/supported.js`, `build/update-versions.js`, and `supported-versions.json` maintain the record of verified Claude Code builds.
 
@@ -47,7 +44,7 @@ Run `node test/check.js` for the full suite. No npm install or dependencies are 
 
 The in-page script stays in ordinary `.js` files rather than one large template literal. In a literal, every backslash needed doubling. A missed backslash failed only at runtime: `/\s+/` became `/s+/` and replaced the letter *s* in every label it passed through.
 
-Reload the window twice to see a code change: once for the extension to rewrite the file, then once for the panel to load it. The activity bar icon needs an editor restart; reloading does not refresh it.
+Reload the window twice to see a code change: once for the extension to rewrite the file, then once for the panel to load it.
 
 Neither patch needs a manual version bump. Each marker includes a digest of the scripts and edits that patch writes, so a patched file that differs from this tree is recognised as outdated.
 

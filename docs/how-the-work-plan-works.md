@@ -12,7 +12,7 @@ The extension registers a Claude Code plugin the first time it activates. Its `m
 | `Stop` | At the end of a turn that changed at least two things without touching the plan, says so once for a plan in that state. If the turn leaves rows `doing`, asks once to move each on: to `done`, to `waiting` with who it waits on, or to stay `doing` with a note on what is still running. It asks once for a given set of rows. If the reply that ends the turn seems to ask the user something and the turn recorded no question, it asks for the question to go on a row. Without a plan, says once that it could keep one after you have sent at least 3 messages and a turn made at least 25 tool calls. |
 | `SessionStart` after compaction | Tells Claude that context is at its smallest, gives the plan file's path and asks it to read the file before anything else. |
 | `UserPromptSubmit`, and `SessionStart` after compaction | When the time zone the panel reported differs from this machine's, tells Claude the user's zone, its offset and the time there, and that `date`, file times and log lines here are in the machine's zone. Said on a conversation's first message and after every compaction, then again only when either side's date turns over, the offset changes, or the context has grown by 100k tokens since; what was said last is kept in `<session ID>.tz`. Says nothing when the zones agree or `claudeCodeWorkPlan.tellClaudeYourTimeZone` is off. |
-| `PreToolUse` on file writes and edits | Refuses a write to a plan file when a row's description exceeds what the view shows: 12 lines or 900 characters. Also refuses a question with more than one question mark. |
+| `PreToolUse` on file writes and edits | Refuses a write to a plan file when a row's description exceeds what the work plan view shows: 12 lines or 900 characters. Also refuses a question with more than one question mark. |
 
 `claudeCodeWorkPlan.workPlanQuietWhenReplyMatches` silences only the compaction prompts: the context-size hook and the two `SessionStart` hooks.
 
@@ -22,7 +22,7 @@ Claude uses `plan-row.py`, a small command shipped with the plugin, to add rows 
 
 ## The view
 
-Rows that are not finished come first. The view counts `discussing` and `todo` rows of the plan it shows on its activity-bar icon; the number disappears when there are none. Row times use the time zone in which the Claude Code panel runs. The Conversations tab is described in the README.
+Agent Work Plan draws the plan. Row times use the time zone in which the Claude Code panel runs.
 
 ## Files and cleanup
 
