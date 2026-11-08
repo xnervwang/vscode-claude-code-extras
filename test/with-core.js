@@ -48,6 +48,13 @@ async function run() {
     note(`no Agent Work Plan checkout at ${core}: the two were not run together`);
     return;
   }
+  /* The plugin's hooks are held to src/workplan.js by test/check.js; Agent Work Plan's reader is what draws the plans
+     now, so the two readers have to agree on the states and the limits. */
+  {
+    const pick = (m) => [m.STATES, m.OPEN_STATES, m.WAITING_ON, m.MAX_DETAIL_LINES, m.MAX_DETAIL_CHARS, m.MAX_QUESTION_CHARS];
+    eq(pick(require(path.join(core, 'src', 'workplan.js'))), pick(require(path.join(root, 'src', 'workplan.js'))),
+      'Agent Work Plan reads plans with the states, parties and description limits the plugin writes them with');
+  }
   const home = os.homedir();
   const ws = fs.realpathSync(fs.mkdtempSync(path.join(home, 'ws-')));
   const SID = 'abababab-1111-4222-8333-444444444444';
