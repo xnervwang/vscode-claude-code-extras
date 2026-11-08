@@ -6,6 +6,8 @@
 .vscodeignore
 build/**
 logs/**
+# Claude Code writes this project's scheduled tasks here.
+.claude/**
 test/**
 CONTRIBUTING.md
 docs/**
