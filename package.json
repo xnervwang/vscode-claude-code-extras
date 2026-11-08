@@ -118,14 +118,14 @@
         {
           "id": "claudeCodeExtras",
           "title": "Work Plan for Claude Code",
-          "icon": "images/workplan.png"
+          "icon": "images/workplan.svg"
         }
       ],
       "panel": [
         {
           "id": "claudeCodeConversations",
           "title": "%conversations.title%",
-          "icon": "images/workplan.png"
+          "icon": "images/workplan.svg"
         }
       ]
     },
