@@ -4,9 +4,10 @@
 
 'use strict';
 /*
- * Usage: node test/vscode/run.js <path to the .vsix>. Downloads the newest stable VS Code, installs the newest Claude
- * Code and the .vsix into it, and runs ./suite inside it; then runs test/check.js against those installs. Exits
- * non-zero if either fails.
+ * Usage: node test/vscode/run.js <path to the .vsix> [<path to Agent Work Plan's .vsix>]. Downloads the newest stable
+ * VS Code, installs the newest Claude Code, Agent Work Plan and the .vsix into it, and runs ./suite inside it; then runs
+ * test/check.js against those installs. Exits non-zero if either fails. Agent Work Plan is installed from its .vsix when
+ * one is given, and from the marketplace otherwise; it has to be there before the .vsix, which depends on it.
  *
  * Needs @vscode/test-electron, which the workflow installs. On Linux it needs a display: run it under xvfb-run.
  */
@@ -22,8 +23,6 @@ function settingsFor(user) {
   const dir = path.join(user, 'User');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
-    // Raise the request limit without the prompt, which nobody is there to answer. Linux asks anyway.
-    'claudeCodeWorkPlan.webviewRequestLimit': 'raise',
     'claudeCode.disableLoginPrompt': true,
     'extensions.autoUpdate': false,
     'telemetry.telemetryLevel': 'off',
@@ -53,7 +52,9 @@ async function main() {
   // The extension registers its plugin in ~/.claude of whoever runs this, so it runs only on a throwaway machine.
   if (process.env.CI !== 'true') throw new Error('runs only where CI=true: it registers a plugin in your ~/.claude');
   const vsix = path.resolve(process.argv[2] || '');
-  if (!process.argv[2] || !fs.existsSync(vsix)) throw new Error('usage: node test/vscode/run.js <path to the .vsix>');
+  if (!process.argv[2] || !fs.existsSync(vsix)) throw new Error('usage: node test/vscode/run.js <path to the .vsix> [<Agent Work Plan .vsix>]');
+  const core = process.argv[3] ? path.resolve(process.argv[3]) : 'xnervwang.agent-work-plan';
+  if (process.argv[3] && !fs.existsSync(core)) throw new Error(`no Agent Work Plan .vsix at ${core}`);
   const work = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cce-vscode-'));
   const exts = path.join(work, 'extensions');
   const user = path.join(work, 'user');
@@ -64,7 +65,7 @@ async function main() {
 
   const exe = await downloadAndUnzipVSCode('stable');
   const profile = [`--extensions-dir=${exts}`, `--user-data-dir=${user}`];
-  for (const ext of ['anthropic.claude-code', vsix]) {
+  for (const ext of ['anthropic.claude-code', core, vsix]) {
     const r = await runVSCodeCommand(['--install-extension', ext, ...profile], { version: 'stable' });
     console.log(r.stdout.trim());
   }

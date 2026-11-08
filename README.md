@@ -137,7 +137,7 @@ With Claude Code's Focus view on, the tool calls are folded:
 
 ## Settings
 
-Open `Work Plan for Claude Code: Settings` for all 38 settings. Most apply without a reload; installing or upgrading the patch needs a reload.
+Open `Work Plan for Claude Code: Settings` for all 36 settings. Most apply without a reload; installing or upgrading the patch needs a reload.
 
 **Work plan settings**
 

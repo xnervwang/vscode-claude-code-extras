@@ -19,7 +19,7 @@ mkdir -p "$stage/extension"
 
 cd "$root"
 # claude-plugin/ is the companion Claude Code plugin. It ships inside the extension so the two always match.
-cp -r package.json package.nls*.json extension.js uninstall.js src images claude-plugin README.md LICENSE "$stage/extension/"
+cp -r package.json extension.js uninstall.js src images claude-plugin README.md LICENSE "$stage/extension/"
 # Python leaves compiled bytecode beside a module it imports, so running the plugin's hooks locally seeds __pycache__
 # inside the tree that is copied above. It is a build artifact of whoever last ran them, and it has no business in a
 # file other people install.

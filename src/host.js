@@ -144,7 +144,7 @@ const EDITS = [
    * tab is missing, and a way to ask which conversations are shown now - in a tab, a restored tab, the sidebar or another
    * window - and which of them are running in another window. This extension reopens the tabs VS Code did not bring back (src/droppedtabs.js). Also a way to tell every
    * panel that the conversations on disk changed, which makes the session list read them again, used after a delete.
-   * And a way to hand an answer to the panel showing a conversation, in a tab or in the sidebar (src/answers.js): asked
+   * And a way to hand an answer to the panel showing a conversation, in a tab or in the sidebar (deliverAnswer in src/claude-source.js): asked
    * without text, it only says whether this window has such a panel. The same lookup sends the info box its process id
    * (__cceToPanel). And a way to have every tab pick its icon again (__cceRefreshTabIcons).
    */

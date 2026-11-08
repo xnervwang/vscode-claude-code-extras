@@ -1,7 +1,7 @@
 {
   "name": "claude-code-extras",
   "displayName": "Work Plan for Claude Code",
-  "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk. See it in its own view beside the Claude Code panel and answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Conversations tab shows running conversations, their plan questions and \"doing\" rows, with a status bar count of questions to decide. The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
+  "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk, and Agent Work Plan, which this extension installs, shows it beside the Claude Code panel; answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
   "version": "1.0.22",
   "publisher": "xnervwang",
   "license": "BSD-3-Clause",
@@ -18,7 +18,8 @@
     "Chat"
   ],
   "extensionDependencies": [
-    "anthropic.claude-code"
+    "anthropic.claude-code",
+    "xnervwang.agent-work-plan"
   ],
   "keywords": [
     "claude",
@@ -51,6 +52,15 @@
   "extensionKind": [
     "workspace"
   ],
+  "agentWorkPlan": {
+    "protocol": 1
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode nothing starts until the workspace is trusted: Claude Code is not patched, the work plan plugin is not installed, no file is written, and Claude Code conversations are not listed in Agent Work Plan. Claude Code itself does not run in Restricted Mode."
+    }
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -82,16 +92,6 @@
         "title": "Work Plan for Claude Code: Show Status"
       },
       {
-        "command": "claudeCodeWorkPlan.refreshWorkPlan",
-        "title": "Work Plan for Claude Code: Refresh Work Plan",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "claudeCodeWorkPlan.openWorkPlanFile",
-        "title": "Work Plan for Claude Code: Open the Work Plan File",
-        "icon": "$(go-to-file)"
-      },
-      {
         "command": "claudeCodeWorkPlan.installWorkPlanPlugin",
         "title": "Work Plan for Claude Code: Install the Work Plan Plugin for Claude Code"
       },
@@ -100,93 +100,10 @@
         "title": "Work Plan for Claude Code: Show How Long Opening a Panel Took"
       },
       {
-        "command": "claudeCodeWorkPlan.restoreWebviewRequestLimit",
-        "title": "Work Plan for Claude Code: Put Back VS Code's Request Limit"
-      },
-      {
         "command": "claudeCodeWorkPlan.disableWorkPlanPlugin",
         "title": "Work Plan for Claude Code: Stop Loading the Work Plan Plugin"
-      },
-      {
-        "command": "claudeCodeWorkPlan.showConversations",
-        "title": "%conversations.show%",
-        "icon": "$(list-tree)"
       }
     ],
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "claudeCodeExtras",
-          "title": "Work Plan for Claude Code",
-          "icon": "images/workplan.svg"
-        }
-      ],
-      "panel": [
-        {
-          "id": "claudeCodeConversations",
-          "title": "%conversations.title%",
-          "icon": "images/workplan.svg"
-        }
-      ]
-    },
-    "views": {
-      "claudeCodeExtras": [
-        {
-          "id": "claudeCodeExtras.workPlan",
-          "name": "Work plan",
-          "when": "config.claudeCodeWorkPlan.workPlan"
-        }
-      ],
-      "claudeCodeConversations": [
-        {
-          "id": "claudeCodeExtras.conversations",
-          "name": "%conversations.title%",
-          "when": "config.claudeCodeWorkPlan.workPlan && config.claudeCodeWorkPlan.conversations"
-        },
-        {
-          "type": "webview",
-          "id": "claudeCodeExtras.answer",
-          "name": "%answer.title%",
-          "when": "config.claudeCodeWorkPlan.workPlan && config.claudeCodeWorkPlan.conversations"
-        }
-      ]
-    },
-    "viewsWelcome": [
-      {
-        "view": "claudeCodeExtras.workPlan",
-        "contents": "No work plan for this conversation yet."
-      },
-      {
-        "view": "claudeCodeExtras.conversations",
-        "contents": "%conversations.empty%"
-      }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "claudeCodeWorkPlan.openWorkPlanFile",
-          "when": "view == claudeCodeExtras.workPlan",
-          "group": "navigation@1"
-        },
-        {
-          "command": "claudeCodeWorkPlan.refreshWorkPlan",
-          "when": "view == claudeCodeExtras.workPlan",
-          "group": "navigation@2"
-        },
-        {
-          "command": "claudeCodeWorkPlan.showConversations",
-          "when": "view == claudeCodeExtras.workPlan",
-          "group": "navigation@0"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "claudeCodeWorkPlan.openWorkPlanFile",
-          "when": "view == claudeCodeExtras.workPlan",
-          "group": "navigation"
-        }
-      ]
-    },
     "configuration": {
       "title": "Work Plan for Claude Code",
       "properties": {
@@ -369,32 +286,12 @@
         "claudeCodeWorkPlan.workPlan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Keep a work plan for each conversation: the tree in the activity bar, the open rows put in front of the model every turn, and the reminder to reconcile them at the end of one. Turned off, the view and its activity bar icon go, nothing is put in front of the model, and a write to a plan file is refused so one is not kept where nobody can see it.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Work Plan for Claude Code: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
+          "markdownDescription": "Keep a work plan for each conversation: the open rows put in front of the model every turn, and the reminder to reconcile them at the end of one. Agent Work Plan shows the plans. Turned off, nothing is put in front of the model, a write to a plan file is refused so one is not kept where nobody can see it, and Agent Work Plan shows no plan for Claude Code conversations.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Work Plan for Claude Code: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
         },
         "claudeCodeWorkPlan.tellClaudeYourTimeZone": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Tell Claude the time zone you read the panel in, and the time there, so it gives you times in your zone rather than in the zone of the machine it runs on. It is said, in about 90 tokens, when a conversation starts, and again after a compaction, when either side's date turns over, when the offset changes, and after every 100k tokens of context. Nothing is said while the two zones agree, as they usually do when VS Code and Claude Code run on the same machine. Takes effect from your next message, without a reload."
-        },
-        "claudeCodeWorkPlan.conversations": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show the **Conversations** tab in the panel, and the status bar entry that opens it. Takes effect without a reload."
-        },
-        "claudeCodeWorkPlan.webviewRequestLimit": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "raise",
-            "leave"
-          ],
-          "enumDescriptions": [
-            "Ask once per VS Code version",
-            "Raise it without asking, again after each update. On Linux it still asks",
-            "Do not change it"
-          ],
-          "default": "ask",
-          "markdownDescription": "VS Code lets Claude Code tabs have only 32 requests in flight at once, across all windows, and a tab can stay blank waiting for one. The extension can raise the limit to 1000000 in VS Code's `service-worker.js`. It takes effect after a restart, and VS Code updates reset it. To return to 32, run `Work Plan for Claude Code: Put Back VS Code's Request Limit`."
         }
       }
     }

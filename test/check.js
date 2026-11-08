@@ -483,44 +483,6 @@ console.log('\nwhat the periodic work reads');
     } else bad(`the open-latency sampler read ${l1}, ${l2} and ${l3} bytes of a ${r.log}-byte log with ${r.logAppended} appended`);
   }
 
-  /* The view reads the plan of the conversation in front of the reader and no other. Reading the whole directory was
-     once what put every conversation's plan in every window; it is also the read that would grow with the machine. */
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-home-'));
-  try {
-    const stub = path.join(home, 'vscode-stub.js');
-    fs.writeFileSync(stub, `module.exports = { EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} } };`);
-    const view = counting + `
-      const Module = require('module'), realResolve = Module._resolveFilename;
-      Module._resolveFilename = function (request, ...rest) {
-        return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest);
-      };
-      const { WorkPlanProvider } = require(${JSON.stringify(path.join(src, 'workplan-view.js'))});
-      const { planDir } = require(${JSON.stringify(path.join(src, 'workplan.js'))});
-      (async () => {
-        const dir = planDir();
-        fs.mkdirSync(dir, { recursive: true });
-        const body = JSON.stringify({ nodes: Array.from({ length: 200 }, (_, i) => ({ title: 'row ' + i, state: 'done', detail: 'z'.repeat(400) })) });
-        const ids = Array.from({ length: 20 }, (_, i) => 'eeeeeeee-1111-2222-3333-' + String(i).padStart(12, '0'));
-        for (const id of ids) fs.writeFileSync(path.join(dir, id + '.json'), body);
-        const p = new WorkPlanProvider();
-        p.setFocus(ids[3]);
-        const focused = await measure(() => p.refresh());
-        p.setFocus('');
-        const none = await measure(() => p.refresh());
-        process.stdout.write(JSON.stringify({ size: Buffer.byteLength(body), focused, none, focus: ids[3] }));
-      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.message })));`;
-    let v;
-    try {
-      v = JSON.parse(cp.execFileSync(process.execPath, ['-e', view], { encoding: 'utf8', env: Object.assign({}, process.env, { HOME: home }) }));
-    } catch (e) { v = { error: e.message }; }
-    if (v.error) bad('measuring the work plan view failed: ' + v.error);
-    else if (v.focused.files.length === 1 && v.focused.files[0].includes(v.focus) && v.focused.bytes === v.size && v.none.bytes === 0) {
-      ok('a refresh of the work plan view reads the one plan in front of the reader, out of twenty, and none without one');
-    } else bad(`a refresh of the work plan view read ${JSON.stringify(v.focused.files)} (${v.focused.bytes} bytes), `
-      + `and ${v.none.bytes} bytes with no conversation in front of it`);
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
-  }
 }
 
 /* ── 2d. what the hooks read of a transcript ──
@@ -2108,14 +2070,16 @@ console.log('\nshipped text');
     if (!hits.length) ok(`no CJK in any of the ${files.length} text files build/pack.sh ships, translations aside`);
     else bad(`shipped files carry CJK, which reaches whoever installs this: ${hits.slice(0, 8).join(', ')}`);
     const shape = (o) => Object.keys(o).sort().map((k) => (o[k] && typeof o[k] === 'object' ? k + '{' + shape(o[k]) + '}' : k)).join();
-    const nls = JSON.parse(fs.readFileSync(path.join(root, 'package.nls.json'), 'utf8'));
-    const nlsZh = JSON.parse(fs.readFileSync(path.join(root, 'package.nls.zh-cn.json'), 'utf8'));
-    const text = require('../src/conversations-text').TEXT;
     const used = (fs.readFileSync(path.join(root, 'package.json'), 'utf8').match(/"%([\w.]+)%"/g) || []).map((k) => k.slice(2, -2));
-    if (shape(nls) === shape(nlsZh) && shape(text.en) === shape(text['zh-cn']) && used.every((k) => k in nls)
-      && Object.keys(nls).every((k) => used.includes(k))) {
-      ok('each translation carries exactly the entries of its English, and every label the manifest names has one');
-    } else bad(`translation entries: nls ${shape(nls)} / ${shape(nlsZh)}, view ${shape(text.en)} / ${shape(text['zh-cn'])}, used ${used}`);
+    const nlsFiles = fs.readdirSync(root).filter((f) => /^package\.nls(\.[a-z]{2}(-[a-z]+)?)?\.json$/i.test(f));
+    const nlsOf = (f) => JSON.parse(fs.readFileSync(path.join(root, f), 'utf8'));
+    const english = nlsFiles.includes('package.nls.json') ? nlsOf('package.nls.json') : {};
+    const off = nlsFiles.filter((f) => shape(nlsOf(f)) !== shape(english));
+    if (!off.length && used.every((k) => k in english) && Object.keys(english).every((k) => used.includes(k))
+      && (used.length > 0 || !nlsFiles.length)) {
+      ok(used.length ? 'each translation carries exactly the entries of its English, and every label the manifest names has one'
+        : 'the manifest names no translated label, and no translation file is shipped');
+    } else bad(`translation entries: ${JSON.stringify({ files: nlsFiles, off, used })}`);
   }
 
   /* Commit messages are not in the .vsix, so the scan above never sees them - and they travel anyway, because history
@@ -2548,61 +2512,23 @@ console.log('\none live stylesheet, several windows');
 
 /* ── 10. what is left to do, drawn first ──
    A plan only grows, so in the file's own order the few rows that still need doing scatter among the many that are done.
-   The drawing separates them; what must survive that is the row's id, because it is all the view has to remember which
-   branches were open - an id that changed because a row moved would fold the tree up as work got done. */
+   The block injected every turn draws the open ones first; the number a person says has to survive that. */
 console.log('\nwhat is left to do, drawn first');
 {
   const plan = require('../src/workplan');
   const N = (title, state) => ({ title, state });
-  const titles = (rows) => rows.map((r) => r.title).join(',');
 
-  const mixed = [N('a', 'done'), N('b', 'todo'), N('c', 'dropped'), N('d', 'discussing'), N('e', 'done'), N('f', 'parked')];
-  if (titles(plan.openFirst(mixed)) === 'f,d,b,e,c,a') ok('unfinished rows come first, newest first within each group');
-  else bad(`the drawn order is ${titles(plan.openFirst(mixed))}, expected f,d,b,e,c,a`);
-
-  /* A row being worked on is unfinished, so it belongs in the front group. Leaving it out of the open list would drop it
-     from what is injected, and a row nobody is reminded of is the one that gets abandoned. */
-  const withDoing = [N('a', 'done'), N('b', 'doing'), N('c', 'todo')];
-  if (titles(plan.openFirst(withDoing)) === 'c,b,a' && plan.OPEN_STATES.includes('doing')) {
-    ok('a row being worked on counts as open and is drawn with the unfinished ones');
-  } else bad(`doing sorted to ${titles(plan.openFirst(withDoing))}, open states ${plan.OPEN_STATES.join()}`);
+  if (plan.OPEN_STATES.includes('doing') && plan.OPEN_STATES.includes('waiting')) {
+    ok('a row being worked on, or waiting on somebody, counts as open');
+  } else bad(`open states ${plan.OPEN_STATES.join()}`);
 
   if (plan.STATES.length === 7 && plan.STATES.includes('doing') && plan.STATES.includes('waiting')) {
     ok('seven states, doing and waiting among them');
   } else bad(`the states are ${plan.STATES.join()}`);
 
-  /* A row waiting on somebody is still unfinished, so it is drawn and injected with the rest of the open work. */
-  const withWaiting = [N('a', 'done'), N('b', 'waiting'), N('c', 'todo')];
-  if (titles(plan.openFirst(withWaiting)) === 'c,b,a' && plan.OPEN_STATES.includes('waiting')) {
-    ok('a row waiting on somebody counts as open');
-  } else bad(`waiting sorted to ${titles(plan.openFirst(withWaiting))}, open states ${plan.OPEN_STATES.join()}`);
-
-  /* Nothing to separate still means newest first: the two groups are an ordering on top of that, not instead of it. */
-  const allDone = [N('a', 'done'), N('b', 'dropped')];
-  const allOpen = [N('a', 'todo'), N('b', 'parked')];
-  if (titles(plan.openFirst(allDone)) === 'b,a' && titles(plan.openFirst(allOpen)) === 'b,a') {
-    ok('a list with nothing to separate is still drawn newest first');
-  } else bad(`all-closed gave ${titles(plan.openFirst(allDone))}, all-open ${titles(plan.openFirst(allOpen))}`);
-
-  if (titles(plan.openFirst([])) === '' && titles(plan.openFirst(null)) === '') ok('no rows, and no rows at all, are fine');
-  else bad('an empty or missing list is not handled');
-
-  /* The id is built from the row's place in the file, so closing a row moves it on screen without renaming it. */
-  const rowsOf = (nodes) => plan.openFirst(
-    nodes.map((n, i) => ({ node: n, key: 'p/' + i + ':' + n.title })), (r) => r.node.state);
-  const idOf = (rows, t) => (rows.find((r) => r.node.title === t) || {}).key;
-  /* Newest first, so closing the LAST row is what moves it: c leads while open and trails once closed. */
-  const before = rowsOf([N('a', 'todo'), N('b', 'todo'), N('c', 'todo')]);
-  const after = rowsOf([N('a', 'todo'), N('b', 'todo'), N('c', 'done')]);
-  const moved = before.indexOf(before.find((r) => r.node.title === 'c'))
-    !== after.indexOf(after.find((r) => r.node.title === 'c'));
-  if (moved && idOf(before, 'c') === idOf(after, 'c') && idOf(before, 'b') === idOf(after, 'b')) {
-    ok('a row that closes moves on screen and keeps its id');
-  } else bad(`closing a row renames it (moved: ${moved}, was ${idOf(before, 'c')}, now ${idOf(after, 'c')})`);
-
-  /* The number a person says out loud, which the tree and the injected rows both show. It comes from the file for the
-     same reason the id does, so finishing something does not renumber what is left - dense numbering over the visible
-     rows alone would mean a number quoted an hour ago points at a different row now. */
+  /* The number a person says out loud, which the tree and the injected rows both show. It comes from the file, so
+     finishing something does not renumber what is left - dense numbering over the visible rows alone would mean a number
+     quoted an hour ago points at a different row now. */
   const cp = require('child_process');
   const hook = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks', 'inject-work-plan.py');
   const numbersRaw = (nodes) => {
@@ -3519,92 +3445,16 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     fs.rmSync(t.dir, { recursive: true, force: true });
   }
   {
-    /* The setting has to reach the plugin, and the view has to be hidden by it. Neither is visible from the other side. */
+    /* The setting has to reach the plugin. The views are Agent Work Plan's; with the setting off the source gives no plan
+       path, so they show no plan either. */
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    const views = manifest.contributes.views.claudeCodeExtras;
-    const view = views.find((v) => v.id === 'claudeCodeExtras.workPlan') || {};
     const setting = manifest.contributes.configuration.properties['claudeCodeWorkPlan.workPlan'];
-    const others = views.filter((v) => v !== view);
-    if (setting && setting.default === true && view.when === 'config.claudeCodeWorkPlan.workPlan'
-      && others.every((v) => String(v.when).startsWith('config.claudeCodeWorkPlan.workPlan && '))) {
-      ok('the views are hidden by the same setting the hooks read, and start on');
-    } else bad(`setting ${JSON.stringify(setting && setting.default)}, view when ${JSON.stringify(views.map((v) => v.when))}`);
+    const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+    if (setting && setting.default === true && /enabled: WORK_PLAN_SETTING,/.test(ext)
+      && /enabled: \(\) => cfg\(\)\.get\(WORK_PLAN_SETTING, true\) !== false,/.test(ext)) {
+      ok('the switch the hooks read is the one Claude Code\'s source reads, and starts on');
+    } else bad(`setting ${JSON.stringify(setting && setting.default)}, or extension.js reads another switch`);
   }
-}
-
-/* ── 15. whose plan the tree shows ──
-   The view's one claim is that it shows what THIS conversation has to do, and the answer to "which conversation" has three
-   values, not two: a name, "none is open", and "nothing has said yet". Flattening the last two is what drew every
-   conversation on the machine as soon as the last panel closed - other people's leftovers, in a view that promised one
-   thing. Nothing else here loads this module, since it needs the editor's own API; a stub covers the little it uses. */
-console.log('\nwhose plan the tree shows');
-{
-  const Module = require('module');
-  const realResolve = Module._resolveFilename;
-  const stub = path.join(os.tmpdir(), 'cce-vscode-stub.js');
-  fs.writeFileSync(stub, `
-    class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-    module.exports = {
-      TreeItem,
-      TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-      ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
-      ThemeColor: class { constructor(id) { this.id = id; } },
-      MarkdownString: class { constructor(v) { this.value = v; } },
-      Uri: { file: (p) => ({ fsPath: p }) },
-      EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
-    };
-  `);
-  Module._resolveFilename = function (request, ...rest) {
-    return request === 'vscode' ? stub : realResolve.call(this, request, ...rest);
-  };
-  let view;
-  try {
-    ({ WorkPlanProvider: view } = require('../src/workplan-view'));
-  } finally {
-    Module._resolveFilename = realResolve;
-  }
-
-  /* The rule is one line: show the conversation in front of the reader, or nothing. There is no state that shows every
-     conversation - a fresh window that has never been told which one it is looking at shows an empty tree, not the whole
-     machine. */
-  const p = new view();
-  if (p.setFocus('abc') === true && p.focus === 'abc') ok('a named conversation is recorded');
-  else bad(`setFocus('abc') left ${JSON.stringify(p.focus)}`);
-
-  if (p.setFocus('abc') === false) ok('the same conversation twice is not announced as a change');
-  else bad('an unchanged focus reported a move');
-
-  /* Focus but no file. A conversation with no plan yet reads as empty, not as a reason to fall back to everyone else's -
-     the bug this section was rewritten for: a fresh project showed other projects' plans. */
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-focus-'));
-  const plan = require('../src/workplan');
-  const seen = plan.readPlan.length; // arity guard: readPlan(session) still takes the id
-  if (seen === 1) ok('a focused conversation is read by id alone');
-  else bad(`readPlan takes ${seen} args, expected 1`);
-
-  /* No path that shows all plans is left in the view: readPlans is gone, and the fallback is no plan. */
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'workplan-view.js'), 'utf8');
-  if (/this\.focus \? this\.read\(this\.focus, this\.source\) : null/.test(src) && !/readPlans/.test(src)) {
-    ok('with no conversation in focus the tree is empty, never every conversation on the machine');
-  } else bad('the view can still fall back to showing all plans');
-  /* The view only ever gets one plan or none, so code for several (a heading row per conversation with its own summary
-     and menu value, an "across N conversations" count, a plan picker) would be unreachable. */
-  const extText = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  const leftovers = [
-    ['a heading row per conversation', /kind: 'root'|cceWorkPlanRoot|function summary\(/.test(src)],
-    ['a second list of the open states', /const OPEN = \[/.test(src)],
-    ['a count across conversations', /across \$\{/.test(extText)],
-    ['a picker of plans', /showQuickPick/.test(extText)],
-    ['a modification time nothing reads', /mtime: st\.mtimeMs/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'workplan.js'), 'utf8'))],
-  ].filter(([, there]) => there).map(([what]) => what);
-  const one = plan.readPlan('');
-  if (!leftovers.length && one === null) ok('the view holds one plan or none, with nothing left of drawing several');
-  else bad(`still there: ${leftovers.join(', ')}${one === null ? '' : '; readPlan without a session gave ' + JSON.stringify(one)}`);
-  if (!/readPlans/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'workplan.js'), 'utf8'))) {
-    ok('the show-everything function is gone, not just unreferenced');
-  } else bad('readPlans is still defined in workplan.js');
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.rmSync(stub, { force: true });
 }
 
 /* ── 16. one list of states, in three places ──
@@ -4292,130 +4142,6 @@ console.log('\none copy of what the hooks share');
   else bad(`copies outside plan_path.py: ${found.join('; ')}`);
 }
 
-/* ── 20. how a row being worked on, or waiting, is drawn ──
-   Uses the same stub of the editor's API as section 15, made again here since that section removes it. */
-console.log('\nhow a row being worked on, or waiting, is drawn');
-{
-  const Module = require('module');
-  const realResolve = Module._resolveFilename;
-  const stub = path.join(os.tmpdir(), 'cce-vscode-stub-20.js');
-  fs.writeFileSync(stub, `
-    class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-    module.exports = {
-      TreeItem,
-      TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-      ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
-      ThemeColor: class { constructor(id) { this.id = id; } },
-      MarkdownString: class { constructor(v) { this.value = v; } },
-      Uri: { file: (p) => ({ fsPath: p }) },
-      EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
-    };
-  `);
-  Module._resolveFilename = function (request, ...rest) {
-    return request === 'vscode' ? stub : realResolve.call(this, request, ...rest);
-  };
-  let viewMod;
-  try {
-    delete require.cache[require.resolve('../src/workplan-view')];
-    viewMod = require('../src/workplan-view');
-  } finally {
-    Module._resolveFilename = realResolve;
-  }
-  const plan = require('../src/workplan');
-
-  {
-    const icons = plan.STATES.map((s) => viewMod.LOOK[s] && viewMod.LOOK[s].icon);
-    const w = viewMod.LOOK.waiting, talk = viewMod.LOOK.discussing;
-    if (icons.every(Boolean) && new Set(icons).size === icons.length && w && w.color === 'charts.orange' && w.color !== talk.color) {
-      ok('every state has its own shape, and waiting is orange, apart from discussing in colour as well');
-    } else bad(`icons per state: ${JSON.stringify(icons)}, waiting colour ${w && w.color}`);
-    const pick = (v) => viewMod.waitingIcon(v);
-    const want = [['1.140.0', 'clockface'], ['1.111.0', 'clockface'], ['2.0.0', 'clockface'], ['1.140.0-insider', 'clockface'],
-      ['1.110.0', 'watch'], ['1.94.0', 'watch'], [undefined, 'watch'], ['', 'watch'], ['x.y', 'watch']];
-    const wrong = want.filter(([v, icon]) => pick(v) !== icon);
-    if (!wrong.length) ok('a clock face from VS Code 1.111, where the icon font has one, and the watch before it or when unknown');
-    else bad(`waitingIcon gave ${wrong.map(([v]) => `${v}: ${pick(v)}`).join(', ')}`);
-  }
-  {
-    /* A row's time is written in the reader's zone once a panel has reported it, and in the host's own before that. */
-    const ms = (iso) => Date.parse(iso);
-    const now = ms('2026-10-11T18:00:00Z');
-    const st = (a, b, zone) => viewMod.stamp(a && ms(a), b && ms(b), zone, now);
-    const local = (iso) => { const d = new Date(ms(iso)); const p = (n) => (n < 10 ? '0' : '') + n;
-      return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
-    const want = [
-      [st('2026-10-11T17:39:00Z', 0, 'America/Los_Angeles'), '10/11 10:39', 'a moment in the reader\'s zone'],
-      [st('2026-10-11T17:39:00Z', '2026-10-12T02:00:00Z', 'America/Los_Angeles'), '10/11 10:39 → 19:00',
-        'one local day is one day, though the host\'s zone has crossed midnight'],
-      [st('2026-10-11T17:39:00Z', '2026-10-12T02:00:00Z', 'UTC'), '10/11 17:39 → 10/12 02:00', 'and two days in a zone where it has'],
-      [st('2025-12-31T23:30:00Z', 0, 'Asia/Tokyo'), '01/01 08:30', 'the year is judged in that zone too'],
-      [st('2025-12-31T23:30:00Z', 0, 'America/Los_Angeles'), '2025/12/31 15:30', 'and written when it is not the current one'],
-      [st('2026-10-11T17:39:00Z', 0, ''), local('2026-10-11T17:39:00Z'), 'no zone reported: the host\'s own'],
-      [st('2026-10-11T17:39:00Z', 0, 'Not/AZone'), local('2026-10-11T17:39:00Z'), 'a zone this runtime does not know: the host\'s own'],
-    ];
-    for (const [got, exp, label] of want) {
-      if (got === exp) ok('plan times: ' + label);
-      else bad(`plan times, ${label}: got "${got}", expected "${exp}"`);
-    }
-    const p = new viewMod.WorkPlanProvider();
-    p.refresh();
-    const same = p.refresh();
-    const moved = p.setTimeZone('America/Los_Angeles'), again = p.setTimeZone('America/Los_Angeles');
-    if (!same && moved && !again && p.refresh()) ok('a newly reported zone redraws the tree, though no plan file changed');
-    else bad(`zone change: unchanged refresh ${same}, set ${moved}, set again ${again}`);
-  }
-  {
-    const now = Date.now();
-    const at = (s, state = 'doing') => viewMod.held({ state, since: now - s * 1000 }, now);
-    const got = [at(30), at(61 * 60), at(49 * 3600), at(3600, 'todo'), viewMod.held({ state: 'doing', since: 0 }, now),
-      at(-600)];
-    if (got.join() === '1m,1h,2d,,,') ok('how long, in minutes, hours or days, and nothing where it does not apply');
-    else bad(`held() gave ${JSON.stringify(got)}`);
-  }
-  {
-    /* The tree and the model read the same figure for the same row, which needs the two to step at the same places. */
-    const hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks');
-    const session = '46000000-0000-0000-0000-000000000000';
-    const spans = [30, 59 * 60 + 30, 61 * 60, 47 * 3600 + 60, 49 * 3600, 10 * 86400];
-    const now = Date.now();
-    const nodes = spans.map((s, i) => ({ title: 'r' + i, state: 'doing', since: new Date(now - s * 1000).toISOString() }));
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-age-'));
-    fs.writeFileSync(path.join(dir, session + '.json'), JSON.stringify({ nodes }));
-    const r = cp.spawnSync('python3', [path.join(hooks, 'inject-work-plan.py'), dir], {
-      encoding: 'utf8', input: JSON.stringify({ session_id: session, hook_event_name: 'UserPromptSubmit' }),
-    });
-    fs.rmSync(dir, { recursive: true, force: true });
-    let text = '';
-    try { text = JSON.parse(r.stdout).hookSpecificOutput.additionalContext; } catch (_) {}
-    const py = spans.map((_, i) => ((new RegExp('\\. r' + i + ' {3}\\[doing for (\\w+)\\]').exec(text)) || [])[1]);
-    const js = nodes.map((n) => viewMod.held({ state: 'doing', since: Date.parse(n.since) }, now));
-    if (py.join() === js.join()) ok(`the tree and the injected block give the same figure: ${js.join(' ')}`);
-    else bad(`the injected block says ${py.join()}, the tree ${js.join()}`);
-  }
-  {
-    const p = new viewMod.WorkPlanProvider();
-    const element = (node) => ({ kind: 'node', node, plan: { session: 's', file: '/f' }, path: [], key: 'k', num: '3' });
-    const now = Date.now();
-    const busy = p.getTreeItem(element({ title: 't', state: 'doing', note: '', detail: '', opened: now - 7200e3,
-      since: now - 7200e3 - 60e3, closed: 0, children: [] }));
-    const over = p.getTreeItem(element({ title: 't', state: 'done', note: '', detail: '', opened: now - 7200e3,
-      since: now - 60e3, closed: now - 60e3, children: [] }));
-    if (/ · for 2h$/.test(busy.description) && busy.tooltip.value.includes('doing for 2h')
-      && busy.command.arguments[0].state === 'doing for 2h' && !/for /.test(over.description)) {
-      ok('a row doing says for how long on the row, in the hover and in the dialog; a closed row does not');
-    } else bad(`doing row: ${JSON.stringify(busy.description)}; done row: ${JSON.stringify(over.description)}`);
-  }
-  {
-    /* The figure goes stale with nothing in the file changing, so it has to be part of what decides a redraw. */
-    const now = Date.now();
-    const nodes = [{ state: 'todo', children: [{ state: 'waiting', since: now - 30e3, children: [] }] }];
-    if (viewMod.heldAll(nodes, now).join() !== viewMod.heldAll(nodes, now + 3 * 3600e3).join()) {
-      ok('the time a row has waited changes what the tree compares, so it is redrawn as the time passes');
-    } else bad('the figure is the same an hour later, so the tree would never redraw it');
-  }
-  fs.rmSync(stub, { force: true });
-}
-
 /* ── 21. an uninstall puts Claude Code back at once ──
    The editor runs the uninstall hook only when it deletes this extension's folder, which in remote development once
    came eight hours after the uninstall. deactivate runs at the restart that follows an uninstall - and at every reload
@@ -4792,47 +4518,15 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
   }
 }
 
-/* ── 23. every call on the work plan view is one it has ──
-   extension.js holds the view in a variable named like the module it reads plans with, and once called a module
-   function on the view instead: the daily sweep of abandoned plans threw "is not a function" every time it ran, and
-   nothing showed it but one line in the output channel. Uses the same stub of the editor's API as sections 15 and 20. */
-console.log('\nevery call on the work plan view is one it has');
+/* ── 23. the sweep of abandoned plans is the module's ──
+   extension.js once called a module function on a variable of another kind: the daily sweep of abandoned plans threw
+   "is not a function" every time it ran, and nothing showed it but one line in the output channel. */
+console.log('\nthe sweep of abandoned plans');
 {
-  const Module = require('module');
-  const realResolve = Module._resolveFilename;
-  const stub = path.join(os.tmpdir(), 'cce-vscode-stub-23.js');
-  fs.writeFileSync(stub, `
-    class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-    module.exports = {
-      TreeItem,
-      TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-      ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
-      ThemeColor: class { constructor(id) { this.id = id; } },
-      MarkdownString: class { constructor(v) { this.value = v; } },
-      Uri: { file: (p) => ({ fsPath: p }) },
-      EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
-    };
-  `);
-  Module._resolveFilename = function (request, ...rest) {
-    return request === 'vscode' ? stub : realResolve.call(this, request, ...rest);
-  };
-  let Provider;
-  try {
-    delete require.cache[require.resolve('../src/workplan-view')];
-    ({ WorkPlanProvider: Provider } = require('../src/workplan-view'));
-  } finally {
-    Module._resolveFilename = realResolve;
-  }
-  const view = new Provider();
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  const called = Array.from(new Set((ext.match(/\bworkplan\.(\w+)\(/g) || []).map((m) => m.slice(9, -1))));
-  const missing = called.filter((name) => typeof view[name] !== 'function');
-  if (called.length && !missing.length) ok(`all ${called.length} methods extension.js calls on the view exist: ${called.join(', ')}`);
-  else bad(`extension.js calls ${missing.join(', ')} on the view, which has no such method`);
   if (/\bsweepOrphans\b[^\n]*require\('\.\/src\/workplan'\)/.test(ext) && /const r = sweepOrphans\(\);/.test(ext)) {
     ok('the sweep of abandoned plans is the module\'s function, imported as such');
   } else bad('the sweep of abandoned plans is not called through the module');
-  fs.rmSync(stub, { force: true });
 }
 
 /* Settings once lived under claudeCodeExtras.*. Moving them is the one part of the rename that can lose what a person set,
@@ -5574,9 +5268,9 @@ console.log('\na panel whose bundle never arrives says so');
     }
   }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  if (/globalThis\.__cceTzHook = /.test(ext) && /workplan\.setTimeZone\(clientZone\(\)\);\s*const moved = workplan\.setFocus/.test(ext)) {
-    ok('the extension redraws on a reported zone and picks it up on every refresh');
-  } else bad('extension.js does not read the reported time zone');
+  if (/globalThis\.__cceTzHook = /.test(ext) && /timeZone: \(\) => clientZone\(\),/.test(ext)) {
+    ok('the extension writes a reported zone for the hooks and gives it to Agent Work Plan as the source\'s timeZone()');
+  } else bad('extension.js does not pass on the reported time zone');
   if (/globalThis\.__cceTabIcon = \(panel, state, run, home, sessionId\) =>/.test(ext)
       && /if \(run !== 'running' && bgWorking\.has\(sessionId\)\) run = 'running';/.test(ext)
       && /if \(!enabled\(\) \|\| removed\(\) \|\| typeof home !== 'string'\) return undefined;/.test(ext)
@@ -7086,14 +6780,13 @@ console.log('\nthe patch markers follow the code');
 }
 
 /* ── conversations ──
-   The Conversations view: this workspace's running conversations from `claude agents --json`, their state as Claude Code
-   reports it, and from each plan only what it is doing and what it asks the user. */
+   What Claude Code's source lists: this workspace's running conversations from `claude agents --json` with their state
+   as Claude Code reports it, and the stopped ones whose plans still have open rows. */
 console.log('\nconversations');
 {
   const w = require('../src/waiting');
   const conv = require('../src/conversations');
   const bgs = require('../src/bgsessions');
-  const ctext = require('../src/conversations-text');
   /* Ages are drawn against the clock, so the times are set against it too. */
   const DAY = 24 * 3600 * 1000, now = Date.now();
   const S = (n) => '9' + String(n).padStart(7, '0') + '-0000-0000-0000-000000000000';
@@ -7126,33 +6819,14 @@ console.log('\nconversations');
     ok('pidsOf drops duplicates and other sessions, and sorts');
   } else bad(`pidsOf ${JSON.stringify(pids)}`);
 
-  const plans = {
-    [S(2)]: { title: '', nodes: [
-      { title: 'publish', state: 'waiting', since: now - 3 * DAY, asked: now - 3600e3, waitingOn: 'user', question: 'Publish 1.0.20 now?', note: 'n', detail: 'd', children: [] },
-      { title: 'old style', state: 'waiting', since: now - 7200e3, waitingOn: '', question: '', children: [] },
-      { title: 'parent', state: 'doing', since: now - 7200e3, children: [
-        { title: 'pick', state: 'discussing', since: now - 60e3, waitingOn: 'user', question: 'A or B?', children: [] },
-      ] },
-      { title: 'built', state: 'done', children: [] },
-    ] },
-    [S(3)]: { title: '', nodes: [{ title: 'build it', state: 'doing', since: now - 600e3, children: [] }] },
-  };
-  const since = { [S(1)]: now - 120e3, [S(2)]: now - 60e3, [S(3)]: now - 30e3, [S(4)]: now - 3000e3, [S(5)]: now - 9000e3 };
-  const data = conv.build({
-    sessions: merged, now, readPlan: (id) => plans[id] || null,
-    titles: (sess) => ({ custom: '', ai: sess.sessionId === S(5) ? 'AI title' : '' }),
-    since: (sess) => since[sess.sessionId] || 0,
-    live: new Map([[S(5), 'running']]), unread: new Set([S(4)]),
-  });
-  const shape = data.running.map((c) => c.sessionId.slice(7, 8) + ':' + c.state).join(' ');
-  const asks = data.running.find((c) => c.sessionId === S(2));
-  if (shape === '1:prompt 2:needs 3:working 5:working 4:unread' && data.asks === 2
-    && asks.questions.map((q) => q.row + ':' + q.question).join('|') === '1:Publish 1.0.20 now?|3.1:A or B?'
-    && asks.questions[0].since === now - 3600e3
-    && asks.doing.map((d) => d.row).join() === '3' && asks.open === 4 && asks.hasPlan
-    && data.running.find((c) => c.sessionId === S(5)).title === 'AI title' && !data.running.find((c) => c.sessionId === S(4)).hasPlan) {
-    ok('each conversation takes its state from Claude Code, needs you when its plan asks something, and sorts by what needs looking at');
-  } else bad(`conversations ${shape}, asks ${data.asks}, ${JSON.stringify(asks)}`);
+  {
+    const live = new Map([[S(5), 'running'], [S(6), 'waiting']]), unread = new Set([S(4)]);
+    const states = [S(1), S(2), S(3), S(4), S(5)].map((id) => conv.stateOf(merged.get(id), live, unread));
+    const asked = conv.stateOf({ sessionId: S(6) }, live, unread);
+    if (states.join() === 'prompt,idle,working,unread,working' && asked === 'prompt') {
+      ok('a conversation takes its state from Claude Code: a prompt, a running turn, an unread reply, or idle');
+    } else bad(`states ${states.join()}, ${asked}`);
+  }
 
   {
     /* Stopped conversations: listed when the plan was written in the last week, still has open rows, and the transcript
@@ -7183,10 +6857,6 @@ console.log('\nconversations');
     fs.rmSync(root, { recursive: true, force: true });
   }
 
-  if (ctext.language('zh-cn') === 'zh-cn' && ctext.language('zh-Hans') === 'zh-cn' && ctext.language('zh-tw') === 'en'
-    && ctext.language('de') === 'en' && ctext.language('en') === 'en' && ctext.language(undefined) === 'en') {
-    ok('the view speaks the editor\'s language when it has words for it, and English otherwise');
-  } else bad('conversations-text.language chose wrongly');
 
   {
     /* Only this workspace's conversations, by real path, and never a background session. */
@@ -7282,167 +6952,10 @@ console.log('\nconversations');
     fs.rmSync(home, { recursive: true, force: true });
   }
 
-  {
-    const stub = path.join(os.tmpdir(), 'cce-vscode-stub-conversations.js');
-    fs.writeFileSync(stub, `
-      class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-      class MarkdownString { constructor(v) { this.value = v || ''; } appendText(t) { this.value += t; return this; } appendMarkdown(t) { this.value += t; return this; } }
-      module.exports = {
-        version: '1.144.0', TreeItem, MarkdownString,
-        TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-        ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
-        ThemeColor: class { constructor(id) { this.id = id; } },
-        EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
-      };
-    `);
-    const Module = require('module');
-    const realResolve = Module._resolveFilename;
-    Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? stub : realResolve.call(this, request, ...rest); };
-    let ConversationsProvider, views;
-    try {
-      delete require.cache[require.resolve('../src/workplan-view')];
-      delete require.cache[require.resolve('../src/conversations-view')];
-      ({ ConversationsProvider } = require('../src/conversations-view'));
-      views = require('../src/workplan-view');
-    } finally { Module._resolveFilename = realResolve; }
-    const withStopped = Object.assign({}, data, { stopped: [Object.assign({}, data.running[1], { sessionId: S(9), running: false, state: 'needs' })] });
-    const tree = new ConversationsProvider();
-    const first = tree.set(withStopped, '', 'en', now), again = tree.set(withStopped, '', 'en', now);
-    const top = tree.getChildren();
-    const asking = top.find((e) => e.c && e.c.sessionId === S(2));
-    const rows = tree.getChildren(asking).map((e) => tree.getTreeItem(e));
-    const head = tree.getTreeItem(asking);
-    const busy = tree.getTreeItem(tree.getChildren(top.find((e) => e.c && e.c.sessionId === S(3)))[0]);
-    if (first && !again && top.length === 6 && top[5].kind === 'stopped' && head.label === asking.c.title
-      && head.iconPath.id === 'question' && head.description === 'needs you · 2 questions · 4 open'
-      && rows.map((r) => r.label).join('|') === '1. Publish 1.0.20 now?|3.1. A or B?|3. parent'
-      && rows[0].command.command === 'claudeCodeWorkPlan.answerQuestion' && rows[0].command.arguments[0].open.sessionId === S(2)
-      && rows[0].command.arguments[0].row === '1' && rows[0].command.arguments[0].running === true
-      && rows[2].description.startsWith('doing (conversation idle') && busy.description === 'doing for 10m'
-      && head.command.command === 'claudeCodeWorkPlan.openWaitingConversation') {
-      ok('a conversation is drawn with its state, its questions numbered as in its plan, and the rows it is doing');
-    } else bad(`tree ${JSON.stringify([first, again, top.map((t) => t.kind), head.description, rows.map((r) => [r.label, r.description])])}`);
-    tree.set(withStopped, '', 'zh-cn', now);
-    const zh = tree.getTreeItem(tree.getChildren().find((e) => e.c && e.c.sessionId === S(2)));
-    if (zh.description === '要你定 · 2 个问题 · 4 项未完成') ok('the same rows in Simplified Chinese, state names of the plan left as written');
-    else bad(`zh-cn description ${JSON.stringify(zh.description)}`);
-    tree.set({ running: [], stopped: [], asks: 0 });
-    if (tree.getChildren().length === 0) ok('with no conversation running it is empty, so its welcome line is all it shows');
-    else bad('an empty Conversations view drew rows');
-    const legacy = views.waitsOn({ state: 'waiting', waitingOn: '' }), user = views.waitsOn({ state: 'waiting', waitingOn: 'user' });
-    if (legacy && !legacy.known && legacy.words === 'on: unknown' && user.words === 'on you' && views.waitsOn({ state: 'todo' }) === null) {
-      ok('the work plan says who a row waits on, and "unknown" for a waiting row written before the field');
-    } else bad(`waitsOn ${JSON.stringify([legacy, user])}`);
-  }
-
-  {
-    const pkg = require('../package.json');
-    const c = pkg.contributes;
-    const panel = (c.viewsContainers.panel || []).find((p) => p.id === 'claudeCodeConversations');
-    const view = (c.views.claudeCodeConversations || [])[0] || {};
-    const setting = c.configuration.properties['claudeCodeWorkPlan.conversations'];
-    const button = (c.menus['view/title'] || []).find((m) => m.command === 'claudeCodeWorkPlan.showConversations');
-    if (panel && view.id === 'claudeCodeExtras.conversations' && view.when === 'config.claudeCodeWorkPlan.workPlan && config.claudeCodeWorkPlan.conversations'
-      && setting && setting.default === true && !c.configuration.properties['claudeCodeWorkPlan.conversationsLanguage']
-      && button && button.when === 'view == claudeCodeExtras.workPlan'
-      && !c.views.claudeCodeExtras.some((v) => v.id === 'claudeCodeExtras.waitingOnYou')) {
-      ok('Conversations is a tab of its own in the panel, on by default, opened from the work plan\'s title bar, in VS Code\'s language');
-    } else bad(`manifest: panel ${JSON.stringify(panel)}, view ${JSON.stringify(view)}`);
-  }
 }
 
 console.log('\nanswering from the Conversations tab');
 {
-  const answers = require('../src/answers');
-  const ctext = require('../src/conversations-text');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-answers-'));
-  /* Two or three windows on one machine, sharing the folder. Time and timers are faked, so a wait is a function call. */
-  let clock = 1_000_000;
-  const timers = [];
-  const window = (shows, panel) => {
-    const finished = [], handed = [];
-    const w = new answers.Courier({
-      dir, now: () => clock,
-      later: (fn, ms) => { timers.push({ at: clock + ms, fn, live: true }); return timers.length; },
-      cancel: (n) => { if (timers[n - 1]) timers[n - 1].live = false; },
-      canShow: (id) => shows.includes(id),
-      hand: (id, text, key) => { handed.push({ id, text, key }); if (panel) panel(w, key); return true; },
-      finish: (sent, result) => finished.push([sent.key, result.kind]),
-    });
-    return { w, finished, handed };
-  };
-  const advance = (ms) => {
-    clock += ms;
-    for (const t of timers) if (t.live && t.at <= clock) { t.live = false; t.fn(); }
-  };
-  const sender = window([]), shower = window(['S'], (w, key) => w.handed(key, true, ''));
-  const id = sender.w.send({ sessionId: 'S', row: '2', text: 'My answer' }, { key: 'S/2' });
-  shower.w.pump();
-  const handedOnce = shower.handed.length === 1 && shower.handed[0].text === 'My answer' && shower.handed[0].key === id;
-  sender.w.pump();
-  {
-    if (handedOnce && JSON.stringify(sender.finished) === JSON.stringify([['S/2', 'sent']])) {
-      ok('an answer reaches the window showing its conversation, which sends it, and the sending window hears it was sent');
-    } else bad(`answer round trip: handed ${JSON.stringify(shower.handed)}, finished ${JSON.stringify(sender.finished)}`);
-
-    /* Nobody shows the conversation: once the wait is over the sender takes it back, so it cannot arrive later. */
-    const lonely = window([]);
-    lonely.w.send({ sessionId: 'T', row: '1', text: 'x' }, { key: 'T/1' });
-    advance(answers.TAKE_MS + 200);
-    const late = window(['T']);
-    late.w.pump();
-    if (JSON.stringify(lonely.finished) === JSON.stringify([['T/1', 'nobody']]) && late.handed.length === 0) {
-      ok('an answer no window takes in time is taken back, and a window opening the conversation later does not send it');
-    } else bad(`nobody: ${JSON.stringify(lonely.finished)}, later handed ${late.handed.length}`);
-
-    /* The panel's input already had text in it, so the panel did not send. */
-    const s2 = window([]), w2 = window(['U'], (w, key) => w.handed(key, false, 'draft'));
-    s2.w.send({ sessionId: 'U', row: '1', text: 'y' }, { key: 'U/1' });
-    w2.w.pump();
-    s2.w.pump();
-    if (JSON.stringify(s2.finished) === JSON.stringify([['U/1', 'draft']])) ok('a panel that could not send says why, and the sender hears it');
-    else bad(`draft: ${JSON.stringify(s2.finished)}`);
-
-    /* Taken, and the panel never reports: the window that took it gives up after its own timeout. */
-    const s3 = window([]), w3 = window(['V']);
-    s3.w.send({ sessionId: 'V', row: '1', text: 'z' }, { key: 'V/1' });
-    w3.w.pump();
-    advance(answers.SEND_MS + 10);
-    s3.w.pump();
-    if (JSON.stringify(s3.finished) === JSON.stringify([['V/1', 'no-reply']])) ok('a panel that never reports is given up on, and the sender hears so');
-    else bad(`no reply: ${JSON.stringify(s3.finished)}`);
-
-    /* Two windows show the same conversation: only one of them sends it. */
-    const s4 = window([]), a = window(['W']), b = window(['W']);
-    s4.w.send({ sessionId: 'W', row: '1', text: 'once' }, { key: 'W/1' });
-    a.w.pump(); b.w.pump();
-    if (a.handed.length + b.handed.length === 1) ok('when two windows show the conversation, one of them sends the answer');
-    else bad(`two windows sent it ${a.handed.length + b.handed.length} times`);
-
-    /* Taken by a window that then closed: no result ever comes, and the sender stops waiting. */
-    const s5 = window([]);
-    const id5 = s5.w.send({ sessionId: 'X', row: '1', text: 'gone' }, { key: 'X/1' });
-    answers.take(dir, id5);
-    advance(answers.TAKE_MS + answers.SEND_MS + 5200);
-    if (JSON.stringify(s5.finished) === JSON.stringify([['X/1', 'lost']])) ok('an answer taken by a window that never reports is reported as lost, not as sent');
-    else bad(`lost: ${JSON.stringify(s5.finished)}`);
-
-    const old = path.join(dir, 'zz-00000000.result');
-    fs.writeFileSync(old, '{}');
-    const back = (Date.now() - answers.KEEP_MS - 60e3) / 1000;
-    fs.utimesSync(old, back, back);
-    if (answers.sweep(dir) >= 1 && !fs.existsSync(old)) ok('files left in the folder for over an hour are removed');
-    else bad('old answer files were not removed');
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-
-  /* What the conversation receives names the row and repeats the question, in the question's own language. */
-  const en = answers.message('3', 'Ship it?', ' Yes, today. ');
-  const zh = answers.message('3', '这个要发吗？', 'Yes');
-  if (en === 'My answer to row 3 ("Ship it?"):\nYes, today.' && zh.startsWith('第 3 行的问题「这个要发吗？」') && zh.endsWith('\nYes')) {
-    ok('the message sent names the row and its question in the question\'s language, then the answer');
-  } else bad(`answer message ${JSON.stringify([en, zh])}`);
-
   /* The host hands an answer only to the panel showing that conversation, and asked without text only says whether it has one. */
   {
     const host = require('../src/host');
@@ -7490,35 +7003,6 @@ console.log('\nanswering from the Conversations tab');
     if (!r.error && JSON.stringify(asked) === '["s1"]' && /^Received message from webview: /.test(env.out)) {
       ok('a cce_process_ask message reaches __cceProcessHook and is still logged');
     } else bad(`process question: ${r.error || JSON.stringify([asked, env.out])}`);
-  }
-
-  /* The Answer view: a question shown with its draft, Ctrl+Enter's message sending it, and a sent one clearing the box. */
-  {
-    const { AnswerView } = require('../src/answer-view');
-    const posted = [], sent = [];
-    const v = new AnswerView({ send: (q, text) => sent.push([q.key, text]), open: () => {}, age: () => '3m', clock: () => '19:52' });
-    let onMessage = null;
-    v.resolveWebviewView({ webview: { set options(_) {}, set html(h) { this.htmlText = h; }, get html() { return this.htmlText; },
-      onDidReceiveMessage: (fn) => { onMessage = fn; }, postMessage: (m) => { posted.push(m); return Promise.resolve(true); } },
-      onDidDispose: () => {} });
-    const html = v.view.webview.html;
-    v.show({ sessionId: 'S', row: '4', rowTitle: 'Pick one', question: 'A or B?', conversation: 'Plugin work', running: true, since: 1 });
-    onMessage({ type: 'draft', key: 'S/4', text: 'B, because' });
-    v.show({ sessionId: 'S', row: '5', question: 'Other?', running: true });
-    v.show({ sessionId: 'S', row: '4', question: 'A or B?', running: true });
-    const shown = posted.filter((m) => m.type === 'show');
-    onMessage({ type: 'send', key: 'S/4', text: 'B, because it is smaller' });
-    onMessage({ type: 'send', key: 'S/5', text: 'not the one shown' });
-    v.setState('S/4', { kind: 'sent' });
-    const last = posted.filter((m) => m.type === 'show').pop();
-    v.show({ sessionId: 'T', row: '1', question: 'Q?', running: false });
-    onMessage({ type: 'send', key: 'T/1', text: 'cannot' });
-    if (/Content-Security-Policy/.test(html) && /script-src 'nonce-/.test(html) && /<textarea/.test(html)
-      && shown[0].row === 'Row 4: Pick one · asked 3m ago' && shown[0].focus === true
-      && shown[2].draft === 'B, because' && JSON.stringify(sent) === JSON.stringify([['S/4', 'B, because it is smaller']])
-      && posted.some((m) => m.type === 'clear' && m.key === 'S/4') && last.status === 'Sent at 19:52.' && last.draft === '') {
-      ok('the Answer view keeps a draft per question, sends only the question shown, and clears the box once sent');
-    } else bad(`answer view: ${JSON.stringify({ shown: shown.map((m) => [m.row, m.draft]), sent, last })}`);
   }
 
   /* In a browser, against an input built like Claude Code's: an editable box whose Enter sends, or with Ctrl+Enter
@@ -7583,15 +7067,6 @@ console.log('\nanswering from the Conversations tab');
       ok('an answer for another conversation is not typed into the panel');
     } else bad(`answer to a switched panel: ${JSON.stringify(got)}`);
   }
-
-  {
-    const pkg = require('../package.json');
-    const views = pkg.contributes.views.claudeCodeConversations || [];
-    const answer = views.find((x) => x.id === 'claudeCodeExtras.answer');
-    if (answer && answer.type === 'webview' && answer.when === views[0].when && views[0].id === 'claudeCodeExtras.conversations') {
-      ok('the Answer view sits beside the Conversations tree in the same panel tab, shown and hidden with it');
-    } else bad(`answer view manifest ${JSON.stringify(views)}`);
-  }
 }
 
 /* The to-do tools gate (test/todo-gate.js), on stand-ins shaped like the 2.1.318 CLI and on any CLI installed here. */
@@ -7635,57 +7110,10 @@ console.log('\nthe workflows');
   else bad(`a step condition that skips after a failure: ${bare.join(', ')}`);
 }
 
-console.log('\nVS Code\'s request limit for webview tabs');
-{
-  /* test/webview-limit-check.js works through an asynchronous file system, so it runs as a child and reports back. */
-  const r = cp.spawnSync(process.execPath, [path.join(__dirname, 'webview-limit-check.js')], { encoding: 'utf8', timeout: 60000 });
-  let verdicts = null;
-  try { verdicts = JSON.parse(r.stdout); } catch (_) { verdicts = null; }
-  if (!Array.isArray(verdicts) || !verdicts.length) bad(`webview limit checks did not report: ${(r.stderr || r.stdout || '').slice(0, 300)}`);
-  else for (const [kind, msg] of verdicts) (kind === 'ok' ? ok : bad)(msg);
-}
-
-/* ── several conversation sources ──
-   Other extensions (codex-extras) register conversation sources through workPlanHost; Claude Code's source is registered
-   the same way. Data read from another extension is checked for being from a newer build or malformed. */
-/* A vscode stub whose EventEmitter delivers events. Returns fresh copies of the named src modules loaded against it. */
-const withEditor = (names) => {
-  const stub = path.join(os.tmpdir(), 'cce-vscode-stub-sources-' + process.pid + '.js');
-  fs.writeFileSync(stub, `
-    class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-    class MarkdownString { constructor(v) { this.value = v || ''; } }
-    class EventEmitter {
-      constructor() { this.listeners = []; this.event = (fn) => { this.listeners.push(fn); return { dispose: () => { this.listeners = this.listeners.filter((f) => f !== fn); } }; }; }
-      fire(v) { for (const fn of this.listeners.slice()) fn(v); }
-    }
-    class Disposable { constructor(fn) { this.fn = fn; } dispose() { if (this.fn) { const f = this.fn; this.fn = null; f(); } } }
-    class TabInputWebview { constructor(viewType) { this.viewType = viewType; } }
-    module.exports = { version: '1.144.0', TreeItem, MarkdownString, EventEmitter, Disposable, TabInputWebview,
-      TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-      ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
-      ThemeColor: class { constructor(id) { this.id = id; } },
-      Uri: { file: (p) => ({ fsPath: p, scheme: 'file', toString: () => 'file://' + p }) } };`);
-  const Module = require('module');
-  const realResolve = Module._resolveFilename;
-  Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? stub : realResolve.call(this, request, ...rest); };
-  const out = {};
-  try {
-    for (const n of names) delete require.cache[require.resolve('../src/' + n)];
-    for (const n of names) out[n] = require('../src/' + n);
-    out.vscode = require(stub);
-  } finally {
-    Module._resolveFilename = realResolve;
-    for (const n of names) delete require.cache[require.resolve('../src/' + n)];
-    delete require.cache[stub];
-  }
-  return out;
-};
-
 console.log('\nplan rows in unknown states');
 {
   const plan = require('../src/workplan');
   const conv = require('../src/conversations');
-  const w = require('../src/waiting');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-plan-at-'));
   try {
     const file = path.join(dir, 'elsewhere.json');
@@ -7702,496 +7130,42 @@ console.log('\nplan rows in unknown states');
       && plan.readPlanAt(path.join(dir, 'missing.json'), 'abc12345') === null && plan.readPlanAt(file, '') === null) {
       ok('readPlanAt() reads the given path and keeps unknown states');
     } else bad(`readPlanAt: ${JSON.stringify(p)}`);
-    const counts = plan.countOpen(p.nodes);
-    const open = conv.openCount(p.nodes), asks = w.planQuestions(p.nodes);
-    const drawn = plan.openFirst(p.nodes).map((n) => n.title);
-    if (counts.todo === 2 && counts.doing === 1 && !('blocked' in counts) && !('snoozed' in counts) && open === 3 && !asks.length
-      && drawn[drawn.length - 1] === 'newer') {
-      ok('rows in unknown states are left out of every count');
-    } else bad(`counts ${JSON.stringify(counts)}, open ${open}, questions ${JSON.stringify(asks)}`);
-    const { 'workplan-view': views } = withEditor(['workplan-view']);
-    const tree = new views.WorkPlanProvider({ read: (session, source) => (session === 'abc12345' && source === 'other' ? p : null) });
-    tree.setFocus('abc12345', 'other');
-    tree.refresh();
-    const items = tree.getChildren().map((e) => tree.getTreeItem(e));
-    const odd = items.find((i) => i.label === '2. newer');
-    if (odd && odd.iconPath.id === 'question' && odd.iconPath.color.id === 'descriptionForeground'
-      && odd.tooltip.value.startsWith('**newer**\n\nblocked') && odd.command.arguments[0].state.startsWith('blocked')
-      && items.find((i) => i.label === '1. known').iconPath.id === 'circle-large-outline') {
-      ok('the work plan shows an unknown state by name with a neutral icon');
-    } else bad(`unknown state row: ${JSON.stringify(odd)}`);
+    if (conv.openCount(p.nodes) === 3) ok('rows in unknown states are not counted as open, so they keep no stopped conversation listed');
+    else bad(`open rows counted: ${conv.openCount(p.nodes)}`);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-console.log('\nsource registry');
+/* ── Claude Code as a source of Agent Work Plan ──
+   Agent Work Plan (xnervwang.agent-work-plan) draws the work plan, Conversations and Answer views; this extension gives
+   it Claude Code's conversations through registerSource(), protocol 1 (its docs/protocol.md). */
+console.log('\nwhat the manifest declares for Agent Work Plan');
 {
-  const src = require('../src/sources');
-  const S = (over) => Object.assign({ protocol: 3, features: [], id: 'codex', label: 'Codex' }, over);
-  const refused = [S({ protocol: 2 }), S({ protocol: '3' }), S({ protocol: undefined }), S({ id: '' }), null, 'codex']
-    .map((x) => src.refusal(x));
-  if (src.refusal(S()) === '' && refused.every(Boolean) && src.MAJORS.includes(src.PROTOCOL) && Array.isArray(src.FEATURES)) {
-    ok('registration requires an accepted protocol major and an id');
-  } else bad(`refusals ${JSON.stringify(refused)}`);
-  const reg = new src.Registry();
-  const heard = [];
-  reg.onDidChange((e) => heard.push(e.added ? { added: e.added } : { removed: e.removed }));
-  const a = reg.add(S()), dup = reg.add(S({ label: 'again' })), old = reg.add(S({ id: 'older', protocol: 2 }));
-  const b = reg.add(S({ id: 'claude-code', label: 'Claude Code' }));
-  const order = reg.all().map((x) => x.id).join();
-  a.remove(); a.remove();
-  if (a.ok && !dup.ok && /registered already/.test(dup.why) && !old.ok && /protocol 2/.test(old.why) && b.ok && order === 'codex,claude-code') {
-    ok('the registry rejects a duplicate id');
-  } else bad(`registry: ${JSON.stringify([a.ok, dup.why, old.why, b.ok, order])}`);
-  if (reg.size === 1 && reg.get('codex') === null && reg.get('claude-code')
-    && JSON.stringify(heard) === JSON.stringify([{ added: 'codex' }, { added: 'claude-code' }, { removed: 'codex' }])) {
-    ok('removing a registration twice fires one event');
-  } else bad(`registry removal: ${JSON.stringify([reg.size, heard])}`);
-
-  let called = 0;
-  const unlisted = S({ preview: () => ++called }), listed = S({ features: ['preview'], preview: () => ++called }),
-    named = S({ features: ['preview'] });
-  const none = src.optional(unlisted, 'preview'), some = src.optional(listed, 'preview');
-  if (none === null && typeof some === 'function' && some() === 1 && called === 1 && src.optional(named, 'preview') === null
-    && src.supports(listed, 'preview') && !src.supports(unlisted, 'preview') && !src.supports(S({ features: 'preview' }), 'preview')) {
-    ok('optional methods are called only when listed in features');
-  } else bad(`feature gate: ${JSON.stringify([none, typeof some, called])}`);
-
-  /* A source must not report `needs`; the host derives it. */
-  const c = src.conversation({ sessionId: 't1', title: 'T', cwd: '/w', state: 'thinking', running: undefined,
-    lastActiveAt: '2026-11-07T12:00:00Z', hasPlan: 'yes', colour: 'red', nested: { deep: 1 } });
-  const needs = src.conversation({ sessionId: 't2', state: 'needs', running: false, lastActiveAt: -5 });
-  if (c && JSON.stringify(Object.keys(c).sort()) === JSON.stringify(['cwd', 'hasPlan', 'id', 'kind', 'lastActiveAt', 'running', 'sessionId', 'state', 'title'])
-    && c.sessionId === 't1' && c.state === 'idle' && c.running === true && c.lastActiveAt === Date.UTC(2026, 10, 7, 12) && c.hasPlan === false
-    && needs.state === 'idle' && needs.running === false && needs.lastActiveAt === 0
-    && src.conversation({ title: 'no id' }) === null && src.conversation(null) === null
-    && src.STATES.every((st) => src.conversation({ sessionId: 'x', state: st }).state === st)) {
-    ok('conversation() keeps only known fields and states');
-  } else bad(`conversation ${JSON.stringify([c, needs])}`);
-
-  const bare = S();
-  const thrower = S({ planPath() { throw new Error('x'); }, planDir: () => 42, onDidFocus() { throw new Error('y'); } });
-  if (src.planFileOf(bare, 's') === '' && src.planFileOf(thrower, 's') === '' && src.planDirOf(thrower) === ''
-    && src.listen(bare, 'onDidFocus', () => {}) === null && src.listen(thrower, 'onDidFocus', () => {}) === null
-    && src.call(bare, 'reveal', ['s'], 'none') === 'none' && src.labelOf(S({ label: '' })) === 'codex'
-    && src.logoOf(bare) === null && JSON.stringify(src.logoOf(S({ logo: { light: { fsPath: '/l.svg' } } }))) === '{"light":"/l.svg","dark":"/l.svg"}') {
-    ok('missing or throwing source methods return the fallback');
-  } else bad('a bare or throwing source was not tolerated');
-
-  const tabA = { label: 'a' }, tabB = { label: 'b' }, file = { label: 'file' };
-  const claude = S({ id: 'claude-code', sessionForTab: (t) => (t === tabA ? 'A' : null) });
-  const codex = S({ sessionForTab: (t) => (t === tabB ? 'B' : null) });
-  const broken = S({ id: 'broken', sessionForTab() { throw new Error('no'); } });
-  const f = new src.Focus();
-  const steps = [];
-  const at = () => f.sourceId + '/' + f.sessionId;
-  const E = (...list) => list.map((source) => ({ id: source.id, source }));
-  steps.push([f.claim(tabA, E(broken, claude, codex)), at()]);
-  steps.push([f.claim(file, E(broken, claude, codex)), at()]);
-  steps.push([f.claim(tabB, E(broken, claude, codex)), at()]);
-  steps.push([f.report('claude-code', 'A2'), at()]);
-  steps.push([f.claim(tabB, E(claude, codex)), at()]);
-  steps.push([f.claim(tabB, E(claude, codex), true), at()]);
-  steps.push([f.report('claude-code', ''), at()]);
-  steps.push([f.report('codex', ''), at()]);
-  steps.push([f.report('codex', 'B'), at()]);
-  steps.push([f.drop('claude-code'), at()]);
-  steps.push([f.drop('codex'), at()]);
-  const want = [[true, 'claude-code/A'], [false, 'claude-code/A'], [true, 'codex/B'], [true, 'claude-code/A2'], [false, 'claude-code/A2'],
-    [true, 'codex/B'], [false, 'codex/B'], [true, 'codex/'], [true, 'codex/B'], [false, 'codex/B'], [true, '/']];
-  if (JSON.stringify(steps) === JSON.stringify(want)) {
-    ok('Focus ends on the latest claimed tab or report');
-  } else bad(`focus steps ${JSON.stringify(steps)}`);
-
-  const ev = src.emitter(), got = [];
-  const d = ev.event((v) => got.push(v));
-  ev.event(() => { throw new Error('one listener failing'); });
-  ev.fire(1); d.dispose(); ev.fire(2);
-  if (JSON.stringify(got) === '[1]') ok('emitter() keeps calling listeners after one throws');
-  else bad(`emitter ${JSON.stringify(got)}`);
-}
-
-/* With Claude Code as the only source, both views must match test/golden/single-source-trees.json, recorded at the commit
-   before sources were added. test/single-source-trees.js renders the fixture with the current code. */
-const singleSourceTrees = (mode) => {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-single-source-')));
-  try {
-    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, CCE_FIXED_NOW: String(Date.UTC(2026, 10, 7, 12)) });
-    delete env.CLAUDE_CONFIG_DIR;
-    const r = cp.spawnSync(process.execPath, [path.join(__dirname, 'single-source-trees.js'), mode], { encoding: 'utf8', env, timeout: 60000 });
-    return r.stdout || JSON.stringify({ threw: r.stderr });
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
-};
-const sameAsRecorded = (got) => {
-  const want = fs.readFileSync(path.join(__dirname, 'golden', 'single-source-trees.json'), 'utf8');
-  if (got === want) return '';
-  let a, b;
-  try { a = JSON.parse(got); b = JSON.parse(want); } catch (_) { return got.slice(0, 300); }
-  for (const k of Object.keys(b)) {
-    if (JSON.stringify(a[k]) === JSON.stringify(b[k])) continue;
-    if (!Array.isArray(b[k])) return `${k}: ${JSON.stringify(a[k])} where ${JSON.stringify(b[k])} was drawn`;
-    const i = b[k].findIndex((x, n) => JSON.stringify(x) !== JSON.stringify((a[k] || [])[n]));
-    return `${k} row ${i}: ${JSON.stringify((a[k] || [])[i]).slice(0, 300)} where ${JSON.stringify(b[k][i]).slice(0, 300)} was drawn`;
-  }
-  return 'it differs in its keys';
-};
-
-console.log('\nConversations tab with several sources');
-{
-  const why = sameAsRecorded(singleSourceTrees('build'));
-  if (!why) ok('conversations.build() output matches the recorded single-source trees');
-  else bad(`single source, built the old way: ${why}`);
-  const through = sameAsRecorded(singleSourceTrees('sources'));
-  if (!through) ok('Claude Code\'s source alone matches the recorded single-source trees');
-  else bad(`single source, through the sources: ${through}`);
-
-  const conv = require('../src/conversations');
-  const src = require('../src/sources');
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-assemble-')));
-  try {
-    const ws = path.join(root, 'ws'), out = path.join(root, 'out'), plans = path.join(root, 'plans');
-    for (const d of [ws, out, plans]) fs.mkdirSync(d);
-    const write = (name, nodes, ageDays = 0) => {
-      const f = path.join(plans, name + '.json');
-      fs.writeFileSync(f, JSON.stringify({ nodes }));
-      const t = (Date.now() - ageDays * 86400e3) / 1000;
-      fs.utimesSync(f, t, t);
-      return f;
-    };
-    const ask = [{ title: 'q', state: 'waiting', waitingOn: 'user', question: 'Which?' }];
-    const files = {
-      'claude-code/same': write('cc-same', [{ title: 'cc row', state: 'doing' }]),
-      'codex/same': write('cx-same', ask),
-      'codex/old': write('cx-old', [{ title: 'o', state: 'todo' }], 9),
-      'codex/stopped': write('cx-stopped', [{ title: 's', state: 'todo' }], 1),
-      'codex/closed': write('cx-closed', [{ title: 's', state: 'done' }], 1),
-    };
-    const planOf = (sourceId, id) => {
-      const file = files[sourceId + '/' + id] || '';
-      return { file, plan: file ? require('../src/workplan').readPlanAt(file, id) : null };
-    };
-    const now = Date.now();
-    const C = (o) => src.conversation(Object.assign({ cwd: ws, running: true, state: 'idle', lastActiveAt: now - 1000 }, o));
-    const data = conv.assemble({
-      folders: [ws], planOf, now,
-      lists: [
-        { sourceId: 'claude-code', conversations: [C({ sessionId: 'same', title: 'Claude one', state: 'working', lastActiveAt: now - 5000 }),
-          C({ sessionId: 'away', cwd: out })] },
-        { sourceId: 'codex', conversations: [C({ sessionId: 'same', title: 'Codex one', state: 'mystery' }),
-          C({ sessionId: 'same', title: 'twice' }), C({ sessionId: 'old', running: false }), C({ sessionId: 'stopped', running: false }),
-          C({ sessionId: 'closed', running: false }), C({ sessionId: 'noplan', state: 'unread', lastActiveAt: now - 9000 })] },
-      ],
-    });
-    const rows = data.running.map((c) => `${c.sourceId}/${c.sessionId}:${c.state}:${c.title}`);
-    if (JSON.stringify(rows) === JSON.stringify(['codex/same:needs:Codex one', 'claude-code/same:working:Claude one', 'codex/noplan:unread:noplan'])
-      && JSON.stringify(data.stopped.map((c) => c.sourceId + '/' + c.sessionId)) === '["codex/stopped"]' && data.asks === 1
-      && data.running[2].hasPlan === false && data.running[1].doing.length === 1) {
-      ok('assemble() sorts and filters all sources together');
-    } else bad(`assembled ${JSON.stringify(rows)}, stopped ${JSON.stringify(data.stopped.map((c) => c.sessionId))}, asks ${data.asks}`);
-    const located = conv.assemble({ folders: [ws], now, planOf: () => ({ plan: null, file: '' }),
-      lists: [{ sourceId: 'x', conversations: [C({ sessionId: 'a', hasPlan: true }), C({ sessionId: 'b' })] }] });
-    if (located.running.map((c) => c.hasPlan).join() === 'true,false') ok('a source without plan paths supplies hasPlan itself');
-    else bad(`hasPlan without a plan file: ${located.running.map((c) => c.hasPlan)}`);
-
-    const { 'conversations-view': cv } = withEditor(['conversations-view']);
-    const decorated = JSON.parse(JSON.stringify(data));
-    for (const c of decorated.running.concat(decorated.stopped)) {
-      c.source = { id: c.sourceId, label: c.sourceId === 'codex' ? 'Codex' : 'Claude Code' };
-      if (c.sourceId === 'codex') c.icon = { light: '/i/l.svg', dark: '/i/d.svg' };
-    }
-    const tree = new cv.ConversationsProvider();
-    tree.set(decorated, '', 'en');
-    const top = tree.getChildren().filter((e) => e.kind === 'conversation');
-    const items = top.map((e) => tree.getTreeItem(e));
-    const q = tree.getTreeItem(tree.getChildren(top[0])[0]);
-    if (items[0].id === 'conversations/codex/same' && items[1].id === 'conversations/claude-code/same'
-      && items[0].iconPath.light === '/i/l.svg' && items[1].iconPath.id === 'sync~spin'
-      && items[0].tooltip.split('\n')[1] === 'Codex' && items[0].command.arguments[0].sourceId === 'codex'
-      && q.command.arguments[0].sourceId === 'codex' && q.command.arguments[0].open.sourceId === 'codex' && q.id === 'conversations/codex/same/?1'
-      && items[0].description.startsWith('needs you')) {
-      ok('multi-source rows show the logo and label and carry the source id');
-    } else bad(`several sources drawn: ${JSON.stringify(items.slice(0, 2))}`);
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
-
-  const icons = require('../src/sourceicons');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-source-icons-'));
-  try {
-    const claudeLike = '<svg height="1em" style="flex:none" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="M1 1h2" fill="#D97757"/></svg>';
-    const codexLike = '<?xml version="1.0"?>\n<svg\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  fill="none"\n>\n  <path d="M2 2h3" fill="#000"/>\n</svg>\n';
-    const a = icons.withDot(claudeLike, '#3794ff'), b = icons.withDot(codexLike, '#89d185');
-    if (/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="16" height="16" viewBox="0 0 24 24">/.test(a) && a.includes('<svg x="0" y="0" width="24" height="24" viewBox="0 0 24 24">')
-      && !a.includes('<title>') && !a.includes('1em') && a.includes('fill="#3794ff"') && a.includes('d="M1 1h2"')
-      && b.includes('viewBox="0 0 24 24" fill="none">') && b.includes('fill="#89d185"') && !b.includes('<?xml')
-      && icons.withDot('not an svg', '#000') === '' && icons.withDot('<svg/>', '#000') === '' && icons.withDot('<svg></svg>', '#000') === '') {
-      ok('withDot() draws the state dot over an SVG logo');
-    } else bad(`dotted logos: ${a.slice(0, 200)} | ${b.slice(0, 200)}`);
-    const light = path.join(dir, 'black.svg'), dark = path.join(dir, 'white.svg');
-    fs.writeFileSync(light, codexLike); fs.writeFileSync(dark, codexLike.replace('#000', '#fff'));
-    const cache = new Map();
-    const made = icons.iconsFor({ light, dark }, 'working', path.join(dir, 'out'), cache);
-    const again = icons.iconsFor({ light, dark }, 'working', path.join(dir, 'out'), new Map());
-    const gone = icons.iconsFor({ light: path.join(dir, 'missing.svg'), dark }, 'idle', path.join(dir, 'out'), cache);
-    if (made && made.light !== made.dark && fs.readFileSync(made.light, 'utf8').includes(icons.COLORS.working.light)
-      && fs.readFileSync(made.dark, 'utf8').includes(icons.COLORS.working.dark) && again && again.light === made.light && gone === null
-      && Object.keys(icons.COLORS).sort().join() === 'idle,needs,prompt,unread,working') {
-      ok('iconsFor() writes each icon file once');
-    } else bad(`icon files ${JSON.stringify([made, again, gone])}`);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-}
-
-console.log('\nanswer delivery by source');
-{
-  /* Runs in a child process because deliveries resolve after this script would otherwise end. */
-  const script = `
-    const answers = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'answers.js'))});
-    const fs = require('fs'), path = require('path'), os = require('os');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-answer-sources-'));
-    let clock = 1000000;
-    const timers = [];
-    const later = (fn, ms) => { timers.push({ at: clock + ms, fn, live: true }); return timers.length; };
-    const cancel = (n) => { if (timers[n - 1]) timers[n - 1].live = false; };
-    const advance = (ms) => { clock += ms; for (const t of timers) if (t.live && t.at <= clock) { t.live = false; t.fn(); } };
-    const settle = () => new Promise((r) => setImmediate(r));
-    const window = (have) => {
-      const finished = [], asked = [];
-      const find = (id) => have[id] || null;
-      let courier = null;
-      const via = answers.throughSources(find, (id, sent, reason) => courier.handed(id, sent, reason));
-      courier = new answers.Courier({ dir, now: () => clock, later, cancel,
-        canShow: (sid, src) => { asked.push(src + '/' + sid); return via.canShow(sid, src); }, hand: via.hand,
-        finish: (sent, result) => finished.push([sent.key, result.kind]) });
-      return { courier, finished, asked };
-    };
-    const delivered = [];
-    const claude = { canDeliver: (id) => id === 'S', deliverAnswer: async (id, text) => { delivered.push('claude:' + text); return { delivered: true }; } };
-    const codex = { canDeliver: (id) => id === 'S', deliverAnswer: async (id, text) => { delivered.push('codex:' + text); return { delivered: false, reason: 'not-supported' }; } };
-    const bare = { canDeliver: () => true };
-    (async () => {
-      const out = {};
-      const sender = window({}), cx = window({ codex }), cc = window({ 'claude-code': claude });
-      const id1 = sender.courier.send({ sourceId: 'codex', sessionId: 'S', row: '1', text: 'to codex' }, { key: 'codex/S/1' });
-      out.file = JSON.parse(fs.readFileSync(path.join(dir, id1 + '.json'), 'utf8'));
-      cc.courier.pump(); cx.courier.pump(); await settle(); sender.courier.pump();
-      const id2 = sender.courier.send({ sourceId: 'claude-code', sessionId: 'S', row: '1', text: 'to claude' }, { key: 'claude-code/S/1' });
-      cx.courier.pump(); cc.courier.pump(); await settle(); sender.courier.pump();
-      out.finished = sender.finished; out.delivered = delivered.slice();
-      fs.writeFileSync(path.join(dir, 'aa-00000001.json'), JSON.stringify({ id: 'aa-00000001', sessionId: 'S', text: 'old file', at: clock }));
-      fs.writeFileSync(path.join(dir, 'aa-00000002.json'), JSON.stringify({ id: 'aa-00000002', sourceId: 'claude-code', sessionId: 'S', text: 'newer', at: clock, format: answers.FORMAT + 1 }));
-      fs.writeFileSync(path.join(dir, 'aa-00000003.json'), JSON.stringify({ id: 'aa-00000003', sourceId: 'claude-code', sessionId: 'S', text: 'odd', at: clock, format: 'one' }));
-      cx.courier.pump(); cc.courier.pump(); await settle();
-      out.left = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
-      out.delivered2 = delivered.slice(2);
-      out.askedCodex = cx.asked.includes('claude-code/S');
-      const lonely = window({}), nobody = window({ codex: bare });
-      lonely.courier.send({ sourceId: 'codex', sessionId: 'T', row: '2', text: 'x' }, { key: 'codex/T/2' });
-      nobody.courier.pump(); await settle(); advance(answers.TAKE_MS + 200);
-      out.notShown = lonely.finished.slice();
-      fs.rmSync(dir, { recursive: true, force: true });
-      process.stdout.write(JSON.stringify(out));
-    })().catch((e) => process.stdout.write(JSON.stringify({ threw: String(e && e.stack) })));`;
-  const r = cp.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 });
-  let o = {};
-  try { o = JSON.parse(r.stdout); } catch (_) { o = { threw: r.stdout + r.stderr }; }
-  if (o.file && o.file.sourceId === 'codex' && o.file.format === 1 && o.file.sessionId === 'S'
-    && JSON.stringify(o.finished) === JSON.stringify([['codex/S/1', 'not-supported'], ['claude-code/S/1', 'sent']])
-    && JSON.stringify(o.delivered) === JSON.stringify(['codex:to codex', 'claude:to claude'])) {
-    ok('an answer is taken by the window whose source can deliver it');
-  } else bad(`answers by source: ${JSON.stringify(o).slice(0, 500)}`);
-  if (JSON.stringify(o.delivered2) === '["claude:old file"]' && o.askedCodex === true) ok('an answer file without a source id goes to Claude Code');
-  else bad(`legacy answer file: ${JSON.stringify(o).slice(0, 500)}`);
-  if (JSON.stringify(o.left) === JSON.stringify(['aa-00000002.json', 'aa-00000003.json'])) ok('answer files in an unknown format are not claimed');
-  else bad(`answer formats: ${JSON.stringify(o.left)}`);
-  if (JSON.stringify(o.notShown) === JSON.stringify([['codex/T/2', 'nobody']])) {
-    ok('a source without deliverAnswer() does not take the answer');
-  } else bad(`no delivery: ${JSON.stringify(o.notShown)}`);
-}
-
-/* A vscode stub for activating extension.js: events can be fired, and views, commands, status bar items, watchers,
-   clipboard writes and webview providers are recorded. `ws` is the only workspace folder. */
-const hostedEditor = (ws) => `
-      const disposable = { dispose() {} };
-      class EventEmitter {
-        constructor() { this.l = []; this.event = (fn) => { this.l.push(fn); return { dispose: () => { this.l = this.l.filter((f) => f !== fn); } }; }; }
-        fire(v) { for (const fn of this.l.slice()) fn(v); }
-      }
-      class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
-      class Disposable { constructor(fn) { this.fn = fn; } dispose() { if (this.fn) { const f = this.fn; this.fn = null; f(); } } }
-      const views = {}, registered = {}, said = [], items = [], clipboard = [], webviews = {}, tabs = new EventEmitter(), groups = new EventEmitter();
-      const tabGroups = { all: [], activeTabGroup: null, onDidChangeTabs: tabs.event, onDidChangeTabGroups: groups.event };
-      module.exports = { views, registered, said, items, clipboard, webviews, tabs, groups, TreeItem, Disposable, EventEmitter,
-        TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-        ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } }, ThemeColor: class { constructor(id) { this.id = id; } },
-        MarkdownString: class { constructor(v) { this.value = v || ''; } }, TabInputWebview: class { constructor(v) { this.viewType = v; } },
-        version: '1.120.0', StatusBarAlignment: { Left: 1, Right: 2 }, env: { language: 'en', clipboard: { writeText: async (t) => { clipboard.push(t); } } },
-        Uri: { file: (p) => ({ fsPath: p, scheme: 'file' }) }, RelativePattern: class { constructor(b, p) { this.base = b; this.pattern = p; } },
-        ConfigurationTarget: { Global: 1 },
-        workspace: { workspaceFolders: [{ uri: { fsPath: ${JSON.stringify(ws)} } }],
-          createFileSystemWatcher: (pattern) => { const w = { pattern, onDidCreate() {}, onDidChange(fn) { w.changed = fn; }, onDidDelete() {}, disposed: false, dispose() { this.disposed = true; } }; items.push(['watcher', w]); return w; },
-          getConfiguration: () => ({ get: (k, d) => d, inspect: () => undefined, update: async () => {} }),
-          onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable },
-        window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
-          createTreeView: (id, o) => { views[id] = { provider: o.treeDataProvider, dispose() {} }; return views[id]; },
-          createStatusBarItem: () => { const i = { show() { this.shown = true; }, hide() { this.shown = false; }, dispose() {} }; items.push(['status', i]); return i; },
-          registerWebviewViewProvider: (id, p) => { webviews[id] = p; return disposable; },
-          showInformationMessage: async (m) => { said.push(m); }, showWarningMessage: async () => undefined, setStatusBarMessage() {},
-          tabGroups, showTextDocument: async () => {} },
-        commands: { registerCommand: (id, fn) => { registered[id] = fn; return disposable; }, executeCommand: async () => {} },
-        extensions: { getExtension: () => undefined, onDidChange: () => disposable } };`;
-
-console.log('\nanother extension\'s agent in these views');
-{
-  /* Activates extension.js against the stub and registers a fake Codex source through workPlanHost. Claude Code has no
-   CLI here, so its source lists only a stopped conversation (found from its plan and transcript) whose session id the
-   Codex conversation shares. */
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-hosted-')));
-  try {
-    const ws = path.join(home, 'ws');
-    fs.mkdirSync(ws);
-    const stub = path.join(home, 'vscode-stub.js');
-    fs.writeFileSync(stub, hostedEditor(ws));
-    const root = path.join(__dirname, '..');
-    const script = `
-      const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
-      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
-      const vs = require(${JSON.stringify(stub)});
-      const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
-      const DATA_DIR = require(${JSON.stringify(path.join(root, 'src', 'plugin-install.js'))}).DATA_DIR;
-      const home = ${JSON.stringify(home)}, ws = ${JSON.stringify(ws)};
-      const store = path.join(home, 'storage');
-      fs.mkdirSync(store, { recursive: true });
-      const T = 'abababab-1111-4222-8333-444444444444';
-      const claudePlans = path.join(home, '.claude', 'plugins', 'data', DATA_DIR);
-      fs.mkdirSync(claudePlans, { recursive: true });
-      fs.writeFileSync(path.join(claudePlans, T + '.json'), JSON.stringify({ nodes: [{ title: 'claude row', state: 'todo' }] }));
-      const project = path.join(home, '.claude', 'projects', 'p');
-      fs.mkdirSync(project, { recursive: true });
-      fs.writeFileSync(path.join(project, T + '.jsonl'), JSON.stringify({ type: 'user', cwd: ws, sessionId: T }) + '\\n');
-      const codexDir = path.join(home, 'codex-plans');
-      fs.mkdirSync(codexDir, { recursive: true });
-      fs.writeFileSync(path.join(codexDir, T + '.json'), JSON.stringify({ nodes: [
-        { title: 'codex row', state: 'waiting', waitingOn: 'user', question: 'Merge it?' }] }));
-      const logo = path.join(home, 'blossom.svg');
-      fs.writeFileSync(logo, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 1h4"/></svg>');
-      const focusOf = new vs.EventEmitter(), changed = new vs.EventEmitter();
-      const codexTab = { label: 'Codex', input: { viewType: 'chatgpt.conversationEditor' }, group: { viewColumn: 1 } };
-      const fileTab = { label: 'a.js', input: {}, group: { viewColumn: 1 } };
-      const revealed = [];
-      const codex = { protocol: 3, features: [], id: 'codex', label: 'Codex', logo: { light: { fsPath: logo }, dark: { fsPath: logo } },
-        planPath: (id) => path.join(codexDir, id + '.json'), planDir: () => codexDir,
-        sessionForTab: (tab) => (tab === codexTab ? T : null), onDidFocus: focusOf.event, onDidChangeConversations: changed.event,
-        listConversations: async () => [{ sessionId: T, title: 'Codex task', cwd: ws, state: 'working', running: true, lastActiveAt: Date.now(), extra: 1 }],
-        reveal: async (id) => { revealed.push(id); return false; }, canDeliver: (id) => id === T,
-        deliverAnswer: async (id, text) => { revealed.push('deliver:' + id + ':' + text.split('\\n').pop()); return { delivered: false, reason: 'not-yet' }; } };
-      const minimal = { protocol: 3, id: 'tiny', listConversations: async () => [{ sessionId: 'tiny-1', cwd: ws, state: 'weird' }] };
-      const memo = () => { const m = new Map(); return { get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { m.set(k, v); } }; };
-      const subs = [], keep = setInterval;
-      global.setInterval = () => keep(() => {}, 1 << 30);
-      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const at = (tab) => { vs.window.tabGroups.activeTabGroup = { activeTab: tab, viewColumn: 1 }; vs.tabs.fire({}); };
-      (async () => {
-        const out = { threw: '' };
-        try {
-          const exported = await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState: memo(), workspaceState: memo(),
-            extension: { id: 'x.y', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
-            globalStorageUri: { fsPath: store }, logUri: { fsPath: path.join(store, 'logs', 'exthost1', 'x.y') } });
-          const host = exported && exported.workPlanHost;
-          out.api = host && { version: host.version, majors: host.majors, features: host.features };
-          const conv = vs.views['claudeCodeExtras.conversations'].provider, plan = vs.views['claudeCodeExtras.workPlan'];
-          const status = vs.items.filter(([k]) => k === 'status').map(([, i]) => i)[0];
-          const rows = () => { const top = conv.getChildren(); const st = top.find((e) => e.kind === 'stopped');
-            return top.concat(st ? conv.getChildren(st) : []).filter((e) => e.kind === 'conversation').map((e) => conv.getTreeItem(e)); };
-          await wait(300);
-          out.alone = rows().map((r) => r.id);
-          out.aloneIcon = (rows()[0] || {}).iconPath;
-          out.aloneDescription = plan.description;
-          const old = host.registerSource(Object.assign({}, codex, { id: 'old', protocol: 2 }));
-          await wait(200);
-          out.oldRows = rows().map((r) => r.id);
-          const reg = host.registerSource(codex);
-          const tiny = host.registerSource(minimal);
-          await wait(400);
-          out.rows = rows().map((r) => ({ id: r.id, icon: r.iconPath && (r.iconPath.light ? 'logo' : r.iconPath.id), tip: r.tooltip, d: r.description }));
-          out.logoFile = (rows().find((r) => r.id === 'conversations/codex/' + T) || {}).iconPath;
-          out.logoFile = out.logoFile && out.logoFile.light && fs.existsSync(out.logoFile.light.fsPath);
-          out.status = status.text;
-          out.problem = (conv.getChildren().find((e) => e.kind === 'problem') && conv.problem) || '';
-          out.watched = vs.items.filter(([k]) => k === 'watcher').map(([, w]) => w.pattern.pattern);
-          at(codexTab);
-          out.afterCodexTab = [plan.provider.shown() && plan.provider.shown().file, plan.description];
-          at(fileTab);
-          out.afterFileTab = [plan.provider.shown() && plan.provider.shown().file, plan.description];
-          globalThis.__cceActiveChat = T; globalThis.__cceChatHook();
-          out.afterClaude = [plan.provider.shown() && plan.provider.shown().file, plan.description];
-          focusOf.fire({ sessionId: T });
-          out.afterCodexFocus = [plan.provider.shown() && plan.provider.shown().file, plan.description];
-          await vs.registered['claudeCodeWorkPlan.openWaitingConversation']({ sourceId: 'codex', sessionId: T, title: 'Codex task', cwd: ws });
-          out.revealed = revealed.slice(); out.said = vs.said.slice();
-          const qrow = conv.getChildren(conv.getChildren().find((e) => e.c && e.c.sourceId === 'codex' && e.c.running));
-          const qitem = conv.getTreeItem(qrow[0]);
-          await vs.registered['claudeCodeWorkPlan.answerQuestion'](qitem.command.arguments[0]);
-          const answerView = vs.webviews['claudeCodeExtras.answer'];
-          answerView.receive({ type: 'send', key: answerView.current.key, text: 'Yes, merge.' });
-          await wait(300);
-          out.answer = { key: answerView.current.key, state: answerView.states.get(answerView.current.key), clipboard: vs.clipboard.slice(),
-            delivered: revealed.filter((x) => String(x).startsWith('deliver:')) };
-          reg.dispose(); reg.dispose(); tiny.dispose(); old.dispose();
-          await wait(400);
-          out.afterDispose = { rows: rows().map((r) => r.id), shown: plan.provider.shown(), description: plan.description,
-            watcherGone: vs.items.filter(([k, w]) => k === 'watcher' && w.pattern.pattern === 'codex-plans/*.json').every(([, w]) => w.disposed) };
-        } catch (e) { out.threw = String(e && e.stack); }
-        for (const d of subs) { try { d.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
-        process.stdout.write(JSON.stringify(out));
-        process.exit(0);
-      })();
-      process.on('unhandledRejection', (e) => { process.stdout.write(JSON.stringify({ threw: 'unhandled: ' + (e && e.stack) })); process.exit(0); });`;
-    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
-    delete env.CLAUDE_CONFIG_DIR;
-    let r;
-    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
-    catch (e) { r = { threw: e.message }; }
-    const T = 'abababab-1111-4222-8333-444444444444';
-    const codexPlan = path.join(home, 'codex-plans', T + '.json');
-    if (!r.threw && JSON.stringify(r.api) === '{"version":3,"majors":[3],"features":[]}') ok('activate() returns workPlanHost version 3 accepting protocol 3');
-    else bad(`exported host: ${JSON.stringify(r).slice(0, 400)}`);
-    if (JSON.stringify(r.alone) === JSON.stringify(['conversations/stopped/' + T]) && r.aloneIcon && r.aloneIcon.id === 'circle-outline'
-      && r.aloneDescription === undefined) {
-      ok('Claude Code alone draws as before');
-    } else bad(`alone: ${JSON.stringify([r.alone, r.aloneIcon, r.aloneDescription])}`);
-    if (JSON.stringify(r.oldRows) === JSON.stringify(r.alone)) ok('a protocol 2 source adds no rows');
-    else bad(`protocol 2 source: ${JSON.stringify(r.oldRows)}`);
-    const rows = r.rows || [];
-    const cx = rows.find((x) => x.id === 'conversations/codex/' + T), cc = rows.find((x) => x.id === 'conversations/stopped/claude-code/' + T);
-    const tiny = rows.find((x) => x.id === 'conversations/tiny/tiny-1');
-    if (cx && cc && tiny && cx.icon === 'logo' && r.logoFile && cc.icon === 'circle-outline' && /\nCodex\n/.test(cx.tip) && /\nClaude Code\n/.test(cc.tip)
-      && cx.d.startsWith('needs you · 1 question') && tiny.icon === 'circle-outline' && tiny.d.startsWith('idle')
-      && r.status.endsWith('1 to decide') && /^Claude Code: /.test(r.problem)) {
-      ok('a registered source\'s rows appear with its logo');
-    } else bad(`several sources: ${JSON.stringify([rows, r.status, r.problem]).slice(0, 700)}`);
-    if (JSON.stringify(r.watched) === JSON.stringify([require('../src/plugin-install').DATA_DIR + '/*.json', 'codex-plans/*.json'])) {
-      ok('each source\'s plan directory is watched');
-    } else bad(`watched ${JSON.stringify(r.watched)}`);
-    const claudePlan = path.join(home, '.claude', 'plugins', 'data', require('../src/plugin-install').DATA_DIR, T + '.json');
-    if (JSON.stringify(r.afterCodexTab) === JSON.stringify([codexPlan, 'Codex']) && JSON.stringify(r.afterFileTab) === JSON.stringify([codexPlan, 'Codex'])
-      && JSON.stringify(r.afterClaude) === JSON.stringify([claudePlan, 'Claude Code']) && JSON.stringify(r.afterCodexFocus) === JSON.stringify([codexPlan, 'Codex'])) {
-      ok('the work plan view follows a claimed tab');
-    } else bad(`front conversation: ${JSON.stringify([r.afterCodexTab, r.afterFileTab, r.afterClaude, r.afterCodexFocus])}`);
-    const ans = r.answer || {};
-    if (ans.key === 'codex/' + T + '/1' && ans.state && ans.state.kind === 'not-yet' && JSON.stringify(ans.delivered) === JSON.stringify(['deliver:' + T + ':Yes, merge.'])
-      && ans.clipboard.length === 1 && /Merge it\?/.test(ans.clipboard[0]) && ans.clipboard[0].endsWith('Yes, merge.')) {
-      ok('an undelivered answer to another source is copied to the clipboard');
-    } else bad(`answer to a Codex question: ${JSON.stringify(ans)}`);
-    if (JSON.stringify(r.revealed) === JSON.stringify([T]) && (r.said || []).some((m) => /could not be brought to front/.test(m))) {
-      ok('reveal() is called on the row\'s source');
-    } else bad(`reveal: ${JSON.stringify([r.revealed, r.said])}`);
-    const a = r.afterDispose || {};
-    if (JSON.stringify(a.rows) === JSON.stringify(['conversations/stopped/' + T]) && a.shown === null && a.description === undefined && a.watcherGone) {
-      ok('disposing a registration removes what it added');
-    } else bad(`after dispose: ${JSON.stringify(a)}`);
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  const pkg = require('../package.json');
+  const c = pkg.contributes;
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'claude-source.js'), 'utf8');
+  const protocol = Number((/^const PROTOCOL = (\d+);$/m.exec(source) || [])[1]);
+  const trust = (pkg.capabilities || {}).untrustedWorkspaces || {};
+  if ((pkg.extensionDependencies || []).includes('xnervwang.agent-work-plan') && pkg.agentWorkPlan && pkg.agentWorkPlan.protocol === protocol
+    && JSON.stringify(pkg.extensionKind) === '["workspace"]' && trust.supported === 'limited' && typeof trust.description === 'string'
+    && trust.description.length > 40) {
+    ok(`it depends on Agent Work Plan, declares protocol ${protocol} as its source does, runs on the workspace side, and says what Restricted Mode leaves out`);
+  } else bad(`manifest for Agent Work Plan: ${JSON.stringify([pkg.extensionDependencies, pkg.agentWorkPlan, pkg.extensionKind, trust, protocol])}`);
+  const props = Object.keys(c.configuration.properties);
+  if (!c.views && !c.viewsContainers && !c.viewsWelcome && !c.menus
+    && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodeWorkPlan.workPlan')) {
+    ok('it has no view, container, menu or view setting of its own; the work plan switch stays, since the hooks read it');
+  } else bad(`left over in the manifest: ${JSON.stringify({ views: c.views, containers: c.viewsContainers, menus: c.menus, props })}`);
+  const declared = c.commands.map((x) => x.command.replace(/^claudeCodeWorkPlan\./, ''));
+  const missing = declared.filter((n) => !ext.includes(`registerCommand('${n}'`));
+  if (!missing.length) ok(`each of the ${declared.length} commands it declares is registered`);
+  else bad(`declared but not registered: ${missing.join(', ')}`);
 }
 
 console.log('\nClaude Code\'s own source');
 {
-  /* Runs in a child process because deliveries resolve later. */
+  /* Runs in a child process because deliveries resolve later. The panel's wait is cut short by a setTimeout that runs
+     anything of the source's length at once. */
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-claude-source-')));
   try {
     const stub = path.join(home, 'vscode-stub.js');
@@ -8200,47 +7174,70 @@ console.log('\nClaude Code\'s own source');
       const Module = require('module'), realResolve = Module._resolveFilename;
       Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
       const vs = require(${JSON.stringify(stub)});
-      const { createClaudeSource, isPanelTab } = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'claude-source.js'))});
-      let chat = '', handed = [], shown = [], said = [];
-      const c = createClaudeSource({ planDir: () => '/plans', listAgents: async () => ({ records: null, error: 'no cli' }), folders: () => [],
+      const C = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'claude-source.js'))});
+      const realTimeout = setTimeout;
+      global.setTimeout = (fn, ms, ...a) => realTimeout(fn, ms === C.ANSWER_WAIT_MS ? 20 : ms, ...a);
+      const SID = 'abababab-1111-4222-8333-444444444444';
+      let chat = '', handed = [], shown = [], on = true;
+      const c = C.createClaudeSource({ planDir: () => '/plans', enabled: () => on, timeZone: () => 'Asia/Tokyo',
+        listAgents: async () => ({ records: null, error: 'no cli' }), folders: () => [],
         readPlan: () => null, titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
         activeChat: () => chat, logo: () => null, canDeliver: (id) => id === 'A',
         hand: (id, text, key) => { handed.push([id, text, key]); return id === 'A'; },
         reveal: async (id, title, cwd) => { shown.push([id, title, cwd]); return true; } });
-      const heard = [];
+      const heard = [], notices = [];
       c.source.onDidFocus((e) => heard.push(e.sessionId));
+      c.source.onDidChangePlanNotice(() => notices.push(c.source.planNotice()));
       const out = {};
-      out.shape = [c.source.protocol, c.source.id, c.source.label, JSON.stringify(c.source.features), c.source.planPath('S'), c.source.planDir(), c.source.logo];
+      out.shape = [c.source.protocol, c.source.id, c.source.label, JSON.stringify(c.source.features), c.source.extensionId,
+        c.source.planPath(SID), c.source.planPath('S'), c.source.planDir(), c.source.logo, c.source.timeZone()];
+      on = false; out.planOff = c.source.planPath(SID); on = true;
       const panel = (column, visible, active) => {
         const p = { viewColumn: column, visible, active, l: [], d: [] };
         p.onDidChangeViewState = (fn) => { p.l.push(fn); return { dispose() {} }; };
         p.onDidDispose = (fn) => { p.d.push(fn); return { dispose() {} }; };
         return p;
       };
-      const p1 = panel(2, true, false), p2 = panel(2, false, false), p3 = panel(1, true, true);
-      c.track(p1, 'A'); c.track(p2, 'B'); c.track(p3, 'C'); c.track(p1, 'A');
+      const p1 = panel(2, true, false), p2 = panel(2, false, false), p3 = panel(1, true, true), p4 = panel(4, true, true);
+      c.track(p1, 'A'); c.track(p2, 'B'); c.track(p3, 'C'); c.track(p1, 'A'); c.track(p4, '');
       const tab = (viewType, column) => ({ input: new vs.TabInputWebview(viewType), group: { viewColumn: column } });
       out.claims = [c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 2)), c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 1)),
         c.source.sessionForTab(tab('mainThreadWebview-markdown.preview', 2)), c.source.sessionForTab({ input: { viewType: 'claudeVSCodePanel' }, group: { viewColumn: 2 } }),
-        c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 3)), isPanelTab(null)];
+        c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 3)), c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 4)), C.isPanelTab(null)];
       out.listeners = p1.l.length;
       p1.active = true; p1.l.forEach((f) => f({})); p2.l.forEach((f) => f({}));
-      c.track(p1, 'A2'); p1.l.forEach((f) => f({}));
+      c.track(p1, 'A2');
+      out.focusedA2 = c.source.isFocused('A2');
       p1.d.forEach((f) => f());
       out.afterDispose = c.source.sessionForTab(tab('mainThreadWebview-claudeVSCodePanel', 2));
       chat = 'X'; out.follow = [c.followChat(), c.followChat()]; chat = ''; out.follow.push(c.followChat());
       c.pageFocus('Y'); c.pageFocus(''); c.pageFocus(42);
+      out.focused = [c.source.isFocused('Y'), c.source.isFocused('C'), c.source.isFocused('A2'), c.source.isFocused('Q'), c.source.isFocused('')];
+      c.refocus();
       out.heard = heard.slice();
+      const notice = { title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] };
+      c.setNotice(notice); c.setNotice(Object.assign({}, notice)); c.setNotice(null);
+      out.notices = notices;
       (async () => {
-        out.notShown = await c.source.deliverAnswer('B', 'hi');
-        const p = c.source.deliverAnswer('A', 'yes');
-        const key = handed[handed.length - 1][2];
+        const last = () => handed[handed.length - 1][2];
+        out.notShown = await c.source.deliverAnswer('B', 'hi', { deliveryId: 'd0' });
+        const p = c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
         c.answered('no-such-key', true, '');
-        c.answered(key, false, 'draft');
-        out.delivered = await p;
-        const q = c.source.deliverAnswer('A', 'again');
-        c.answered(handed[handed.length - 1][2], true, '');
-        out.again = await q;
+        c.answered(last(), false, 'draft');
+        out.draft = await p;
+        const retry = c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
+        out.retried = handed.length;
+        c.answered(last(), true, '');
+        out.sent = await retry;
+        out.again = await c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
+        out.handedForD1 = handed.filter((h) => h[1] === 'yes').length;
+        const odd = c.source.deliverAnswer('A', 'odd', { deliveryId: 'd2' });
+        c.answered(last(), false, 'error');
+        out.error = await odd;
+        out.silent = await c.source.deliverAnswer('A', 'nobody answers', { deliveryId: 'd3' });
+        const reasons = {};
+        for (const r of ['not-shown', 'no-input', 'insert', 'left-in-input', 'something new']) reasons[r] = C.outcomeOf(false, r).outcome;
+        out.reasons = reasons;
         out.canDeliver = [c.source.canDeliver('A'), c.source.canDeliver('B')];
         out.list = await c.source.listConversations();
         out.problem = out.list.problem;
@@ -8251,265 +7248,38 @@ console.log('\nClaude Code\'s own source');
     const r = cp.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 });
     let o = {};
     try { o = JSON.parse(r.stdout); } catch (_) { o = { threw: r.stdout + r.stderr }; }
-    if (JSON.stringify(o.shape) === JSON.stringify([3, 'claude-code', 'Claude Code', '[]', path.join('/plans', 'S.json'), '/plans', null])) {
-      ok('Claude Code\'s source is protocol 3 with plans in the plugin directory');
-    } else bad(`claude source shape ${JSON.stringify(o.shape || o)}`);
-    if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, null, false]) && o.listeners === 1 && o.afterDispose === null) {
-      ok('sessionForTab() uses the panel visible in the tab\'s group, not the title');
+    const SID = 'abababab-1111-4222-8333-444444444444';
+    if (JSON.stringify(o.shape) === JSON.stringify([1, 'claude-code', 'Claude Code', '[]', 'xnervwang.claude-code-extras',
+      path.join('/plans', SID + '.json'), null, '/plans', null, 'Asia/Tokyo']) && o.planOff === null) {
+      ok('Claude Code\'s source is protocol 1, names its extension, keeps plans in the plugin directory, and has none with the work plan off');
+    } else bad(`claude source shape ${JSON.stringify(o.shape || o)}, with the plan off ${JSON.stringify(o.planOff)}`);
+    if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, '', '', false]) && o.listeners === 1 && o.afterDispose === '') {
+      ok('sessionForTab() gives the panel visible in the tab\'s group, \'\' for a Claude Code tab with no conversation, null for any other tab');
     } else bad(`claims ${JSON.stringify([o.claims, o.listeners, o.afterDispose])}`);
-    if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
-      ok('each Claude Code focus signal fires onDidFocus');
+    if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
+      ok('each Claude Code focus signal fires onDidFocus, and a panel in front that gets its session id says so');
     } else bad(`focus heard ${JSON.stringify([o.heard, o.follow])}`);
-    if (o.notShown && o.notShown.delivered === false && o.notShown.reason === 'not-shown' && o.delivered && o.delivered.delivered === false
-      && o.delivered.reason === 'draft' && o.again && o.again.delivered === true && JSON.stringify(o.canDeliver) === '[true,false]') {
-      ok('deliverAnswer() resolves with the panel\'s result');
-    } else bad(`claude delivery ${JSON.stringify(o).slice(0, 500)}`);
+    if (o.focusedA2 === true && JSON.stringify(o.focused) === '[true,true,false,false,false]') {
+      ok('isFocused() holds for the latest signal and for a panel in front, and not for one left behind');
+    } else bad(`isFocused ${JSON.stringify([o.focusedA2, o.focused])}`);
+    if (JSON.stringify(o.notices) === JSON.stringify([{ title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] }, null])) {
+      ok('the plan notice is reported when it changes, and not when it is set to the same again');
+    } else bad(`plan notices ${JSON.stringify(o.notices)}`);
+    const is = (x, outcome) => !!x && x.outcome === outcome && (outcome === 'submitted' || (typeof x.reason === 'string' && x.reason.length > 0));
+    if (is(o.notShown, 'notReceived') && is(o.draft, 'notReceived') && o.retried === 3 && is(o.sent, 'submitted') && is(o.again, 'submitted')
+      && o.handedForD1 === 2 && is(o.error, 'uncertain') && is(o.silent, 'uncertain')
+      && JSON.stringify(o.reasons) === JSON.stringify({ 'not-shown': 'notReceived', 'no-input': 'notReceived', insert: 'notReceived',
+        'left-in-input': 'notReceived', 'something new': 'uncertain' }) && JSON.stringify(o.canDeliver) === '[true,false]') {
+      ok('deliverAnswer() reports one of the four outcomes, types an answer once per delivery id, and tries again one that did not get there');
+    } else bad(`claude delivery ${JSON.stringify(o).slice(0, 700)}`);
     if (Array.isArray(o.list) && o.problem === 'no cli' && o.revealed === true && JSON.stringify(o.shown) === JSON.stringify([['Z', 'Z', '']])) {
       ok('listConversations() reports a failed `claude agents` as its problem');
     } else bad(`claude list ${JSON.stringify([o.list, o.problem, o.revealed, o.shown])}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-console.log('\na panel\'s page getting the focus');
+console.log('\nClaude Code\'s source after its rows are gone');
 {
-  const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '92-focus.js'), 'utf8');
-  const posted = [], listeners = {};
-  const page = { sid: undefined, focused: false };
-  const env = {
-    out: {}, posted,
-    window: { addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); } },
-    document: { hasFocus: () => page.focused },
-    acquireVsCodeApi: () => ({ postMessage: (m) => posted.push(m) }),
-    sigValue: (name) => (name === 'sessionId' ? page.sid : undefined),
-  };
-  vm.createContext(env);
-  vm.runInContext(`(function(){${fragment}\n;out.listen = listenForFocus; out.ifFocused = sayFocusIfFocused;})()`, env, { filename: '92-focus.js' });
-  env.out.listen();
-  const fire = () => (listeners.focus || []).forEach((fn) => fn({}));
-  fire();
-  page.sid = 'S1'; fire();
-  page.focused = false; env.out.ifFocused();
-  page.focused = true; page.sid = 'S2'; env.out.ifFocused();
-  if (JSON.stringify(posted) === JSON.stringify([{ type: 'cce_page_focus', sessionId: 'S1' }, { type: 'cce_page_focus', sessionId: 'S2' }])
-    && (listeners.focus || []).length === 1) {
-    ok('the page posts cce_page_focus when it gets focus');
-  } else bad(`page focus posted ${JSON.stringify(posted)}`);
-  const sweep = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '99-sweep.js'), 'utf8');
-  const session = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '25-session.js'), 'utf8');
-  if (/var boot = function\(\)\{[\s\S]*?try \{ listenForFocus\(\); \} catch \(e\) \{\}[\s\S]*?\};/.test(sweep)
-    && /sessionRef = s;\s*try \{ sayFocusIfFocused\(\); \} catch \(e\) \{\}/.test(session) && webview.SCRIPT.includes('cce_page_focus')) {
-    ok('the page focus listener is added at boot and on session switch');
-  } else bad('the page focus is not wired into boot and the session switch');
-
-  const edit = host.EDITS.find((e) => e.name === 'panel messages');
-  const fn = 'function eT($,J){let Q=`Received message from webview: ${bl0(J)}`;$.info(Q)}';
-  const r = require('../src/edits').applyEdits(fn, [edit]);
-  const heard = [];
-  const henv = { bl0: (m) => JSON.stringify(m), out: null, __cceFocusHook: (id) => heard.push(id) };
-  henv.globalThis = henv;
-  vm.createContext(henv);
-  if (!r.error) {
-    vm.runInContext(r.out + ';eT({info:(q)=>out=q},{type:"cce_page_focus",sessionId:"s1"});'
-      + 'eT({info:(q)=>out=q},{type:"cce_page_focus",sessionId:7});eT({info:(q)=>out=q},{type:"cce_page_focus"});', henv);
-  }
-  if (!r.error && JSON.stringify(heard) === '["s1"]' && /^Received message from webview: /.test(henv.out)) {
-    ok('a cce_page_focus message reaches __cceFocusHook and is still logged');
-  } else bad(`page focus in the host: ${r.error || JSON.stringify([heard, henv.out])}`);
-  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  if (/globalThis\.__cceFocusHook = \(sessionId\) => \{\s*drawLater = true;\s*try \{ claude\.pageFocus\(sessionId\); \}/.test(ext)
-    && /delete globalThis\.__cceFocusHook/.test(ext)) {
-    ok('extension.js passes page focus to Claude Code\'s source');
-  } else bad('extension.js does not pass the page focus on');
-}
-
-console.log('\nmalformed and hostile sources');
-{
-  const src = require('../src/sources');
-  const S = (over) => Object.assign({ protocol: 3, features: [], id: 'codex', label: 'Codex' }, over);
-  const reg = new src.Registry();
-  const spaced = reg.add(S({ id: ' codex ' })), long = reg.add(S({ id: 'x'.repeat(src.MAX_ID + 1) })), fine = reg.add(S({ id: 'a/b c' }));
-  const kept = src.conversation({ sessionId: 'a/b c', cwd: '/w' }), padded = src.conversation({ sessionId: ' s ', cwd: '/w' });
-  const longId = src.conversation({ sessionId: 'y'.repeat(src.MAX_ID + 1) });
-  if (!spaced.ok && !long.ok && fine.ok && fine.id === 'a/b c' && reg.get('a/b c') && kept.sessionId === 'a/b c' && padded === null && longId === null) {
-    ok('ids are kept exactly or rejected');
-  } else bad(`ids: ${JSON.stringify([spaced.why, long.why, fine.id, kept, padded, longId])}`);
-
-  const boom = () => { throw new Error('getter'); };
-  const nasty = {};
-  for (const k of ['protocol', 'id', 'label', 'logo', 'features', 'planDir', 'planPath', 'onDidFocus', 'listConversations']) {
-    Object.defineProperty(nasty, k, { get: boom });
-  }
-  let flips = 0;
-  const flipping = { sessionId: 's1', cwd: '/w', get state() { flips++; return flips === 1 ? 'idle' : '../../../shared/logo'; } };
-  const throwing = {};
-  Object.defineProperty(throwing, 'sessionId', { get: boom });
-  const list = [{ sessionId: 'ok1', cwd: '/w' }, throwing, flipping, null, 7, { sessionId: 'ok2', cwd: '/w', get title() { throw new Error('t'); } }];
-  const listed = src.conversations(list);
-  const badList = new Proxy([], { get: (t, k) => (k === 'length' ? boom() : t[k]) });
-  let noThrow = true;
-  try {
-    src.refusal(nasty); src.refusal(S({ protocol: 3n })); src.refusal(S({ protocol: Symbol('p') })); src.idOf(nasty); src.labelOf(nasty);
-    src.logoOf(nasty); src.supports(nasty, 'x'); src.optional(nasty, 'x'); src.planDirOf(nasty); src.planFileOf(nasty, 's');
-    src.listen(nasty, 'onDidFocus', () => {}); src.call(nasty, 'listConversations', [], []); src.conversations(badList);
-    src.logoOf(S({ logo: { get light() { throw new Error('l'); }, dark: { get fsPath() { throw new Error('f'); } } } }));
-  } catch (e) { noThrow = String(e); }
-  if (noThrow === true && /3n/.test(src.refusal(S({ protocol: 3n }))) && src.idOf(nasty) === '' && src.labelOf(nasty) === ''
-    && JSON.stringify(listed.map((c) => [c.sessionId, c.state, c.title])) === JSON.stringify([['ok1', 'idle', ''], ['s1', 'idle', ''], ['ok2', 'idle', '']])
-    && flips === 1 && src.conversations(badList).length === 0) {
-    ok('getters that throw or change are read once');
-  } else bad(`hostile source: ${JSON.stringify([noThrow, listed, flips])}`);
-
-  const t = 'T'.repeat(800);
-  if (src.conversation({ sessionId: 's', title: t }).title === t) ok('conversation titles are not truncated');
-  else bad('a long title was cut');
-
-
-  const { 'conversations-view': cv, 'workplan-view': wv, 'answer-view': av } = withEditor(['conversations-view', 'workplan-view', 'answer-view']);
-  const row = (sourceId, sessionId) => ({ sessionId, sourceId, source: { id: sourceId, label: sourceId }, id: '', kind: '', cwd: '/w',
-    running: true, state: 'idle', questions: [{ row: '1', title: 'r', question: 'q', since: 0 }], doing: [], open: 1, hasPlan: true, title: 't', since: 0 });
-  const tree = new cv.ConversationsProvider();
-  tree.set({ running: [row('a', 'b/c'), row('a/b', 'c')], stopped: [], asks: 2 }, '', 'en');
-  const ids = tree.getChildren().map((e) => tree.getTreeItem(e).id);
-  const qids = tree.getChildren().map((e) => tree.getTreeItem(tree.getChildren(e)[0]).id);
-  const view = new av.AnswerView({ send() {}, open() {}, age: () => '', clock: () => '' });
-  const keys = [['a', 'b/c'], ['a/b', 'c']].map(([sourceId, sessionId]) => { view.show({ sourceId, sessionId, row: '1' }); return view.current.key; });
-  view.show({ sessionId: 'b/c', row: '1' });
-  const plain = view.current.key;
-  if (new Set(ids).size === 2 && new Set(qids).size === 2 && new Set(keys).size === 2 && ids[0] === 'conversations/a/b%2Fc' && plain === 'b/c/1') {
-    ok('multi-source row ids and answer keys never collide');
-  } else bad(`keys ${JSON.stringify([ids, qids, keys, plain])}`);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-review-'));
-  try {
-    const file = path.join(dir, 'p.json');
-    fs.writeFileSync(file, JSON.stringify({ nodes: [{ title: 'Implement', state: 'todo' }, { title: 'odd', state: 'toString' },
-      { title: 'odder', state: '__proto__' }, { title: 'broken', state: 'hasOwnProperty' }] }));
-    const plan = require('../src/workplan').readPlanAt(file, 'S');
-    const wp = new wv.WorkPlanProvider({ read: () => plan });
-    wp.setFocus('S', 'codex');
-    wp.refresh();
-    const single = wp.getChildren().map((e) => wp.getTreeItem(e));
-    const scopedMoved = wp.setScoped(true); wp.refresh();
-    const scoped = wp.getChildren().map((e) => wp.getTreeItem(e));
-    const odd = single.filter((i) => /odd|broken/.test(i.label));
-    if (single.some((i) => i.id === 'S/0:Implement') && scopedMoved && scoped.some((i) => i.id === 'codex/S/0:Implement')) {
-      ok('scoped work plan row ids include the source id');
-    } else bad(`work plan row ids ${JSON.stringify([single.map((i) => i.id), scoped.map((i) => i.id)])}`);
-    if (odd.length === 3 && odd.every((i) => i.iconPath.id === 'question' && /^\*\*\w+\*\*\n\n(toString|__proto__|hasOwnProperty)$/.test(i.tooltip.value))) {
-      ok('states named like Object properties show as unknown');
-    } else bad(`work plan rows ${JSON.stringify(single.map((i) => [i.id, i.iconPath, i.tooltip]))}`);
-
-    const big = path.join(dir, 'big.json');
-    fs.writeFileSync(big, '');
-    fs.truncateSync(big, require('../src/workplan').MAX_PLAN_BYTES + 1);
-    const asDir = path.join(dir, 'adir.json');
-    fs.mkdirSync(asDir);
-    const W = require('../src/workplan');
-    if (W.readPlanAt(big, 'S', W.MAX_PLAN_BYTES) === null && W.readPlanAt(asDir, 'S', W.MAX_PLAN_BYTES) === null && W.readPlanAt(asDir, 'S') === null) {
-      ok('oversized or irregular plan files are not read');
-    } else bad('an oversized or irregular plan file was read');
-
-    /* The state is part of the icon file name, so a state such as '../../../shared/logo' must not create a file. */
-    const icons = require('../src/sourceicons');
-    const logo = path.join(dir, 'logo.svg');
-    fs.writeFileSync(logo, '<svg viewBox="0 0 24 24"><path d="M1 1h1"/></svg>');
-    const huge = path.join(dir, 'huge.svg');
-    fs.writeFileSync(huge, '<svg>' + ' '.repeat(300 * 1024) + '<path d="M1 1"/></svg>');
-    const out = path.join(dir, 'icons');
-    const strange = ['../../../shared/logo', 'toString', '__proto__', 'needs'].map((st) => icons.iconsFor({ light: logo, dark: logo }, st, out, null));
-    const files = fs.existsSync(out) ? fs.readdirSync(out) : [];
-    if (strange[0] === null && strange[1] === null && strange[2] === null && strange[3] && files.every((n) => /-needs-(light|dark)\.svg$/.test(n))
-      && icons.iconsFor({ light: asDir, dark: asDir }, 'idle', out, null) === null && icons.iconsFor({ light: huge, dark: huge }, 'idle', out, null) === null
-      && !fs.existsSync(path.join(dir, 'shared'))) {
-      ok('iconsFor() rejects unknown states and unusable logos');
-    } else bad(`icons for odd states and logos: ${JSON.stringify([strange, files])}`);
-    /* Reading a FIFO would block, so this runs in a child process with a timeout. */
-    const fifo = path.join(dir, 'fifo.svg');
-    const made = process.platform !== 'win32' && cp.spawnSync('mkfifo', [fifo]).status === 0;
-    if (!made) note('no mkfifo here to check that a FIFO logo or plan is not read');
-    else {
-      const r = cp.spawnSync(process.execPath, ['-e', `const i = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'sourceicons.js'))});
-        const w = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'workplan.js'))});
-        process.stdout.write(JSON.stringify([i.iconsFor({ light: ${JSON.stringify(fifo)}, dark: ${JSON.stringify(fifo)} }, 'idle', ${JSON.stringify(out)}, null),
-          w.readPlanAt(${JSON.stringify(fifo)}, 'S')]));`], { encoding: 'utf8', timeout: 10000 });
-      if (r.status === 0 && r.stdout === '[null,null]') ok('a FIFO logo or plan path is not opened');
-      else bad(`a FIFO logo or plan: status ${r.status}, ${r.stdout}${r.signal ? ' (killed: it blocked)' : ''}`);
-    }
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-
-  const answers = require('../src/answers');
-  const adir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-answer-names-'));
-  try {
-    const OLD_NAME = /^[0-9a-z]+-[0-9a-f]{8}$/;
-    const codexId = answers.post(adir, { sourceId: 'codex', sessionId: 'S', text: 'x' });
-    const claudeId = answers.post(adir, { sourceId: 'claude-code', sessionId: 'S', text: 'y' });
-    const oldWindowSees = fs.readdirSync(adir).filter((n) => n.endsWith('.json') && OLD_NAME.test(n.slice(0, -5))).map((n) => n.slice(0, -5));
-    const newWindowSees = answers.waiting(adir).map((a) => a.id).sort();
-    if (codexId.endsWith(answers.OTHER) && JSON.stringify(oldWindowSees) === JSON.stringify([claudeId])
-      && JSON.stringify(newWindowSees) === JSON.stringify([codexId, claudeId].sort())) {
-      ok('older builds see only Claude Code\'s answer files');
-    } else bad(`answer names: ${JSON.stringify([codexId, claudeId, oldWindowSees, newWindowSees])}`);
-  } finally { fs.rmSync(adir, { recursive: true, force: true }); }
-  const answersText = fs.readFileSync(path.join(__dirname, '..', 'src', 'answers.js'), 'utf8');
-  if (/A delivery that completes after the claiming window's SEND_MS timeout is ignored\./.test(answersText)) {
-    ok('answers.js documents deliveries after the SEND_MS timeout');
-  } else bad('answers.js does not say what happens to a late delivery');
-}
-
-console.log('\nthe first review: answers and Claude Code\'s source');
-{
-  const script = `
-    const answers = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'answers.js'))});
-    const fs = require('fs'), path = require('path'), os = require('os');
-    const unhandled = [];
-    process.on('unhandledRejection', (e) => unhandled.push(String(e && e.message)));
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-answer-reasons-'));
-    let clock = 1000000;
-    const timers = [];
-    const later = (fn, ms) => { timers.push({ at: clock + ms, fn, live: true }); return timers.length; };
-    const cancel = (n) => { if (timers[n - 1]) timers[n - 1].live = false; };
-    const advance = (ms) => { clock += ms; for (const t of timers) if (t.live && t.at <= clock) { t.live = false; t.fn(); } };
-    const settle = () => new Promise((r) => setTimeout(r, 20));
-    const results = {};
-    let runs = 0;
-    const run = async (name, source) => {
-      const finished = [], handed = [];
-      const own = path.join(dir, String(++runs));
-      let courier = null;
-      const via = answers.throughSources((id) => (id === 'x' ? source : null), (id, sent, reason) => { handed.push([sent, reason]); courier.handed(id, sent, reason); });
-      courier = new answers.Courier({ dir: own, now: () => clock, later, cancel, canShow: via.canShow, hand: via.hand,
-        finish: (sent, result) => finished.push(result.kind) });
-      courier.send({ sourceId: 'x', sessionId: 'S', row: '1', text: name }, { key: name });
-      await settle(); courier.pump(); await settle();
-      advance(answers.TAKE_MS + 200); courier.pump();
-      results[name] = { finished, handed };
-    };
-    const reason = (r) => ({ canDeliver: () => true, deliverAnswer: async () => ({ delivered: false, reason: r }) });
-    (async () => {
-      for (const r of ['sent', 'lost', 'nobody', 'waiting', 'draft', 'x'.repeat(50)]) await run('reason ' + r.slice(0, 10), reason(r));
-      await run('not true', { canDeliver: () => true, deliverAnswer: async () => ({ delivered: 'yes' }) });
-      await run('getter', { canDeliver: () => true, deliverAnswer: async () => ({ get delivered() { throw new Error('d'); } }) });
-      await run('throws', { canDeliver: () => true, deliverAnswer() { throw new Error('sync'); } });
-      await run('rejects', { canDeliver: () => true, deliverAnswer: async () => { throw new Error('async'); } });
-      const hidden = { canDeliver: () => true };
-      Object.defineProperty(hidden, 'deliverAnswer', { get() { throw new Error('hidden'); } });
-      await run('hidden', hidden);
-      fs.rmSync(dir, { recursive: true, force: true });
-      process.stdout.write(JSON.stringify({ results, unhandled }));
-    })().catch((e) => process.stdout.write(JSON.stringify({ threw: String(e && e.stack) })));`;
-  const r = cp.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 });
-  let o = {};
-  try { o = JSON.parse(r.stdout); } catch (_) { o = { threw: r.stdout + r.stderr }; }
-  const R = o.results || {};
-  const kinds = Object.fromEntries(Object.entries(R).map(([k, v]) => [k, v.finished.join()]));
-  const once = Object.values(R).every((v) => v.handed.length <= 1);
-  if (kinds['reason sent'] === 'error' && kinds['reason lost'] === 'error' && kinds['reason nobody'] === 'error' && kinds['reason waiting'] === 'error'
-    && kinds['reason draft'] === 'draft' && kinds['reason xxxxxxxxxx'] === 'error' && kinds['not true'] === 'error') {
-    ok('source failure reasons never map to sent, lost or nobody');
-  } else bad(`reasons: ${JSON.stringify(kinds)}`);
-  if (kinds.getter === 'error' && kinds.throws === 'error' && kinds.rejects === 'error' && kinds.hidden === 'nobody' && once
-    && Array.isArray(o.unhandled) && !o.unhandled.length) {
-    ok('failing deliveries are reported once as not sent');
-  } else bad(`hostile deliveries: ${JSON.stringify([kinds, once, o.unhandled, o.threw])}`);
 
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-claude-review-')));
   try {
@@ -8559,214 +7329,14 @@ console.log('\nthe first review: answers and Claude Code\'s source');
       && JSON.stringify(co.shown) === JSON.stringify([['A', 'Alpha', home], ['never', 'never', '']])) {
       ok('reveal() uses the remembered title and folder after the row is gone');
     } else bad(`remembered conversations: ${JSON.stringify(co)}`);
-    if (JSON.stringify(co.afterClose) === JSON.stringify([[true, true], null, 'P2']) && JSON.stringify(co.afterDispose) === JSON.stringify([[true, true], null])) {
+    if (JSON.stringify(co.afterClose) === JSON.stringify([[true, true], '', 'P2']) && JSON.stringify(co.afterDispose) === JSON.stringify([[true, true], ''])) {
       ok('panel subscriptions are disposed');
     } else bad(`panel subscriptions: ${JSON.stringify([co.afterClose, co.afterDispose, co.threw])}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-console.log('\nmisbehaving sources in a running window');
+console.log('\nClaude Code\'s reveal() with the clicked row');
 {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-review-hosted-')));
-  try {
-    const ws = path.join(home, 'ws');
-    fs.mkdirSync(ws);
-    const stub = path.join(home, 'vscode-stub.js');
-    fs.writeFileSync(stub, hostedEditor(ws));
-    const root = path.join(__dirname, '..');
-    const script = `
-      const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
-      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
-      const vs = require(${JSON.stringify(stub)});
-      const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
-      const DATA_DIR = require(${JSON.stringify(path.join(root, 'src', 'plugin-install.js'))}).DATA_DIR;
-      const home = ${JSON.stringify(home)}, ws = ${JSON.stringify(ws)};
-      const store = path.join(home, 'storage');
-      fs.mkdirSync(store, { recursive: true });
-      const T = 'abababab-1111-4222-8333-444444444444';
-      const claudePlans = path.join(home, '.claude', 'plugins', 'data', DATA_DIR);
-      fs.mkdirSync(claudePlans, { recursive: true });
-      fs.writeFileSync(path.join(claudePlans, T + '.json'), JSON.stringify({ nodes: [{ title: 'claude row', state: 'todo' }] }));
-      const project = path.join(home, '.claude', 'projects', 'p');
-      fs.mkdirSync(project, { recursive: true });
-      fs.writeFileSync(path.join(project, T + '.jsonl'), JSON.stringify({ type: 'user', cwd: ws, sessionId: T }) + '\\n');
-      const codexDir = path.join(home, 'codex-plans');
-      fs.mkdirSync(codexDir, { recursive: true });
-      fs.writeFileSync(path.join(codexDir, T + '.json'), JSON.stringify({ nodes: [{ title: 'codex row', state: 'todo' }] }));
-      const memo = () => { const m = new Map(); return { get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { m.set(k, v); } }; };
-      const subs = [], keep = setInterval;
-      global.setInterval = () => keep(() => {}, 1 << 30);
-      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const boom = () => { throw new Error('getter'); };
-      (async () => {
-        const out = { threw: '' };
-        try {
-          const exported = await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState: memo(), workspaceState: memo(),
-            extension: { id: 'x.y', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
-            globalStorageUri: { fsPath: store }, logUri: { fsPath: path.join(store, 'logs', 'exthost1', 'x.y') } });
-          const host = exported.workPlanHost;
-          const conv = vs.views['claudeCodeExtras.conversations'].provider, plan = vs.views['claudeCodeExtras.workPlan'];
-          let paints = 0;
-          const set = conv.set.bind(conv);
-          conv.set = (...a) => { paints++; return set(...a); };
-          const rows = () => { const top = conv.getChildren(); const st = top.find((e) => e.kind === 'stopped');
-            return top.concat(st ? conv.getChildren(st) : []).filter((e) => e.kind === 'conversation').map((e) => conv.getTreeItem(e)); };
-          const ids = () => rows().map((r) => r.id);
-          const shownFile = () => plan.provider.shown() && path.basename(path.dirname(plan.provider.shown().file));
-          await wait(300);
-
-          let slowCalls = 0;
-          const slow = { protocol: 3, id: 'slow', label: 'Slow', listConversations: () => { slowCalls++;
-            return new Promise((r) => setTimeout(() => r([{ sessionId: 'S1', title: 'slow one', cwd: ws, state: 'working' }]), 4500)); } };
-          const before = paints;
-          const slowReg = host.registerSource(slow);
-          await wait(3600);
-          out.slowEarly = { ids: ids(), painted: paints > before, problem: conv.problem };
-          await wait(1500);
-          out.slowLate = { ids: ids(), calls: slowCalls };
-          await wait(1000);
-          out.slowCalls = slowCalls;
-          slowReg.dispose();
-          await wait(300);
-
-          const nasty = {};
-          for (const k of ['protocol', 'id', 'label', 'features', 'planDir', 'onDidFocus', 'listConversations']) Object.defineProperty(nasty, k, { get: boom });
-          /* A source that registers again from inside its own getter: the inner call is rejected, and the outer registration
-             disposes its own subscription when removed. */
-          const outerListeners = [], innerListeners = [];
-          const evOf = (list) => (fn) => { list.push(fn); return { dispose: () => list.splice(list.indexOf(fn), 1) }; };
-          let inner = null;
-          const reentrant = { protocol: 3, id: 'flip', listConversations: async () => [{ sessionId: 'F1', cwd: ws }],
-            get onDidFocus() { if (!inner) inner = host.registerSource({ protocol: 3, id: 'flip', onDidFocus: evOf(innerListeners) }); return evOf(outerListeners); } };
-          const regs = [];
-          let threw = '';
-          try { regs.push(host.registerSource(nasty), host.registerSource({ protocol: 3, id: ' spaced ' }),
-            host.registerSource({ protocol: 3n, id: 'big' }), host.registerSource({ protocol: 3, id: 'bad\\uD800' }), host.registerSource(null)); } catch (e) { threw = String(e); }
-          const outer = host.registerSource(reentrant);
-          await wait(300);
-          const registeredOnce = ids().filter((i) => i.includes('/flip/')).length;
-          outer.dispose();
-          await wait(200);
-          out.hostile = { threw, disposables: regs.every((d) => d && typeof d.dispose === 'function'), ids: ids(), registeredOnce,
-            innerRefused: !!inner && innerListeners.length === 0, outerReleased: outerListeners.length === 0 };
-          for (const d of regs) d.dispose();
-
-          const bad = { protocol: 3, id: 'bad', get label() { throw new Error('label'); }, get logo() { throw new Error('logo'); },
-            listConversations: async () => { const t = {}; Object.defineProperty(t, 'sessionId', { get: boom });
-              const list = [{ sessionId: 'G1', title: 'good', cwd: ws, state: 'idle' }, t]; Object.defineProperty(list, 'problem', { get: boom }); return list; } };
-          const worse = { protocol: 3, id: 'worse', listConversations: async () => new Proxy([], { get: (o, k) => (k === 'length' ? boom() : o[k]) }) };
-          const badReg = host.registerSource(bad), worseReg = host.registerSource(worse);
-          await wait(400);
-          const g = rows().find((r) => r.id === 'conversations/bad/G1');
-          out.bad = { ids: ids(), icon: g && g.iconPath && g.iconPath.id, tip: g && g.tooltip };
-          badReg.dispose(); worseReg.dispose();
-          await wait(300);
-
-          const focusOf = new vs.EventEmitter();
-          const codexTab = { label: 'Codex', input: { viewType: 'chatgpt.conversationEditor' }, group: { viewColumn: 1 } };
-          const codex = { protocol: 3, id: 'codex', label: 'Codex', planPath: (id) => path.join(${JSON.stringify(path.join(home, 'codex-plans'))}, id + '.json'),
-            planDir: () => ${JSON.stringify(path.join(home, 'codex-plans'))}, sessionForTab: (tab) => (tab === codexTab ? T : null), onDidFocus: focusOf.event,
-            listConversations: async () => [] };
-          const codexReg = host.registerSource(codex);
-          await wait(200);
-          globalThis.__cceFocusHook(T);
-          focusOf.fire({ sessionId: T });
-          await wait(50);
-          out.superseded = shownFile();
-          globalThis.__cceFocusHook(T);
-          await wait(50);
-          out.pageFocus = shownFile();
-
-          vs.window.tabGroups.activeTabGroup = { activeTab: codexTab, viewColumn: 1 };
-          const tiny = host.registerSource({ protocol: 3, id: 'tiny', listConversations: async () => [] });
-          await wait(100);
-          out.keptOnRegister = shownFile();
-          focusOf.fire({ sessionId: T });
-          codexReg.dispose();
-          await wait(100);
-          out.afterDrop = shownFile();
-          const codexAgain = host.registerSource(codex);
-          await wait(100);
-          out.claimedOnRegister = shownFile();
-          tiny.dispose(); codexAgain.dispose();
-          await wait(300);
-
-          const late = host.registerSource({ protocol: 3, id: 'late', listConversations: () => new Promise((r) => setTimeout(() => r([{ sessionId: 'L1', cwd: ws }]), 400)) });
-          await wait(50);
-          for (const d of subs) { try { d.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
-          const closedAt = paints;
-          late.dispose();
-          await wait(4000);
-          out.paintsAfterClose = paints - closedAt;
-        } catch (e) { out.threw = String(e && e.stack); }
-        process.stdout.write(JSON.stringify(out));
-        process.exit(0);
-      })();
-      process.on('unhandledRejection', (e) => { process.stdout.write(JSON.stringify({ threw: 'unhandled: ' + (e && e.stack) })); process.exit(0); });`;
-    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
-    delete env.CLAUDE_CONFIG_DIR;
-    let r;
-    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 90000, env })); }
-    catch (e) { r = { threw: e.message }; }
-    const T = 'abababab-1111-4222-8333-444444444444';
-    const claudeRow = 'conversations/stopped/claude-code/' + T;
-    const e = r.slowEarly || {}, l = r.slowLate || {};
-    if (!r.threw && e.painted && e.ids && e.ids.includes(claudeRow) && !e.ids.some((i) => /slow/.test(i)) && !/Slow/.test(e.problem)
-      && l.ids && l.ids.includes('conversations/slow/S1') && l.calls === 1 && r.slowCalls === 1) {
-      ok('a slow source does not delay Claude Code\'s rows');
-    } else bad(`slow source: ${JSON.stringify([r.threw, e, l, r.slowCalls]).slice(0, 700)}`);
-    const h = r.hostile || {};
-    if (h.threw === '' && h.disposables && h.ids && !h.ids.some((i) => /flip|spaced|big|bad/.test(i)) && h.registeredOnce === 1
-      && h.innerRefused && h.outerReleased) {
-      ok('hostile registrations leave at most one registration');
-    } else bad(`hostile registrations: ${JSON.stringify(h)}`);
-    const b = r.bad || {};
-    if (b.ids && b.ids.includes('conversations/bad/G1') && b.ids.includes(claudeRow) && b.icon === 'circle-outline' && /\nbad\n/.test(b.tip || '')
-      && !b.ids.some((i) => /worse/.test(i))) {
-      ok('unreadable source data is dropped or replaced');
-    } else bad(`bad source: ${JSON.stringify(b)}`);
-    if (r.superseded === 'codex-plans' && r.pageFocus === require('../src/plugin-install').DATA_DIR) {
-      ok('a Codex focus after a page focus stays in front');
-    } else bad(`deferred page focus: ${JSON.stringify([r.superseded, r.pageFocus])}`);
-    if (r.keptOnRegister === require('../src/plugin-install').DATA_DIR && r.afterDrop === null && r.claimedOnRegister === 'codex-plans') {
-      ok('registering a source keeps the current focus');
-    } else bad(`focus on registration: ${JSON.stringify([r.keptOnRegister, r.afterDrop, r.claimedOnRegister])}`);
-    if (r.paintsAfterClose === 0) ok('nothing is painted after the window closes');
-    else bad(`painted ${r.paintsAfterClose} time(s) after closing`);
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
-}
-
-console.log('\nids and size limits');
-{
-  const src = require('../src/sources');
-  const W = require('../src/workplan');
-  const lone = ['bad\uD800', '\uDC00x', 'a\uD800b'];
-  const reg = new src.Registry();
-  const refused = lone.map((id) => reg.add({ protocol: 3, id }).ok);
-  const dropped = lone.map((sessionId) => src.conversation({ sessionId, cwd: '/w' }));
-  let encoded = null;
-  try { encoded = lone.map(src.keyPart); } catch (_) { encoded = null; }
-  const f = new src.Focus();
-  const claimedBad = f.claim({}, [{ id: 'x', source: { sessionForTab: () => 'bad\uD800' } }]);
-  if (refused.every((x) => !x) && dropped.every((x) => x === null) && src.usableId('ok😀') && encoded
-    && new Set(encoded).size === 3 && !encoded.includes(src.keyPart('bad')) && !claimedBad && f.sessionId === '') {
-    ok('ids with unpaired surrogates are rejected');
-  } else bad(`lone surrogates: ${JSON.stringify([refused, dropped, encoded, claimedBad])}`);
-
-  const many = Array.from({ length: src.MAX_CONVERSATIONS + 1 }, (_, i) => ({ sessionId: 's' + i, cwd: '/w' }));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-limits-'));
-  try {
-    const big = path.join(dir, 'big.json');
-    fs.writeFileSync(big, JSON.stringify({ nodes: [{ title: 'x', state: 'todo' }], pad: 'a'.repeat(W.MAX_PLAN_BYTES) }));
-    const whole = W.readPlanAt(big, 'S'), limited = W.readPlanAt(big, 'S', W.MAX_PLAN_BYTES);
-    const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-    if (src.conversations(many).length === many.length && src.conversations(many, src.MAX_CONVERSATIONS).length === src.MAX_CONVERSATIONS
-      && whole && whole.nodes.length === 1 && limited === null
-      && /const max = entry\.id === sources\.BUILTIN \? Infinity : sources\.MAX_CONVERSATIONS;/.test(ext)
-      && /const max = sourceId === sources\.BUILTIN \? Infinity : MAX_PLAN_BYTES;/.test(ext)) {
-      ok('size limits apply to other sources only');
-    } else bad(`limits: ${JSON.stringify([src.conversations(many).length, whole && whole.nodes.length, limited])}`);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-reveal-row-')));
   try {
@@ -8795,143 +7365,120 @@ console.log('\nids and size limits');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-console.log('\nlist requests and focus timing in a running window');
+console.log('\na panel\'s page getting the focus');
 {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-review2-hosted-')));
+  const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '92-focus.js'), 'utf8');
+  const posted = [], listeners = {};
+  const page = { sid: undefined, focused: false };
+  const env = {
+    out: {}, posted,
+    window: { addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); } },
+    document: { hasFocus: () => page.focused },
+    acquireVsCodeApi: () => ({ postMessage: (m) => posted.push(m) }),
+    sigValue: (name) => (name === 'sessionId' ? page.sid : undefined),
+  };
+  vm.createContext(env);
+  vm.runInContext(`(function(){${fragment}\n;out.listen = listenForFocus; out.ifFocused = sayFocusIfFocused;})()`, env, { filename: '92-focus.js' });
+  env.out.listen();
+  const fire = () => (listeners.focus || []).forEach((fn) => fn({}));
+  fire();
+  page.sid = 'S1'; fire();
+  page.focused = false; env.out.ifFocused();
+  page.focused = true; page.sid = 'S2'; env.out.ifFocused();
+  if (JSON.stringify(posted) === JSON.stringify([{ type: 'cce_page_focus', sessionId: 'S1' }, { type: 'cce_page_focus', sessionId: 'S2' }])
+    && (listeners.focus || []).length === 1) {
+    ok('the page posts cce_page_focus when it gets focus');
+  } else bad(`page focus posted ${JSON.stringify(posted)}`);
+  const sweep = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '99-sweep.js'), 'utf8');
+  const session = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '25-session.js'), 'utf8');
+  if (/var boot = function\(\)\{[\s\S]*?try \{ listenForFocus\(\); \} catch \(e\) \{\}[\s\S]*?\};/.test(sweep)
+    && /sessionRef = s;\s*try \{ sayFocusIfFocused\(\); \} catch \(e\) \{\}/.test(session) && webview.SCRIPT.includes('cce_page_focus')) {
+    ok('the page focus listener is added at boot and on session switch');
+  } else bad('the page focus is not wired into boot and the session switch');
+
+  const edit = host.EDITS.find((e) => e.name === 'panel messages');
+  const fn = 'function eT($,J){let Q=`Received message from webview: ${bl0(J)}`;$.info(Q)}';
+  const r = require('../src/edits').applyEdits(fn, [edit]);
+  const heard = [];
+  const henv = { bl0: (m) => JSON.stringify(m), out: null, __cceFocusHook: (id) => heard.push(id) };
+  henv.globalThis = henv;
+  vm.createContext(henv);
+  if (!r.error) {
+    vm.runInContext(r.out + ';eT({info:(q)=>out=q},{type:"cce_page_focus",sessionId:"s1"});'
+      + 'eT({info:(q)=>out=q},{type:"cce_page_focus",sessionId:7});eT({info:(q)=>out=q},{type:"cce_page_focus"});', henv);
+  }
+  if (!r.error && JSON.stringify(heard) === '["s1"]' && /^Received message from webview: /.test(henv.out)) {
+    ok('a cce_page_focus message reaches __cceFocusHook and is still logged');
+  } else bad(`page focus in the host: ${r.error || JSON.stringify([heard, henv.out])}`);
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  if (/globalThis\.__cceFocusHook = \(sessionId\) => \{\s*try \{ claude\.pageFocus\(sessionId\); \}/.test(ext)
+    && /delete globalThis\.__cceFocusHook/.test(ext)) {
+    ok('extension.js passes page focus to Claude Code\'s source');
+  } else bad('extension.js does not pass the page focus on');
+}
+
+console.log('\nRestricted Mode');
+{
+  /* In a workspace that is not trusted, activation starts nothing: no timer, no hook for the patched host, no registration
+     with Agent Work Plan, and nothing written under the home folder. Trusting the workspace starts all of it. */
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-restricted-')));
   try {
-    const ws = path.join(home, 'ws');
-    fs.mkdirSync(ws);
     const stub = path.join(home, 'vscode-stub.js');
-    fs.writeFileSync(stub, hostedEditor(ws));
+    fs.writeFileSync(stub, `
+      const disposable = { dispose() {} }, state = { trusted: false, grant: [], registered: 0 };
+      const core = { isActive: true, exports: { agentWorkPlan: { version: '1.0.0',
+        registerSource: () => { state.registered++; return { accepted: true, code: '', reason: '', registration: disposable }; } } } };
+      module.exports = { state, TabInputWebview: class {}, version: '1.120.0', env: { language: 'en' },
+        Uri: { file: (p) => ({ fsPath: p }) }, RelativePattern: class {}, ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+        workspace: { get isTrusted() { return state.trusted; }, onDidGrantWorkspaceTrust: (fn) => { state.grant.push(fn); return disposable; },
+          workspaceFolders: [], getConfiguration: () => ({ get: (k, d) => d, inspect: () => undefined, update: async () => {} }),
+          onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable },
+        window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }), showInformationMessage: async () => undefined,
+          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null } },
+        commands: { registerCommand: () => disposable, executeCommand: async () => {} },
+        extensions: { getExtension: (id) => (id === 'xnervwang.agent-work-plan' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');
     const script = `
       const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
       Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
       const vs = require(${JSON.stringify(stub)});
       const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
-      const DATA_DIR = require(${JSON.stringify(path.join(root, 'src', 'plugin-install.js'))}).DATA_DIR;
-      const home = ${JSON.stringify(home)}, ws = ${JSON.stringify(ws)};
-      const store = path.join(home, 'storage');
-      fs.mkdirSync(store, { recursive: true });
-      const T = 'abababab-1111-4222-8333-444444444444', T2 = 'cdcdcdcd-1111-4222-8333-444444444444';
-      const claudePlans = path.join(home, '.claude', 'plugins', 'data', DATA_DIR);
-      fs.mkdirSync(claudePlans, { recursive: true });
-      for (const id of [T, T2]) fs.writeFileSync(path.join(claudePlans, id + '.json'), JSON.stringify({ nodes: [{ title: 'row', state: 'todo' }] }));
-      const codexDir = path.join(home, 'codex-plans');
-      fs.mkdirSync(codexDir, { recursive: true });
-      fs.writeFileSync(path.join(codexDir, T + '.json'), JSON.stringify({ nodes: [{ title: 'codex row', state: 'todo' }] }));
+      const store = path.join(${JSON.stringify(home)}, 'storage');
       const memo = () => { const m = new Map(); return { get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { m.set(k, v); } }; };
-      const subs = [], keep = setInterval;
-      global.setInterval = () => keep(() => {}, 1 << 30);
-      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const later = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
+      const subs = [], timers = [], keep = setInterval;
+      global.setInterval = (fn, ms) => { timers.push(ms); return keep(() => {}, 1 << 30); };
+      const look = () => ({ timers: timers.slice().sort((a, b) => a - b), hooks: ['__cceTabIcon', '__cceChatHook', '__cceAnswerHook'].filter((n) => n in globalThis),
+        registered: vs.state.registered, written: fs.readdirSync(${JSON.stringify(home)}).filter((f) => f !== 'vscode-stub.js').sort() });
       (async () => {
         const out = { threw: '' };
         try {
-          const exported = await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState: memo(), workspaceState: memo(),
+          await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState: memo(), workspaceState: memo(),
             extension: { id: 'x.y', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
             globalStorageUri: { fsPath: store }, logUri: { fsPath: path.join(store, 'logs', 'exthost1', 'x.y') } });
-          const host = exported.workPlanHost;
-          const conv = vs.views['claudeCodeExtras.conversations'].provider, plan = vs.views['claudeCodeExtras.workPlan'];
-          let paints = 0;
-          const set = conv.set.bind(conv);
-          conv.set = (...a) => { paints++; return set(...a); };
-          const ids = () => conv.getChildren().filter((e) => e.kind === 'conversation').map((e) => conv.getTreeItem(e).id);
-          const shown = () => plan.provider.shown() && (path.basename(path.dirname(plan.provider.shown().file)) + '/' + plan.provider.shown().session);
-          await wait(300);
-
-          const focusOf = new vs.EventEmitter();
-          const codex = { protocol: 3, id: 'codex', label: 'Codex', planPath: (id) => path.join(codexDir, id + '.json'), planDir: () => codexDir,
-            onDidFocus: focusOf.event, listConversations: async () => [] };
-          const codexReg = host.registerSource(codex);
-          await wait(100);
-          globalThis.__cceFocusHook(T); globalThis.__cceFocusHook(T2);
-          await wait(50);
-          out.twoPages = shown();
-          globalThis.__cceFocusHook(T); focusOf.fire({ sessionId: T });
-          await wait(50);
-          out.pageThenCodex = shown();
-          globalThis.__cceFocusHook(T2);
-          vs.window.tabGroups.activeTabGroup = { activeTab: { label: 'a.js', input: {}, group: { viewColumn: 1 } }, viewColumn: 1 };
-          vs.tabs.fire({});
-          focusOf.fire({ sessionId: 'bad\\uD800' });
-          await wait(50);
-          out.pageThenFileTab = shown();
-          focusOf.fire({ sessionId: T });
-          const before = plan.description;
-          globalThis.__cceFocusHook(T2);
-          vs.items.filter(([k, w]) => k === 'watcher' && w.pattern.pattern === 'codex-plans/*.json').pop()[1].changed();
-          await wait(50);
-          out.described = [before, shown(), plan.description];
-          codexReg.dispose();
-          await wait(200);
-
-          const calls = { a: 0, b: 0, d: 0, x: 0 };
-          const slowA = { protocol: 3, id: 'slowA', listConversations: () => { calls.a++; return later(4500, [{ sessionId: 'A1', cwd: ws }]); } };
-          const slowB = { protocol: 3, id: 'slowB', listConversations: () => { calls.b++; return later(4500, [{ sessionId: 'B1', cwd: ws }]); } };
-          /* Each call returns the data as it was when the call started. */
-          const changed = new vs.EventEmitter();
-          let version = 'D-old';
-          const dirty = { protocol: 3, id: 'dirty', onDidChangeConversations: changed.event,
-            listConversations: () => { calls.d++; return later(4500, [{ sessionId: version, cwd: ws }]); } };
-          const again = { protocol: 3, id: 'again',
-            listConversations: () => { calls.x++; return calls.x === 1 ? later(4500, [{ sessionId: 'X-old', cwd: ws }]) : later(200, [{ sessionId: 'X-new', cwd: ws }]); } };
-          const regs = [host.registerSource(slowA), host.registerSource(slowB), host.registerSource(dirty)];
-          let againReg = host.registerSource(again);
-          for (let i = 0; i < 100 && !(calls.d && calls.x); i++) await wait(100);
-          await wait(300);
-          version = 'D-new';
-          changed.fire();
-          againReg.dispose();
-          againReg = host.registerSource(again);
-          await wait(11000);
-          out.lists = { calls: Object.assign({}, calls), ids: ids() };
-          for (const d of regs) d.dispose();
-
-          const watchersBefore = vs.items.filter(([k]) => k === 'watcher').length;
-          const focusAfter = new vs.EventEmitter();
-          const stays = host.registerSource({ protocol: 3, id: 'stays', onDidFocus: focusAfter.event, planDir: () => codexDir, listConversations: async () => [] });
-          await wait(200);
-          for (const d of subs) { try { d.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
-          const shownAtClose = shown(), paintsAtClose = paints;
-          const afterClose = host.registerSource({ protocol: 3, id: 'late', planDir: () => codexDir, listConversations: async () => [] });
-          focusAfter.fire({ sessionId: T });
-          againReg.dispose(); stays.dispose(); afterClose.dispose();
-          await wait(500);
-          out.closed = { refusedWatcher: vs.items.filter(([k]) => k === 'watcher').length === watchersBefore + 1, shownSame: shown() === shownAtClose,
-            paints: paints - paintsAtClose, disposable: !!afterClose && typeof afterClose.dispose === 'function' };
+          await new Promise((r) => setTimeout(r, 100));
+          out.before = look();
+          vs.state.trusted = true;
+          for (const fn of vs.state.grant) fn();
+          for (const fn of vs.state.grant) fn();
+          await new Promise((r) => setTimeout(r, 300));
+          out.after = look();
         } catch (e) { out.threw = String(e && e.stack); }
+        for (const s of subs) { try { s.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
         process.stdout.write(JSON.stringify(out));
         process.exit(0);
-      })();
-      process.on('unhandledRejection', (e) => { process.stdout.write(JSON.stringify({ threw: 'unhandled: ' + (e && e.stack) })); process.exit(0); });`;
+      })();`;
+    let r;
     const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
     delete env.CLAUDE_CONFIG_DIR;
-    let r;
-    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 90000, env })); }
-    catch (e) { r = { threw: e.message.slice(-600) }; }
-    const D = require('../src/plugin-install').DATA_DIR;
-    const T = 'abababab-1111-4222-8333-444444444444', T2 = 'cdcdcdcd-1111-4222-8333-444444444444';
-    if (!r.threw && r.twoPages === D + '/' + T2 && r.pageThenCodex === 'codex-plans/' + T && r.pageThenFileTab === D + '/' + T2) {
-      ok('the second of two page focuses wins, and a file tab keeps it');
-    } else bad(`page focus order: ${JSON.stringify([r.threw, r.twoPages, r.pageThenCodex, r.pageThenFileTab])}`);
-    if (JSON.stringify(r.described) === JSON.stringify(['Codex', D + '/' + T2, 'Claude Code'])) {
-      ok('the view description follows a plan refresh before a deferred redraw');
-    } else bad(`view description: ${JSON.stringify(r.described)}`);
-    const L = r.lists || { calls: {}, ids: [] };
-    if (L.calls.a === 1 && L.calls.b === 1 && L.ids.includes('conversations/slowA/A1') && L.ids.includes('conversations/slowB/B1')) {
-      ok('two slow sources do not trigger requests to each other');
-    } else bad(`slow sources: ${JSON.stringify(L)}`);
-    if (L.calls.d === 2 && L.ids.includes('conversations/dirty/D-new') && !L.ids.includes('conversations/dirty/D-old')) {
-      ok('a change during a request triggers one more request');
-    } else bad(`change during a request: ${JSON.stringify(L)}`);
-    if (L.calls.x === 2 && L.ids.includes('conversations/again/X-new') && !L.ids.includes('conversations/again/X-old')) {
-      ok('a removed registration\'s late result is dropped');
-    } else bad(`re-registered source: ${JSON.stringify(L)}`);
-    const C = r.closed || {};
-    if (C.refusedWatcher && C.shownSame && C.paints === 0 && C.disposable) {
-      ok('registerSource() after close is rejected');
-    } else bad(`after close: ${JSON.stringify(C)}`);
+    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
+    catch (e) { r = { threw: e.message }; }
+    const b = r.before || {}, a = r.after || {};
+    if (!r.threw && JSON.stringify(b) === JSON.stringify({ timers: [], hooks: [], registered: 0, written: [] })) {
+      ok('in Restricted Mode nothing starts: no timer, no hook for the patched host, no registration, no file written');
+    } else bad(`before the workspace is trusted: ${JSON.stringify(r).slice(0, 500)}`);
+    if (!r.threw && a.timers.includes(30000) && a.hooks.length === 3 && a.registered === 1) {
+      ok('trusting the workspace starts it, once, and registers the source with Agent Work Plan');
+    } else bad(`after the workspace is trusted: ${JSON.stringify(r).slice(0, 500)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 

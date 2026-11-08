@@ -17,9 +17,8 @@
  *
  * A session id is unique across every project on a machine, so it is the whole name and no grouping directory is needed.
  *
- * The view reads only the current conversation's file, named by the session id the host provides. It never reads the
- * whole directory, which would load every conversation on the machine into every window, at a cost that grows with how
- * many conversations have ever existed.
+ * Agent Work Plan draws them. This extension reads one by session id, for a conversation's title and for the stopped
+ * conversations it lists, and never the whole directory's plans at once.
  *
  * Nothing here writes those files. The shape below is the whole contract between the two halves:
  *
@@ -79,16 +78,13 @@ const STATES = ['discussing', 'todo', 'doing', 'waiting', 'parked', 'done', 'dro
 const WAITING_ON = ['user', 'build', 'someone', 'session', 'other'];
 const MAX_QUESTION_CHARS = 200;
 const MAX_STATE_CHARS = 40;
-/* Applies to other extensions' plans only. MAX_NODES takes effect only after the whole file is read and parsed. Plans
-   on the machines this was written on stay under a megabyte. */
-const MAX_PLAN_BYTES = 8 * 1024 * 1024;
 /* Depth and count are bounded because the file is written by another process: a cycle turned into JSON, or a runaway
    generator, would otherwise be rendered forever. Both are far above any plan a person reads. */
 const MAX_DEPTH = 8;
 const MAX_NODES = 2000;
 /*
- * How much of a description this view will show, in lines as well as characters - thirty short lines are as unreadable
- * as one long paragraph, so a character count alone would not hold.
+ * How much of a description the work plan view will show, in lines as well as characters - thirty short lines are as
+ * unreadable as one long paragraph, so a character count alone would not hold.
  *
  * It is a real limit rather than a safety valve, and there is deliberately no roomier view to escape into. A description
  * is what the next person needs in order to pick the task up; somewhere comfortable to write at length is an invitation
@@ -234,41 +230,8 @@ function sweepOrphans(opts = {}) {
 /** The states that mean a row still needs something done to it. */
 const OPEN_STATES = ['discussing', 'todo', 'doing', 'waiting', 'parked'];
 
-/**
- * The same rows with the unfinished ones first, each group keeping the order it had.
- *
- * A plan only grows: rows are added at the end and closed where they sit, so in the file's own order the few that still
- * need doing end up scattered among the many that are done - and a row added an hour ago sinks towards the middle as
- * later ones are added and closed after it. Reading "what is left" then means going through everything.
- *
- * Nothing is sorted within a group, so no row moves relative to others of its own kind: this separates the two and
- * changes nothing else. It is a matter of drawing only - the file is untouched, which is what keeps a hand edit
- * predictable, at the cost that the drawn order is no longer the file's order.
- */
-function openFirst(items, stateOf = (n) => n && n.state) {
-  const rows = items || [];
-  const isOpen = (n) => OPEN_STATES.includes(stateOf(n));
-  /* Newest first within each group. Rows are only ever appended, so the end of the file is the part of the work that is
-     current, and a plan long enough to be worth having is longer than the view is tall - reading it in file order puts
-     the rows still being argued about below a screenful of settled ones. The numbers come from the file either way, so
-     this changes what is on top and nothing else. */
-  const newest = rows.slice().reverse();
-  const open = newest.filter(isOpen);
-  if (!open.length) return newest;
-  return open.concat(newest.filter((n) => !isOpen(n)));
-}
-
-/** Open counts, which is what the view puts in its title so the shape of the work is legible without expanding it. */
-function countOpen(nodes, acc = { discussing: 0, todo: 0, doing: 0, waiting: 0, parked: 0, done: 0, dropped: 0 }) {
-  for (const n of nodes || []) {
-    if (STATES.includes(n.state)) acc[n.state] = (acc[n.state] || 0) + 1;
-    countOpen(n.children, acc);
-  }
-  return acc;
-}
-
 module.exports = {
-  readPlan, readPlanAt, countOpen, planDir, liveSessions, sweepOrphans, openFirst,
+  readPlan, readPlanAt, planDir, liveSessions, sweepOrphans,
   DATA_ROOT, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
-  STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS, MAX_PLAN_BYTES,
+  STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS,
 };

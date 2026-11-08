@@ -4,8 +4,7 @@
 
 'use strict';
 /*
- * The running conversations of this workspace, read from `claude agents --json`, and the questions in their plans
- * (src/conversations.js puts them together).
+ * The running conversations of this workspace, read from `claude agents --json` (src/claude-source.js lists them).
  *
  * `claude --bg` sessions are left out. Their questions go through the conversation that started them. `claude agents`
  * reports one resumed with `claude -p --resume` as interactive, so inFolders also reads the sessionKind in its transcript.
@@ -149,19 +148,6 @@ function transcriptTitles(file) {
   return out;
 }
 
-/** The rows of a plan that wait on the user, each with the number shown in front of it. */
-function planQuestions(nodes, prefix = '', out = []) {
-  (nodes || []).forEach((n, i) => {
-    const num = (prefix ? prefix + '.' : '') + (i + 1);
-    if (n.waitingOn === 'user' && (n.state === 'waiting' || n.state === 'discussing')) {
-      out.push({ num, title: n.title, question: n.question || n.title, since: n.asked || n.since || 0, state: n.state,
-        note: n.note || '', detail: n.detail || '' });
-    }
-    planQuestions(n.children, num, out);
-  });
-  return out;
-}
-
 /**
  * Transcript lookups, kept between calls: a transcript's path, and the titles near its end, which are read again only
  * when the file has changed.
@@ -196,5 +182,5 @@ function reader() {
 }
 
 module.exports = {
-  parseAgents, listAgents, isDefaultName, merge, pidsOf, folderTest, inFolders, transcriptTitles, planQuestions, reader,
+  parseAgents, listAgents, isDefaultName, merge, pidsOf, folderTest, inFolders, transcriptTitles, reader,
 };
