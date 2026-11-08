@@ -34,10 +34,23 @@ jobs:
         run: |
           vsix=$(bash build/pack.sh | tail -n 1)
           mv "$vsix" extension.vsix
+      # This extension depends on Agent Work Plan, so the run installs it too. Checked out after the build above, whose
+      # checks read the files under this folder.
+      - uses: actions/checkout@v7
+        with:
+          repository: xnervwang/vscode-agent-work-plan
+          path: agent-work-plan
+      - name: Build Agent Work Plan's .vsix
+        shell: bash
+        run: |
+          core=$(cd agent-work-plan && bash build/pack.sh | tail -n 1)
+          mv "$core" core.vsix
       - uses: actions/upload-artifact@v7
         with:
           name: vsix
-          path: extension.vsix
+          path: |
+            extension.vsix
+            core.vsix
 
   run:
     needs: package
@@ -62,8 +75,8 @@ jobs:
       - name: Run in VS Code
         if: runner.os == 'Linux'
         shell: bash
-        run: xvfb-run -a node test/vscode/run.js extension.vsix
+        run: xvfb-run -a node test/vscode/run.js extension.vsix core.vsix
       - name: Run in VS Code
         if: runner.os != 'Linux'
         shell: bash
-        run: node test/vscode/run.js extension.vsix
+        run: node test/vscode/run.js extension.vsix core.vsix

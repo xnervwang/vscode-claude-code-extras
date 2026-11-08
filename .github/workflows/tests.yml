@@ -27,14 +27,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          path: vscode-claude-code-extras
           # The commit-message scan reads the history, and a shallow clone would leave it with almost nothing to read.
           fetch-depth: 0
+
+      # test/with-core.js runs this extension with Agent Work Plan from a checkout beside this one.
+      - uses: actions/checkout@v7
+        with:
+          repository: xnervwang/vscode-agent-work-plan
+          path: vscode-agent-work-plan
 
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Run the checks
+        working-directory: vscode-claude-code-extras
         shell: bash
         env:
           CCE_REQUIRE_BROWSER: '1'
@@ -44,6 +52,7 @@ jobs:
 
       - name: Put the count in the run summary
         if: always()
+        working-directory: vscode-claude-code-extras
         shell: bash
         run: |
           {
