@@ -99,7 +99,7 @@ remote.
 
 The extension works by editing files inside the installed Claude Code extension.
 
-Verified against Claude Code 2.1.318 and 2.1.319.
+Verified against Claude Code 2.1.319.
 
 ## Other features
 

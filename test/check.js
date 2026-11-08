@@ -1775,6 +1775,53 @@ console.log('\nbackground sessions');
     } else bad(`a hint that was not a launch was recorded: ${JSON.stringify(ids)}`);
   }
 
+  // A launch cut down to `claude attach <id>` by `grep -o`: the bare line counts for a session created while the call
+  // ran, and not for an older one echoed the same way.
+  {
+    const SID5 = 'eeeeeeee-1111-2222-3333-444444444444';
+    const t5 = path.join(proj, SID5 + '.jsonl');
+    const plans5 = path.join(root, 'plans5');
+    const timed = (command, text, from, to) => {
+      const id = 'toolu_' + (++callNo);
+      return JSON.stringify({ type: 'assistant', timestamp: from, message: { role: 'assistant', content: [
+        { type: 'tool_use', id, name: 'Bash', input: { command } }] } }) + '\n'
+        + JSON.stringify({ type: 'user', timestamp: to, message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: id, content: text }] } }) + '\n';
+    };
+    job('a1a1a1a1', { createdAt: '2026-11-07T23:27:52.257Z' });
+    job('b2b2b2b2', { createdAt: '2026-11-07T18:31:50.000Z' });
+    job('c3c3c3c3', { createdAt: '2026-11-07T20:00:05.000Z' });
+    fs.writeFileSync(t5,
+      timed("claude --bg \"odb\" 2>&1 | grep -oE 'claude attach [0-9a-f]+' | head -1", 'claude attach a1a1a1a1',
+        '2026-11-07T23:27:41.416Z', '2026-11-07T23:27:53.168Z')
+      + timed('wc -l a b c; claude --bg "tests" | grep -o "claude attach [0-9a-f]*"', '121\n12\n3\nclaude attach b2b2b2b2\n',
+        '2026-11-07T18:31:41.913Z', '2026-11-07T18:31:53.859Z')
+      + timed('claude --bg "later" | tail -1; echo claude attach 13579bdf', 'claude attach 13579bdf\n',
+        '2026-11-07T19:00:00.000Z', '2026-11-07T19:00:09.000Z')                       // an older session echoed
+      + ran('claude --bg "untimed" | grep -o "claude attach [0-9a-f]*"', 'claude attach c3c3c3c3'));  // no times recorded
+    const once5 = () => JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      const bg = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'background.js'))});
+      const fs = require('fs');
+      const opts = ${JSON.stringify({ dir: plans5, jobs, transcript: t5 })};
+      bg.scan(${JSON.stringify(SID5)}, opts).then(() => {
+        process.stdout.write(fs.readFileSync(opts.dir + '/' + ${JSON.stringify(SID5)} + '.background', 'utf8'));
+      }).catch((e) => { process.stdout.write(JSON.stringify({ error: e.message })); });`], { encoding: 'utf8' }));
+    const r5 = once5();
+    if (Array.isArray(r5.ids) && r5.ids.join() === 'a1a1a1a1,b2b2b2b2') {
+      ok('a launch cut down to its attach line is found, even after other output');
+    } else bad(`from the attach command alone the scan recorded ${JSON.stringify(r5)}`);
+    if (Array.isArray(r5.ids) && !r5.ids.includes('13579bdf') && !r5.ids.includes('c3c3c3c3')) {
+      ok('an attach line for an older session, or from a call without times, is left out');
+    } else bad(`a bare attach command that was not a launch was recorded: ${JSON.stringify(r5.ids)}`);
+    // As an older version left it: the whole transcript read, the two launches above missed.
+    fs.writeFileSync(path.join(plans5, SID5 + '.background'),
+      JSON.stringify({ ids: ['0a0b0c0d'], scannedTo: fs.statSync(t5).size }) + '\n');
+    const again = once5();
+    if (again.reader === r5.reader && Array.isArray(again.ids) && again.ids.join() === '0a0b0c0d,a1a1a1a1,b2b2b2b2') {
+      ok('an older version\'s link file is rescanned and keeps its sessions');
+    } else bad(`over an older version's link file the scan wrote ${JSON.stringify(again)}`);
+  }
+
   // A conversation that launched nothing still gets an empty link file, which tells the next window, or the extension
   // after a restart, how far its transcript was read. Below, the already-read part is rewritten to contain a launch
   // that only a pass from byte 0 would find; the second pass runs in a separate process, like a starting window.

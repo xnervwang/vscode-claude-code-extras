@@ -42,9 +42,18 @@ const HINTS = ['open in this terminal', 'show recent output', 'stop this session
 const HINT_NEEDLES = HINTS.map((h) => Buffer.from(h, 'utf8'));
 const ID_IN_HINT = new RegExp('^(?:\\x1b\\[[0-9;]*m)*[ \\t]*claude (?:attach|logs|stop) ([0-9a-f]{8})[ \\t]+(?:'
   + HINTS.join('|') + ')', 'gm');
+/* One of those commands alone on its line, which is all a launch piped through `grep -o 'claude attach [0-9a-f]*'`
+   keeps. An `echo` leaves the same line, so it counts only for a session created while the call ran. */
+const ID_ALONE = /^(?:\x1b\[[0-9;]*m)*[ \t]*claude (?:attach|logs|stop) ([0-9a-f]{8})(?:\x1b\[[0-9;]*m)*[ \t\r]*$/gm;
+const ALONE_NEEDLES = ['claude attach ', 'claude logs ', 'claude stop '].map((s) => Buffer.from(s, 'utf8'));
+/* Leeway on both sides of the call: the rows and the record are stamped by different processes. */
+const DURING_SLACK_MS = 5000;
 /* The flag that starts one, found in the command a tool result answers. */
 const BG_FLAG = Buffer.from('--bg', 'utf8');
-const NEEDLES = [BG_FLAG, MARK, ...HINT_NEEDLES];
+const NEEDLES = [BG_FLAG, MARK, ...HINT_NEEDLES, ...ALONE_NEEDLES];
+/* Bump this when the scan starts recognising a launch it used to miss: link files written by an older version are then
+   read again from the start, once. */
+const READER = 2;
 /* The stylesheet carries all of this to every panel on every change, so the caps are about its size, not about how
    many sessions anyone starts. */
 const MAX_SESSIONS = 10;
@@ -68,31 +77,45 @@ const textOf = (b) => (typeof b.content === 'string' ? b.content
  * name a session that has a record. Either end of the CLI's output is enough: a launch whose output lost its hints is an
  * ordinary launch, and so is one whose output kept only the hints - `| tail -3` keeps the last three, and that is how a
  * live launch went unseen. A hint counts only with the words after it, so a command that echoes `claude stop <id>` is
- * not one.
+ * not one. Without them, the command alone counts only if the session's record was created between the call and its
+ * result; an echo of an older session's id fails that.
  *
- * `ran` carries the commands across lines and passes, since a call and its result are separate rows.
+ * `ran` carries the commands, and when each was made, across lines and passes, since a call and its result are
+ * separate rows.
  */
 function readLine(line, ran, jobs, seen) {
   let row;
   try { row = JSON.parse(line); } catch (_) { return; }
   const blocks = row && row.message && Array.isArray(row.message.content) ? row.message.content : [];
+  const at = Date.parse(row && row.timestamp);
   for (const b of blocks) {
     if (!b) continue;
     if (b.type === 'tool_use' && b.input && typeof b.input.command === 'string' && b.input.command.includes('--bg')) {
-      ran.add(b.id);
-      if (ran.size > 500) ran.delete(ran.values().next().value);
+      ran.set(b.id, at);
+      if (ran.size > 500) ran.delete(ran.keys().next().value);
       continue;
     }
     if (b.type !== 'tool_result' || !ran.has(b.tool_use_id)) continue;
     const text = textOf(b);
+    let m;
     for (const re of [ID_AFTER, ID_IN_HINT]) {
       re.lastIndex = 0;
-      let m;
       while ((m = re.exec(text))) {
         if (!seen.has(m[1]) && fs.existsSync(path.join(jobs, m[1], 'state.json'))) seen.add(m[1]);
       }
     }
+    ID_ALONE.lastIndex = 0;
+    while ((m = ID_ALONE.exec(text))) {
+      if (!seen.has(m[1]) && createdBetween(path.join(jobs, m[1], 'state.json'), ran.get(b.tool_use_id), at)) seen.add(m[1]);
+    }
   }
+}
+
+function createdBetween(file, from, to) {
+  if (!isFinite(from) || !isFinite(to)) return false;
+  let t;
+  try { t = Date.parse(JSON.parse(fs.readFileSync(file, 'utf8')).createdAt); } catch (_) { return false; }
+  return isFinite(t) && t >= from - DURING_SLACK_MS && t <= to + DURING_SLACK_MS;
 }
 
 /*
@@ -113,7 +136,7 @@ function readLink(file) {
   let d = null;
   try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { /* caught mid-write, or not ours */ }
   const ids = d && Array.isArray(d.ids) ? d.ids.filter((x) => typeof x === 'string' && SHORT_ID.test(x)) : [];
-  const scannedTo = d && typeof d.scannedTo === 'number' && d.scannedTo >= 0 ? d.scannedTo : 0;
+  const scannedTo = d && d.reader === READER && typeof d.scannedTo === 'number' && d.scannedTo >= 0 ? d.scannedTo : 0;
   const launched = d && typeof d.launched === 'number' && isFinite(d.launched) ? d.launched : 0;
   const link = { ids, scannedTo, launched, exists: true };
   links.set(file, { mtimeMs: st.mtimeMs, size: st.size, link });
@@ -126,7 +149,8 @@ function writeLink(file, link) {
   try {
     const st = fs.statSync(file);
     links.set(file, { mtimeMs: st.mtimeMs, size: st.size,
-      link: { ids: link.ids.slice(), scannedTo: link.scannedTo, launched: link.launched || 0, exists: true } });
+      link: { ids: link.ids.slice(), scannedTo: link.reader === READER ? link.scannedTo : 0, launched: link.launched || 0,
+        exists: true } });
   } catch (_) { /* read again next time */ }
 }
 
@@ -185,7 +209,7 @@ async function scanOnce(session, opts) {
   const link = readLink(file);
   const seen = new Set(link.ids);
   for (const id of known.get(session) || []) seen.add(id);
-  if (!commands.has(session)) commands.set(session, new Set());
+  if (!commands.has(session)) commands.set(session, new Map());
   const ran = commands.get(session);
   // A position past the end means the transcript was replaced rather than appended to, so it is read again in full.
   const reader = { pos: Math.max(link.scannedTo, readTo.get(session) || 0), take: (data) => readChunk(data, ran, jobs, seen) };
@@ -200,7 +224,7 @@ async function scanOnce(session, opts) {
     const launched = Math.max(link.launched, launchOf(link.launched ? fresh : ids, jobs));
     try {
       fs.mkdirSync(dir, { recursive: true });
-      writeLink(file, Object.assign({ ids, scannedTo: consumed }, launched ? { launched } : {}));
+      writeLink(file, Object.assign({ ids, scannedTo: consumed, reader: READER }, launched ? { launched } : {}));
     } catch (_) { /* the next pass writes it */ }
   }
   return { added: fresh.length, scannedTo: consumed };

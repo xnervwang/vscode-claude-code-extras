@@ -1,12 +1,6 @@
 {
   "comment": "Claude Code builds THIS COMMIT was verified to patch, on the machine that wrote it. Written by build/update-versions.js once the whole check suite passes. A build absent from that machine is left out rather than carried forward, so for an older one use: git log -S<version> -- supported-versions.json. See build/supported.js.",
   "claudeCode": {
-    "2.1.318": {
-      "shapes": {
-        "Claude Code panel / tool result": "2.1.285 and later: setToolResult takes options",
-        "Claude Code panel / context meter always visible": "2.1.317 and later: the checks stand alone"
-      }
-    },
     "2.1.319": {
       "shapes": {
         "Claude Code panel / tool result": "2.1.285 and later: setToolResult takes options",
