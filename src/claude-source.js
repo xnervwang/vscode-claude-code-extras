@@ -237,8 +237,8 @@ function createClaudeSource(deps) {
     refocus() {
       if (front) focused.fire({ sessionId: front });
     },
-    /* Called from the tab icon hook (src/host.js). When the active panel gets a new session id, as a new conversation does,
-       that session is reported as the conversation in front. */
+    /* Called from the tab icon hook (src/host.js). When the active panel is first reported with a session id, or gets a new
+       one as a new conversation does, that session is reported as the conversation in front. */
     track(panel, sessionId) {
       if (!panel || typeof panel !== 'object') return;
       const id = typeof sessionId === 'string' ? sessionId : '';
@@ -265,6 +265,7 @@ function createClaudeSource(deps) {
           }));
         }
       } catch (_) { /* focus then comes from the other signals */ }
+      if (id && panel.active) say(id);
     },
     freshAgents() {
       if (agentsLast.records && Date.now() - agentsAt < AGENTS_FRESH_MS) return Promise.resolve(agentsLast);

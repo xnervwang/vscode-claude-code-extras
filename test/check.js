@@ -7264,7 +7264,7 @@ console.log('\nClaude Code\'s own source');
     if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, '', '', false]) && o.listeners === 1 && o.afterDispose === '') {
       ok('sessionForTab() claims only Claude Code tabs');
     } else bad(`claims ${JSON.stringify([o.claims, o.listeners, o.afterDispose])}`);
-    if (JSON.stringify(o.heard) === JSON.stringify(['A', 'A2', 'X', '', 'Y', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
+    if (JSON.stringify(o.heard) === JSON.stringify(['C', 'A', 'A2', 'X', '', 'Y', 'Y', 'Y']) && JSON.stringify(o.follow) === '[true,false,true]') {
       ok('every Claude Code focus signal fires onDidFocus, including a front panel getting its session id');
     } else bad(`focus heard ${JSON.stringify([o.heard, o.follow])}`);
     if (o.focusedA2 === true && JSON.stringify(o.focused) === '[true,true,false,false,false]') {
