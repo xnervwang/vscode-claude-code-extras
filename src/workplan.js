@@ -47,6 +47,7 @@ const path = require('path');
 /* The plan directory and the list of live transcripts come from src/claude-files.js; the directory name derives from
    the plugin and marketplace names. */
 const { DATA_ROOT, PLAN_DIR, planDir, projectsDir, liveSessions } = require('./claude-files');
+const { readBounded } = require('./bounded');
 
 /*
  * Per-conversation files in the plan directory, deleted with their conversation: each is named by session id plus one
@@ -77,6 +78,10 @@ const STATES = ['discussing', 'todo', 'doing', 'waiting', 'parked', 'done', 'dro
    in it, or none, reads as '' - not known - since a row written before the field existed says it only in its note. */
 const WAITING_ON = ['user', 'build', 'someone', 'session', 'other'];
 const MAX_QUESTION_CHARS = 200;
+const MAX_STATE_CHARS = 40;
+/* Applies to other extensions' plans only. MAX_NODES takes effect only after the whole file is read and parsed. Plans
+   on the machines this was written on stay under a megabyte. */
+const MAX_PLAN_BYTES = 8 * 1024 * 1024;
 /* Depth and count are bounded because the file is written by another process: a cycle turned into JSON, or a runaway
    generator, would otherwise be rendered forever. Both are far above any plan a person reads. */
 const MAX_DEPTH = 8;
@@ -127,7 +132,9 @@ function node(raw, depth, budget) {
   const title = text(raw.title, 200);
   if (!title) return null;
   budget.left--;
-  const state = STATES.includes(raw.state) ? raw.state : 'todo';
+  /* An unknown state from a newer writer is kept so the row can show it. A row with no state predates states: todo. */
+  const named = typeof raw.state === 'string' ? raw.state.trim().slice(0, MAX_STATE_CHARS) : '';
+  const state = STATES.includes(named) ? named : (named || 'todo');
   const children = [];
   if (depth < MAX_DEPTH && Array.isArray(raw.children)) {
     for (const child of raw.children) {
@@ -144,15 +151,10 @@ function node(raw, depth, budget) {
   };
 }
 
-/** One plan, or null when there is no readable file for that session. */
-function readOne(session) {
-  const file = path.join(planDir(), session + '.json');
-  let st, body;
-  try {
-    st = fs.statSync(file);
-    if (!st.isFile() || !st.size) return null;
-    body = fs.readFileSync(file, 'utf8');
-  } catch (_) { return null; }
+function readPlanAt(file, session, max = Infinity) {
+  if (!file || !session) return null;
+  const body = readBounded(file, max);
+  if (!body) return null;
   const entry = { session, file, title: '', nodes: [], error: '' };
   let parsed;
   try { parsed = JSON.parse(body); }
@@ -175,7 +177,7 @@ function readOne(session) {
 
 /** The plan for one session id, or null if that conversation has none. */
 function readPlan(session) {
-  return session ? readOne(session) : null;
+  return session ? readPlanAt(path.join(planDir(), session + '.json'), session) : null;
 }
 
 /* A plan younger than this is left alone whatever the transcripts say. Its real job is not to wait longer - a transcript
@@ -259,14 +261,14 @@ function openFirst(items, stateOf = (n) => n && n.state) {
 /** Open counts, which is what the view puts in its title so the shape of the work is legible without expanding it. */
 function countOpen(nodes, acc = { discussing: 0, todo: 0, doing: 0, waiting: 0, parked: 0, done: 0, dropped: 0 }) {
   for (const n of nodes || []) {
-    acc[n.state] = (acc[n.state] || 0) + 1;
+    if (STATES.includes(n.state)) acc[n.state] = (acc[n.state] || 0) + 1;
     countOpen(n.children, acc);
   }
   return acc;
 }
 
 module.exports = {
-  readPlan, countOpen, planDir, liveSessions, sweepOrphans, openFirst,
+  readPlan, readPlanAt, countOpen, planDir, liveSessions, sweepOrphans, openFirst,
   DATA_ROOT, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
-  STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS,
+  STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS, MAX_PLAN_BYTES,
 };

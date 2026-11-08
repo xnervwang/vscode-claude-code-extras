@@ -10,6 +10,7 @@
  */
 const crypto = require('crypto');
 const { textFor } = require('./conversations-text');
+const { keyPart } = require('./sources');
 
 class AnswerView {
   /** `send(question, text)` sends an answer, `open(target)` goes to a conversation, `age(ms)` says how long ago and
@@ -50,7 +51,9 @@ class AnswerView {
   /** Shows `q`, a question from the Conversations tree, ready to be answered. */
   show(q) {
     if (!q || !q.sessionId || !q.row) return;
-    this.current = Object.assign({}, q, { key: q.sessionId + '/' + q.row });
+    const key = q.sourceId ? keyPart(q.sourceId) + '/' + keyPart(q.sessionId) + '/' + q.row
+      : q.sessionId + '/' + q.row;
+    this.current = Object.assign({}, q, { key });
     this.paint(true);
   }
 

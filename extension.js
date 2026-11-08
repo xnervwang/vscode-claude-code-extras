@@ -24,7 +24,7 @@ const { safeColor } = webview;
 const { readTasks, rememberDirs } = require('./src/tasks');
 const background = require('./src/background');
 const efforts = require('./src/efforts');
-const { countOpen, sweepOrphans, planDir, readPlan, DATA_ROOT, PLAN_DIR } = require('./src/workplan');
+const { countOpen, sweepOrphans, planDir, readPlan, readPlanAt, MAX_PLAN_BYTES } = require('./src/workplan');
 const { transcriptOf, writeAtomic } = require('./src/claude-files');
 const { WorkPlanProvider, ageSince } = require('./src/workplan-view');
 const answers = require('./src/answers');
@@ -33,6 +33,9 @@ const waiting = require('./src/waiting');
 const conversations = require('./src/conversations');
 const { ConversationsProvider } = require('./src/conversations-view');
 const conversationsText = require('./src/conversations-text');
+const sources = require('./src/sources');
+const sourceIcons = require('./src/sourceicons');
+const { createClaudeSource } = require('./src/claude-source');
 const pluginInstall = require('./src/plugin-install');
 const pythonRuntime = require('./src/python-runtime');
 const webviewLimit = require('./src/webview-limit');
@@ -192,10 +195,13 @@ async function renameSettings(context) {
   return done.join(', ');
 }
 
+/* activate() returns `workPlanHost`, through which another extension registers a conversation source (src/sources.js). */
 async function activate(context) {
   let renamed = '';
   try { renamed = await renameSettings(context); } catch (e) { renamed = 'failed: ' + (e && e.message); }
-  return start(context, renamed);
+  const { synced, workPlanHost } = start(context, renamed);
+  await synced;
+  return { workPlanHost };
 }
 
 function start(context, renamed) {
@@ -521,9 +527,24 @@ function start(context, renamed) {
    * Nothing here writes a work plan. The extension shows what a conversation keeps, and offers the file for editing so
    * a correction goes into the same copy the conversation reads back.
    */
-  const workplan = new WorkPlanProvider();
+  /* `focus` is the (sourceId, sessionId) whose plan the work plan view shows. */
+  const registry = new sources.Registry();
+  const focus = new sources.Focus();
+  const planOf = (sourceId, session) => {
+    const source = registry.get(sourceId);
+    const file = source ? sources.planFileOf(source, session) : '';
+    const max = sourceId === sources.BUILTIN ? Infinity : MAX_PLAN_BYTES;
+    return { file, plan: file ? readPlanAt(file, session, max) : null };
+  };
+  const workplan = new WorkPlanProvider({ read: (session, sourceId) => planOf(sourceId, session).plan });
   const view = vscode.window.createTreeView('claudeCodeExtras.workPlan', { treeDataProvider: workplan });
   context.subscriptions.push(view);
+  let viewSays;
+  const paintPlanView = () => {
+    const s = registry.size > 1 && focus.sourceId ? registry.get(focus.sourceId) : null;
+    const says = s ? sources.labelOf(s) : undefined;
+    if (says !== viewSays) { viewSays = says; view.description = says; }
+  };
 
   /*
    * The Conversations view, a tab in the panel (src/conversations-view.js), and the status bar entry that opens it. VS Code
@@ -571,7 +592,7 @@ function start(context, renamed) {
       try {
         const body = answers.message(q.row, q.question, text);
         answerView.setState(q.key, { kind: 'waiting' });
-        courier.send({ sessionId: q.sessionId, row: q.row, text: body }, { key: q.key });
+        courier.send({ sourceId: q.sourceId || sources.BUILTIN, sessionId: q.sessionId, row: q.row, text: body }, { key: q.key });
       } catch (e) {
         log.appendLine('answer: ' + (e && e.message));
         answerView.setState(q.key, { kind: 'error' });
@@ -645,26 +666,95 @@ function start(context, renamed) {
   const refreshPlans = () => {
     sweepPlans().catch((e) => log.appendLine('orphan work plans: ' + e.message));
     workplan.setTimeZone(clientZone());
-    const moved = workplan.setFocus(activeChat());
+    const moved = workplan.setFocus(focus.sessionId, focus.sourceId);
     if (workplan.refresh() || moved) paintBadge();
+    paintPlanView();
     refreshConversations(false);
   };
   /*
-   * The running conversations are asked for at most every half minute, on the periodic tick, and a change to any plan
-   * re-reads only the plans against the last answer: a question added to a plan should show at once, and starting
-   * Claude Code's binary for every write to a plan would cost a process per row changed.
+   * Claude Code's listConversations() is called on every pass. It runs `claude agents` only after invalidate() (the
+   * 30-second tick, a folder or settings change), so a question added to a plan shows at once without starting Claude
+   * Code's binary for each write.
    *
-   * The stopped conversations with open rows are looked for on the same half-minute step, since that reads every recent
-   * plan. Host updates for this window's conversations (src/host.js) arrive as they happen and override the last poll.
-   *
-   * One pass at a time.
+   * Another extension's source is called only when it registers, when it fires onDidChangeConversations, on the tick and
+   * on a folder or settings change. A pass waits OTHER_WAIT_MS for it and otherwise uses its previous list; a result that
+   * arrives later triggers one repaint from the cached lists, which calls no source.
    */
-  let agentsAt = 0, agentsLast = { records: null, error: '' }, convBusy = false, convAgain = null;
-  let stoppedLast = new Map(), liveStates = new Map(), unreadKeys = new Set(), statesTimer = 0;
+  const LIST_WAIT_MS = 20000;
+  const OTHER_WAIT_MS = 3000;
+  const EMPTY_LIST = { list: [], problem: '' };
+  let convBusy = false, convAgain = null, closing = false;
+  let liveStates = new Map(), unreadKeys = new Set(), statesTimer = 0;
   const readTitles = waiting.reader();
   const NO_CONVERSATIONS = { running: [], stopped: [], asks: 0 };
-  const refreshConversations = async (askAgents) => {
-    if (convBusy) { convAgain = !!(convAgain || askAgents); return; }
+  const rowIcons = new Map(), rowIconUris = new Map();
+  const rowIcon = (source, state) => {
+    const logo = sources.logoOf(source);
+    if (!logo) return undefined;
+    const files = sourceIcons.iconsFor(logo, state, path.join(context.globalStorageUri.fsPath, 'conversation-icons'), rowIcons);
+    if (!files) return undefined;
+    const uri = (f) => { if (!rowIconUris.has(f)) rowIconUris.set(f, vscode.Uri.file(f)); return rowIconUris.get(f); };
+    return { light: uri(files.light), dark: uri(files.dark) };
+  };
+  /* On close each pending timeout's callback runs at once, so no promise is left pending. */
+  const waits = new Map();
+  const after = (fn, ms) => { const t = setTimeout(() => { waits.delete(t); fn(); }, ms); waits.set(t, fn); return t; };
+  const cancel = (t) => { clearTimeout(t); waits.delete(t); };
+  const said = (e) => {
+    const m = sources.get(e, 'message');
+    if (typeof m === 'string' && m) return m;
+    try { return String(e); } catch (_) { return 'it failed'; }
+  };
+  /* Never rejects: a failing source must not stop the other sources' lists from being drawn. */
+  const listOf = (source, max) => new Promise((resolve) => {
+    const timer = after(() => resolve({ list: [], problem: 'it did not list its conversations within '
+      + (LIST_WAIT_MS / 1000) + ' seconds' }), LIST_WAIT_MS);
+    let answer;
+    try { answer = Promise.resolve(sources.call(source, 'listConversations', [], [])); } catch (e) { answer = Promise.reject(e); }
+    answer.then((got) => {
+      const problem = sources.get(got, 'problem');
+      resolve({ list: sources.conversations(got, max), problem: typeof problem === 'string' ? problem : '' });
+    }, (e) => resolve({ list: [], problem: said(e) }))
+      .catch(() => resolve({ list: [], problem: 'its list could not be read' }))
+      .finally(() => cancel(timer));
+  });
+  const listState = (entry) => entry.list
+    || (entry.list = { lastResult: null, pending: null, askNext: true, askAgain: false, repaintWhenDone: false });
+  const ask = (entry) => {
+    const st = listState(entry);
+    if (st.pending) { st.askAgain = true; return st.pending; } // onDidChangeConversations during a call: call again after it
+    st.askNext = false;
+    const max = entry.id === sources.BUILTIN ? Infinity : sources.MAX_CONVERSATIONS;
+    const asking = listOf(entry.source, max).then((r) => {
+      if (st.pending === asking) st.pending = null;
+      if (closing || !registry.has(entry)) return r;
+      st.lastResult = r;
+      if (st.askAgain) { st.askAgain = false; st.repaintWhenDone = false; st.askNext = true; refreshConversations(false); }
+      else if (st.repaintWhenDone) { st.repaintWhenDone = false; refreshConversations(false, true); }
+      return r;
+    });
+    st.pending = asking;
+    return asking;
+  };
+  const listFor = (entry, cachedOnly) => {
+    const st = listState(entry);
+    if (entry.id === sources.BUILTIN) return cachedOnly && st.lastResult ? Promise.resolve(st.lastResult) : ask(entry);
+    if (cachedOnly || !st.askNext) return Promise.resolve(st.lastResult || EMPTY_LIST);
+    const asking = ask(entry);
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = after(() => { if (done) return; done = true; st.repaintWhenDone = true; resolve(st.lastResult || EMPTY_LIST); }, OTHER_WAIT_MS);
+      asking.then((r) => { if (done) return; done = true; cancel(timer); resolve(r); });
+    });
+  };
+  const askAll = () => {
+    claude.invalidate();
+    for (const entry of registry.list()) listState(entry).askNext = true;
+  };
+  const refreshConversations = async (askAgents, cachedOnly = false) => {
+    if (closing) return;
+    if (askAgents) askAll();
+    if (convBusy) { convAgain = convAgain === null ? !!cachedOnly : convAgain && !!cachedOnly; return; }
     convBusy = true;
     try {
       if (!conversationsOn()) {
@@ -672,51 +762,54 @@ function start(context, renamed) {
         paintConversations();
         return;
       }
-      const ask = askAgents || !agentsAt;
-      if (ask) {
-        agentsLast = await waiting.listAgents(pluginInstall.findClaude(claudeFolders()));
-        agentsAt = Date.now();
-      }
-      const { records, error } = agentsLast;
+      const asked = registry.list();
+      const got = await Promise.all(asked.map((entry) => listFor(entry, cachedOnly)));
+      if (closing) return;
       const folders = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath);
-      const all = records ? waiting.merge(records) : new Map();
-      const sessions = waiting.inFolders(all, folders);
-      if (ask) stoppedLast = conversations.stoppedWithOpenRows(folders, new Set(all.keys()), { readPlan });
-      const data = conversations.build({ sessions, stopped: stoppedLast, readPlan, titles: readTitles.titles,
-        since: readTitles.since, live: liveStates, unread: unreadKeys });
-      conversationsTree.set(data, records ? '' : error, conversationsLang());
+      const lists = [], problems = [];
+      asked.forEach((entry, i) => {
+        if (!registry.has(entry)) return;
+        lists.push({ sourceId: entry.id, conversations: got[i].list });
+        if (got[i].problem) problems.push([entry.source, got[i].problem]);
+      });
+      const several = registry.size > 1;
+      const data = conversations.assemble({ lists, folders, planOf });
+      if (several) {
+        for (const c of data.running.concat(data.stopped)) {
+          const source = registry.get(c.sourceId);
+          c.source = { id: c.sourceId, label: sources.labelOf(source) || c.sourceId };
+          try { const icon = rowIcon(source, c.state); if (icon) c.icon = icon; } catch (_) { /* the row keeps the state icon */ }
+        }
+      }
+      const problem = problems.map(([source, what]) => (several ? sources.labelOf(source) + ': ' + what : what)).join('\n');
+      conversationsTree.set(data, problem, conversationsLang());
       answerView.setLanguage(conversationsLang());
       paintConversations();
     } catch (e) {
       log.appendLine('conversations: ' + (e && e.message));
     } finally {
       convBusy = false;
-      if (convAgain !== null) { const again = convAgain; convAgain = null; refreshConversations(again); }
+      if (convAgain !== null && !closing) { const cached = convAgain; convAgain = null; refreshConversations(false, cached); }
     }
   };
+  context.subscriptions.push({ dispose: () => {
+    closing = true;
+    for (const [t, fn] of waits) { clearTimeout(t); try { fn(); } catch (_) { /* closing anyway */ } }
+    waits.clear();
+  } });
   globalThis.__cceStatesHook = (states, active, open, unread) => {
     try {
       liveStates = new Map((Array.isArray(states) ? states : [])
         .filter((s) => s && typeof s.sessionId === 'string').map((s) => [s.sessionId, s.state]));
       unreadKeys = new Set((Array.isArray(unread) ? unread : []).filter((k) => typeof k === 'string'));
-      if (!statesTimer) statesTimer = setTimeout(() => { statesTimer = 0; refreshConversations(false); }, 300);
+      if (!statesTimer) statesTimer = setTimeout(() => { statesTimer = 0; claude.changed(); }, 300);
     } catch (_) { /* the next update */ }
   };
   /* The info box asks for its conversation's process id. `claude agents` is run for it unless the last run is under
      half a minute old. */
-  let pidsAsk = null;
-  const freshAgents = () => {
-    if (agentsLast.records && Date.now() - agentsAt < 30000) return Promise.resolve(agentsLast);
-    if (!pidsAsk) {
-      pidsAsk = waiting.listAgents(pluginInstall.findClaude(claudeFolders()))
-        .then((r) => { if (r.records) { agentsLast = r; agentsAt = Date.now(); } return r; })
-        .finally(() => { pidsAsk = null; });
-    }
-    return pidsAsk;
-  };
   globalThis.__cceProcessHook = (sessionId) => {
     if (removed() || !enabled() || switchedOff().includes('footerInfo')) return;
-    freshAgents().then((r) => {
+    claude.freshAgents().then((r) => {
       const reply = { type: 'cce_process', sessionId, pids: r.records ? waiting.pidsOf(r.records, sessionId) : null };
       if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
     }).catch((e) => log.appendLine('process for the info box: ' + (e && e.message)));
@@ -727,12 +820,54 @@ function start(context, renamed) {
     if (globalThis.__cceProcessHook) delete globalThis.__cceProcessHook;
   } });
 
-  const courier = new answers.Courier({
-    dir: answersDir(),
-    canShow: (sessionId) => {
+  /* Created here because it reads globals the patched host sets in this process. */
+  const claude = createClaudeSource({
+    planDir,
+    listAgents: () => waiting.listAgents(pluginInstall.findClaude(claudeFolders())),
+    folders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
+    readPlan,
+    titles: readTitles.titles,
+    since: readTitles.since,
+    live: () => liveStates,
+    unread: () => unreadKeys,
+    activeChat: () => activeChat(),
+    logo: () => {
+      const ext = vscode.extensions.getExtension(webview.id);
+      if (!ext || !ext.extensionPath) return null;
+      const file = vscode.Uri.file(path.join(ext.extensionPath, 'resources', 'claude-logo.svg'));
+      return { light: file, dark: file };
+    },
+    canDeliver: (sessionId) => {
       try { return typeof globalThis.__cceAnswer === 'function' && globalThis.__cceAnswer(sessionId) === true; } catch (_) { return false; }
     },
-    hand: (sessionId, text, id) => globalThis.__cceAnswer(sessionId, text, id) === true,
+    hand: (sessionId, text, key) => globalThis.__cceAnswer(sessionId, text, key) === true,
+    /*
+     * An extension cannot raise another window, and opening the conversation here as well would start a second process on
+     * it, so a conversation not open in this window gets a message saying where it is. Returns true after the message so
+     * the host does not add its own.
+     */
+    reveal: async (sessionId, title, cwd) => {
+      const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
+      const elsewhere = list('__cceSessionsElsewhere');
+      const here = list('__cceSessionsShown').filter((id) => !elsewhere.includes(id));
+      if (here.includes(sessionId)) {
+        await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId);
+        return true;
+      }
+      const where = cwd ? ` (folder ${cwd})` : '';
+      vscode.window.showInformationMessage(elsewhere.includes(sessionId)
+        ? `"${title}" is open in another VS Code window${where}.`
+        : `"${title}" is not open in this window${where}. It is running outside it, so it is not opened here as well.`);
+      return true;
+    },
+  });
+  context.subscriptions.push(claude);
+
+  const delivery = answers.throughSources((id) => registry.get(id), (id, sent, reason) => courier.handed(id, sent, reason));
+  const courier = new answers.Courier({
+    dir: answersDir(),
+    canShow: delivery.canShow,
+    hand: delivery.hand,
     finish: (sent, result) => {
       if (result.kind !== 'sent' && result.kind !== 'lost') {
         Promise.resolve(vscode.env.clipboard.writeText(sent.text)).catch(() => {});
@@ -742,7 +877,7 @@ function start(context, renamed) {
     },
   });
   const pumpAnswers = () => courier.pump();
-  globalThis.__cceAnswerHook = (id, sent, reason) => courier.handed(id, sent, reason);
+  globalThis.__cceAnswerHook = (key, sent, reason) => claude.answered(key, sent, reason);
   /* The folder is watched rather than polled: answers are rare, and a window shows the result as soon as the file lands.
      The half-minute tick below reads it too, in case a change is not heard. */
   let answersWatch = null, answersSoon = 0;
@@ -818,12 +953,28 @@ function start(context, renamed) {
     open(path.join(transcript.replace(/\.jsonl$/, ''), 'subagents'), 'sub');
   };
   context.subscriptions.push({ dispose: unwatchEffort });
-  const followChat = () => {
-    const id = activeChat();
-    if (!workplan.setFocus(id)) return;
-    log.appendLine('active conversation: ' + (id || '(none reported)'));
+  /* A page focus arrives inside the patched host's message handler, so its redraw is deferred with setTimeout(0) instead
+     of reading a plan file there. `focus` is updated at once, so the deferred redraw shows the latest signal. */
+  let drawLater = false, drawTimer = 0;
+  const drawFocus = () => {
+    if (closing) return;
+    /* refreshPlans() may already have switched the plan, so the description is not tied to setFocus() changing. */
+    paintPlanView();
+    if (!workplan.setFocus(focus.sessionId, focus.sourceId)) return;
+    log.appendLine('active conversation: ' + (focus.sessionId || '(none reported)')
+      + (registry.size > 1 && focus.sourceId ? ` (${focus.sourceId})` : ''));
     workplan.refresh();
     paintBadge();
+  };
+  const showFocus = () => {
+    if (closing) return;
+    if (!drawLater) { drawFocus(); return; }
+    if (!drawTimer) drawTimer = setTimeout(() => { drawTimer = 0; drawFocus(); }, 0);
+  };
+  /* The background and effort scans are for Claude Code's own panel, so they follow activeSessionId even while the work
+     plan view shows another source's conversation. */
+  const followChat = () => {
+    if (!claude.followChat()) return;
     scanBackground();
     scanEffort();
     watchEffort();
@@ -842,6 +993,15 @@ function start(context, renamed) {
   context.subscriptions.push({
     dispose: () => { stopPolling(); if (globalThis.__cceChatHook) delete globalThis.__cceChatHook; },
   });
+  /* A Claude Code panel's page got focus (src/page/92-focus.js). */
+  globalThis.__cceFocusHook = (sessionId) => {
+    drawLater = true;
+    try { claude.pageFocus(sessionId); } catch (e) { log.appendLine('page focus: ' + (e && e.message)); } finally { drawLater = false; }
+  };
+  context.subscriptions.push({ dispose: () => {
+    if (drawTimer) clearTimeout(drawTimer);
+    if (globalThis.__cceFocusHook) delete globalThis.__cceFocusHook;
+  } });
   /* A panel reports its time zone as it opens, which is usually after this has activated; the rows are redrawn then
      rather than at the next periodic refresh. */
   globalThis.__cceTzHook = () => {
@@ -878,6 +1038,7 @@ function start(context, renamed) {
   const tabIcons = new Map(), tabIconUris = new Map();
   globalThis.__cceTabIcon = (panel, state, run, home, sessionId) => {
     try {
+      claude.track(panel, sessionId);
       const title = tabdot.withoutMark(panel.title);
       if (panel.title !== title) panel.title = title;
       if (!enabled() || removed() || typeof home !== 'string') return undefined;
@@ -1144,6 +1305,92 @@ function start(context, renamed) {
     if (globalThis.__cceRecentClosed) delete globalThis.__cceRecentClosed;
     if (globalThis.__cceSendSessionStates) delete globalThis.__cceSendSessionStates;
   } });
+  /* The watcher's base is the parent directory because a plan directory may not exist yet. Watchers outside the
+     workspace are not guaranteed to fire; the 30-second tick refreshes too. */
+  const unhook = (subs) => { for (const d of subs) { try { d.dispose(); } catch (_) { /* already disposed */ } } subs.length = 0; };
+  /* The id is reserved before any of the source's code runs, so a source that registers again from its own getter is
+     rejected. */
+  const addSource = (source) => {
+    if (closing) return { ok: false, why: 'the window is closing', id: '', remove() {} };
+    const reserved = registry.reserve(source, sources.idOf(source));
+    if (!reserved.ok) return { ok: false, why: reserved.why, id: '', remove() {} };
+    const entry = reserved.entry, id = entry.id;
+    const keep = (d) => { if (d) entry.subs.push(d); };
+    const giveUp = (why) => { unhook(entry.subs); registry.release(entry); return { ok: false, why, id: '', remove() {} }; };
+    try {
+      keep(sources.listen(source, 'onDidFocus', (e) => {
+        if (!registry.has(entry)) return;
+        const sessionId = sources.get(e, 'sessionId');
+        if (sessionId !== undefined && sessionId !== '' && !sources.usableId(sessionId)) return;
+        if (focus.report(id, sessionId || '')) showFocus();
+      }));
+      keep(sources.listen(source, 'onDidChangeConversations', () => {
+        if (!registry.has(entry)) return;
+        const st = listState(entry);
+        if (st.pending) st.askAgain = true; else st.askNext = true;
+        refreshConversations(false);
+      }));
+      const dir = sources.planDirOf(source);
+      if (dir) {
+        try {
+          const watcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(vscode.Uri.file(path.dirname(dir)), path.basename(dir) + '/*.json'));
+          watcher.onDidCreate(refreshPlans);
+          watcher.onDidChange(refreshPlans);
+          watcher.onDidDelete(refreshPlans);
+          keep(watcher);
+        } catch (e) {
+          log.appendLine('work plan watcher not available: ' + e.message);
+        }
+      }
+    } catch (e) {
+      return giveUp('it could not be attached: ' + said(e));
+    }
+    if (closing) return giveUp('the window is closing');
+    return { ok: true, why: '', id, remove: registry.commit(entry) };
+  };
+  const claimTab = (again) => {
+    const groups = vscode.window.tabGroups;
+    const group = groups && groups.activeTabGroup;
+    if (focus.claim(group ? group.activeTab : undefined, registry.list(), again)) showFocus();
+  };
+  addSource(claude.source);
+  claude.followChat();
+  /* The active tab is offered again only when nothing is in focus or the focused source was removed: Codex registering
+     must not pull the view away from a Claude Code sidebar conversation. */
+  context.subscriptions.push(registry.onDidChange((e) => {
+    let again = !focus.sessionId;
+    if (e.removed) {
+      unhook(e.entry.subs);
+      if (focus.drop(e.removed)) { showFocus(); again = true; }
+    }
+    if (again) claimTab(true);
+    if (workplan.setScoped(registry.size > 1) && workplan.refresh()) paintBadge();
+    paintPlanView();
+    refreshConversations(false);
+  }));
+  {
+    const groups = vscode.window.tabGroups;
+    for (const name of ['onDidChangeTabs', 'onDidChangeTabGroups']) {
+      if (groups && typeof groups[name] === 'function') context.subscriptions.push(groups[name](() => claimTab(false)));
+    }
+  }
+  context.subscriptions.push({ dispose: () => {
+    for (const entry of registry.list()) unhook(entry.subs);
+    registry.clear();
+  } });
+  const workPlanHost = Object.freeze({
+    version: sources.PROTOCOL,
+    majors: sources.MAJORS.slice(),
+    features: sources.FEATURES.slice(),
+    registerSource(source) {
+      const r = addSource(source);
+      if (!r.ok) log.appendLine('a conversation source was not registered: ' + r.why);
+      else log.appendLine(`conversation source registered: ${sources.labelOf(source)}`);
+      const remove = () => r.remove();
+      return typeof vscode.Disposable === 'function' ? new vscode.Disposable(remove) : { dispose: remove };
+    },
+  });
   refreshPlans();
   paintBadge();
   watchEffort();
@@ -1342,21 +1589,6 @@ function start(context, renamed) {
   };
   syncPlugin(false);
 
-  /* A work plan is written by another process, so a watcher is what makes an edit show up at once. Its base is outside
-     the workspace on purpose - that is where the plugin keeps its data - and the interval below is the fallback,
-     because a watcher out there is a courtesy rather than a guarantee.
-     The base is the directory every plugin's data sits under, not ours: ours does not exist until the plugin is
-     installed, and a watcher cannot be given a base that is not there yet. */
-  try {
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(DATA_ROOT), PLAN_DIR + '/*.json'));
-    watcher.onDidCreate(refreshPlans);
-    watcher.onDidChange(refreshPlans);
-    watcher.onDidDelete(refreshPlans);
-    context.subscriptions.push(watcher);
-  } catch (e) {
-    log.appendLine('work plan watcher not available: ' + e.message);
-  }
   /*
    * A single 30-second timer re-checks the plan and, while the additions are on and this window runs the installed
    * build, the transcript, the live stylesheet and the log. Task files are written by another process, so nothing else
@@ -1364,7 +1596,7 @@ function start(context, renamed) {
    * content changes. While the additions are off the transcript is not watched.
    */
   const tick = setInterval(() => {
-    agentsAt = 0;
+    askAll();
     refreshPlans();
     try { pumpAnswers(); } catch (e) { log.appendLine('answer: ' + (e && e.message)); }
     if (removed() || !enabled() || uninstalling() || replaced()) { unwatchEffort(); return; }
@@ -1431,17 +1663,14 @@ function start(context, renamed) {
      */
     registerCommand('openWaitingConversation', async (target) => {
       if (!target || !target.sessionId) return;
-      const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
-      const elsewhere = list('__cceSessionsElsewhere');
-      const here = list('__cceSessionsShown').filter((id) => !elsewhere.includes(id));
-      if (here.includes(target.sessionId)) {
-        await vscode.commands.executeCommand('claude-vscode.editor.open', target.sessionId);
-        return;
-      }
+      const source = registry.get(target.sourceId || sources.BUILTIN);
+      if (!source) return;
+      let shown = false;
+      const row = { title: typeof target.title === 'string' ? target.title : '', cwd: typeof target.cwd === 'string' ? target.cwd : '' };
+      try { shown = (await sources.call(source, 'reveal', [target.sessionId, row], false)) === true; } catch (_) { shown = false; }
+      if (shown) return;
       const where = target.cwd ? ` (folder ${target.cwd})` : '';
-      vscode.window.showInformationMessage(elsewhere.includes(target.sessionId)
-        ? `"${target.title}" is open in another VS Code window${where}.`
-        : `"${target.title}" is not open in this window${where}. It is running outside it, so it is not opened here as well.`);
+      vscode.window.showInformationMessage(`"${target.title}" could not be brought to front from this window${where}.`);
     }),
     registerCommand('openWorkPlanFile', async (element) => {
       const file = (element && element.plan && element.plan.file) || (workplan.shown() && workplan.shown().file);
@@ -1486,7 +1715,7 @@ function start(context, renamed) {
     writeLiveNow();
   }));
 
-  return sync();
+  return { synced: sync(), workPlanHost };
 }
 
 /*

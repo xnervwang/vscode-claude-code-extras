@@ -27,6 +27,7 @@
   var useSession = function(s){
     var was = sessionRef;
     sessionRef = s;
+    try { sayFocusIfFocused(); } catch (e) {}
     if (!was) return;
     titles = new Map(); KNOWN = []; srcMap = srcTasks = null;
     try { primeIdle(); } catch (e) {}

@@ -443,6 +443,7 @@
     setInterval(function(){ try { sweepCaches(); } catch (e) {} }, SWEEP_MS);
     try { window.addEventListener('pagehide', function(){ forget(lastProbeUrl); }); } catch (e) {}
     try { listenForAnswers(); } catch (e) {}
+    try { listenForFocus(); } catch (e) {}
     // The chime and the low-context outline must not depend on DOM churn: a turn can end without
     // any further mutation, which would leave the last sweep observing a still-busy state.
     setInterval(function(){ try { watchIdle(); } catch (e) {} try { fillWindow(); } catch (e) {} try { markCtxLow(); } catch (e) {} try { ensureMute(); } catch (e) {} try { ensureInfo(); } catch (e) {} try { ensureFocusControl(); } catch (e) {} try { paintToolClock(); } catch (e) {} try { orderControls(); } catch (e) {} }, 700);

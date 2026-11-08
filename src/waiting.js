@@ -98,18 +98,26 @@ function pidsOf(records, sessionId) {
 const realPath = (p) => { try { return fs.realpathSync.native(p); } catch (_) { return path.resolve(p); } };
 const caseOf = process.platform === 'win32' ? (s) => s.toLowerCase() : (s) => s;
 
+/* Compares real paths, so a folder reached through a symbolic link still matches. */
+function folderTest(folders) {
+  const roots = (folders || []).filter(Boolean).map((f) => caseOf(realPath(f)));
+  return (dir) => {
+    if (!dir || !roots.length) return false;
+    const cwd = caseOf(realPath(dir));
+    return roots.some((root) => {
+      const rel = path.relative(root, cwd);
+      return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+    });
+  };
+}
+
 /** Drops background sessions, and sessions started outside `folders`. */
 function inFolders(sessions, folders, { isBackground = bgSessions.isBackground } = {}) {
-  const roots = (folders || []).filter(Boolean).map((f) => caseOf(realPath(f)));
+  const inside = folderTest(folders);
   const out = new Map();
   for (const [id, s] of sessions) {
     if (s.kind === 'background' || !s.cwd) continue;
-    const cwd = caseOf(realPath(s.cwd));
-    const under = (root) => {
-      const rel = path.relative(root, cwd);
-      return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
-    };
-    if (roots.some(under) && !isBackground(id, s.cwd)) out.set(id, s);
+    if (inside(s.cwd) && !isBackground(id, s.cwd)) out.set(id, s);
   }
   return out;
 }
@@ -188,5 +196,5 @@ function reader() {
 }
 
 module.exports = {
-  parseAgents, listAgents, isDefaultName, merge, pidsOf, inFolders, transcriptTitles, planQuestions, reader,
+  parseAgents, listAgents, isDefaultName, merge, pidsOf, folderTest, inFolders, transcriptTitles, planQuestions, reader,
 };

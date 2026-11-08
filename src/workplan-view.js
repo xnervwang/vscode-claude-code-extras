@@ -16,6 +16,7 @@
  */
 const vscode = require('vscode');
 const { readPlan, openFirst, OPEN_STATES } = require('./workplan');
+const { keyPart } = require('./sources');
 
 /*
  * `clockface` is in the editor's icon font from VS Code 1.111 on. An older editor, or a fork built on one, draws nothing
@@ -55,6 +56,9 @@ const LOOK = {
   done: { icon: 'pass-filled', color: 'charts.green', word: 'done' },
   dropped: { icon: 'circle-slash', color: 'descriptionForeground', word: 'dropped' },
 };
+const unknownLook = (state) => ({ icon: 'question', color: 'descriptionForeground', word: String(state || '') });
+/* hasOwnProperty, so a state named toString or __proto__ is unknown rather than an Object.prototype member. */
+const lookOf = (state) => (Object.prototype.hasOwnProperty.call(LOOK, state) ? LOOK[state] : unknownLook(state));
 
 /*
  * How long a row has been in a state it is meant to leave soon, or nothing.
@@ -167,16 +171,18 @@ function hasOpen(node) {
 }
 
 class WorkPlanProvider {
-  constructor() {
+  constructor({ read } = {}) {
     this._emitter = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._emitter.event;
+    this.read = typeof read === 'function' ? read : (session) => readPlan(session);
     /* The plan shown, or null. */
     this.plan = null;
     this.signature = '';
-    /* The session id of the conversation in front of the reader, as the Claude Code host itself reports it. Only that
-       conversation's plan is shown. Empty means the host has not said - no conversation open yet, or a build this
-       extension could not patch - and then nothing is, and the view's welcome text explains itself. */
+    /* The session id of the conversation whose plan is shown. Empty when no source has reported one (no conversation
+       open yet, or a Claude Code build this extension could not patch); the view then shows its welcome text. */
     this.focus = '';
+    this.source = '';
+    this.scoped = false;
     /* The reader's time zone as the panel reports it, or empty for the host's own. */
     this.timeZone = '';
     /* What went wrong installing the plugin that writes the plans, if anything. It is shown as a row rather than in the
@@ -193,10 +199,18 @@ class WorkPlanProvider {
   /* Records which conversation to read and says whether that moved; reading and redrawing is refresh()'s job. Doing both
      here made every caller read the file twice, since each one has to call refresh() anyway for the case where the
      conversation stayed put and its plan changed underneath. */
-  setFocus(session) {
-    const next = String(session || '');
-    if (next === this.focus) return false;
+  setFocus(session, source = '') {
+    const next = String(session || ''), from = String(source || '');
+    if (next === this.focus && from === this.source) return false;
     this.focus = next;
+    this.source = from;
+    return true;
+  }
+
+  setScoped(on) {
+    const next = !!on;
+    if (next === this.scoped) return false;
+    this.scoped = next;
     return true;
   }
 
@@ -224,16 +238,17 @@ class WorkPlanProvider {
        shows an empty tree, where the view's welcome text explains itself. Reading the whole directory here is what once
        drew every conversation on the machine into a window that had simply not been told which one it was looking at;
        a view whose only claim is "what THIS conversation has to do" has no business showing other people's leftovers. */
-    const plan = this.focus ? readPlan(this.focus) : null;
+    const plan = this.focus ? this.read(this.focus, this.source) : null;
     /* The focus is part of the signature because two conversations can hold identical plans - most often two empty ones.
-       Comparing only the content would then find no change and leave the previous conversation's tree on screen. The
+       Comparing only the content would then find no change and leave the previous conversation's tree on screen. Its
+       agent and file are part of it for the same reason across agents, where two conversations can share an id. The
        time a row has been `doing` or `waiting` is part of it for the opposite reason: the figure changes while the file
        does not, and the periodic refresh is the only thing that will ever redraw it. Its steps are minutes at the finest,
        so this redraws at most once a minute. The time zone is part of it for the same reason: every row's time changes
        when the panel reports the reader's zone, and the file does not. */
     const now = Date.now();
-    const signature = JSON.stringify([this.focus, this.timeZone,
-      plan && [plan.session, plan.title, plan.error, plan.nodes, heldAll(plan.nodes, now)]]);
+    const signature = JSON.stringify([this.source, this.focus, this.scoped, this.timeZone,
+      plan && [plan.session, plan.file, plan.title, plan.error, plan.nodes, heldAll(plan.nodes, now)]]);
     if (signature === this.signature) return false;
     this.plan = plan;
     this.signature = signature;
@@ -255,8 +270,10 @@ class WorkPlanProvider {
   }
 
   rowsFor(plan) {
-    if (plan.error) return [{ kind: 'error', plan, key: plan.session + '/!' }];
-    return this.rowsOf(plan.nodes, plan, plan.session, []);
+    /* With several sources two plans can share a session id and row titles, so the id root includes the source. */
+    const root = this.scoped ? keyPart(this.source) + '/' + keyPart(plan.session) : plan.session;
+    if (plan.error) return [{ kind: 'error', plan, key: root + '/!' }];
+    return this.rowsOf(plan.nodes, plan, root, []);
   }
 
   /*
@@ -304,7 +321,7 @@ class WorkPlanProvider {
       return item;
     }
     const node = element.node;
-    const look = LOOK[node.state] || LOOK.todo;
+    const look = lookOf(node.state);
     const kids = node.children || [];
     /* The dot is only in the label; element.num stays bare because children are numbered from it. */
     const item = new vscode.TreeItem(`${element.num}. ${node.title}`, kids.length
@@ -356,4 +373,4 @@ class WorkPlanProvider {
   }
 }
 
-module.exports = { WorkPlanProvider, hasOpen, stamp, held, heldAll, ageSince, waitsOn, LOOK, TIMED, WHO, waitingIcon };
+module.exports = { WorkPlanProvider, hasOpen, stamp, held, heldAll, ageSince, waitsOn, unknownLook, lookOf, LOOK, TIMED, WHO, waitingIcon };

@@ -8,7 +8,7 @@
  *
  * Running conversations come from `claude agents --json`, limited to this window's workspace folders and without
  * `claude --bg` sessions (src/waiting.js). Stopped ones are added when their plan, written in the last week, still has
- * open rows.
+ * open rows. assemble() builds the same list from every registered source (src/sources.js), including Claude Code's.
  *
  * A conversation's state (turn running, permission prompt, unread reply, idle) is Claude Code's. Its plan adds the
  * `doing` rows and the questions on rows waiting on the user; any question marks the conversation as needing the user.
@@ -86,6 +86,33 @@ function stoppedWithOpenRows(folders, running, { dir = planDir(), now = Date.now
   return out;
 }
 
+/* planOf() is called only when the first three titles are missing, so a titled conversation does not read its plan. */
+function claudeTitle(s, t, planOf) {
+  const named = s.name && !waiting.isDefaultName(s.name, s.cwd) ? s.name : '';
+  if (t.custom || named || t.ai) return t.custom || named || t.ai;
+  const plan = planOf();
+  const top = plan && plan.nodes && plan.nodes.find((n) => OPEN_STATES.includes(n.state));
+  return (plan && plan.title) || (top && top.title) || s.name || s.id || s.sessionId;
+}
+
+/* A source that gives no plan path is believed about hasPlan. */
+function entry(c, plan, located) {
+  const nodes = plan && plan.nodes;
+  const questions = waiting.planQuestions(nodes).map((q) => ({
+    row: q.num, title: q.title, question: q.question, since: q.since, state: q.state, note: q.note, detail: q.detail }));
+  let state = c.running ? c.state : 'idle';
+  if (questions.length && state !== 'prompt') state = 'needs';
+  const top = nodes && nodes.find((n) => OPEN_STATES.includes(n.state));
+  return {
+    sessionId: c.sessionId, id: c.id || '', kind: c.kind || '', cwd: c.cwd, running: c.running, state, questions,
+    doing: doingRows(nodes), open: openCount(nodes), hasPlan: located || plan ? !!(plan && !plan.error) : c.hasPlan === true,
+    title: c.title || (plan && plan.title) || (top && top.title) || c.sessionId,
+    since: c.lastActiveAt || 0,
+  };
+}
+
+const order = (a, b) => (RANK[a.state] - RANK[b.state]) || (b.since - a.since);
+
 /**
  * Every conversation to show: { running: [...], stopped: [...], asks }, where asks counts the questions of the running
  * ones. `sessions` and `stopped` are maps as merge() makes them; `live` maps a session id to the state the host reports
@@ -94,25 +121,41 @@ function stoppedWithOpenRows(folders, running, { dir = planDir(), now = Date.now
 function build({ sessions, stopped = new Map(), readPlan, titles, since, live = new Map(), unread = new Set(), now = Date.now() }) {
   const one = (s, running) => {
     const plan = readPlan(s.sessionId);
-    const nodes = plan && plan.nodes;
-    const questions = waiting.planQuestions(nodes).map((q) => ({
-      row: q.num, title: q.title, question: q.question, since: q.since, state: q.state, note: q.note, detail: q.detail }));
-    let state = running ? stateOf(s, live, unread) : 'idle';
-    if (questions.length && state !== 'prompt') state = 'needs';
-    const t = titles(s);
-    const named = s.name && !waiting.isDefaultName(s.name, s.cwd) ? s.name : '';
-    const top = nodes && nodes.find((n) => OPEN_STATES.includes(n.state));
-    return {
-      sessionId: s.sessionId, id: s.id, kind: s.kind, cwd: s.cwd, running, state, questions,
-      doing: doingRows(nodes), open: openCount(nodes), hasPlan: !!(plan && !plan.error),
-      title: t.custom || named || t.ai || (plan && plan.title) || (top && top.title) || s.name || s.id || s.sessionId,
-      since: since(s) || 0,
-    };
+    return entry({ sessionId: s.sessionId, id: s.id, kind: s.kind, cwd: s.cwd, running,
+      state: running ? stateOf(s, live, unread) : 'idle', title: claudeTitle(s, titles(s), () => plan),
+      lastActiveAt: since(s) || 0 }, plan, true);
   };
-  const order = (a, b) => (RANK[a.state] - RANK[b.state]) || (b.since - a.since);
   const running = [...sessions.values()].map((s) => one(s, true)).sort(order);
   const stoppedList = [...stopped.values()].map((s) => one(s, false)).sort(order);
   return { running, stopped: stoppedList, asks: running.reduce((n, c) => n + c.questions.length, 0), at: now };
 }
 
-module.exports = { build, stateOf, doingRows, openCount, transcriptCwd, stoppedWithOpenRows, RANK, CLOSED_DAYS };
+const mtimeOf = (file) => { try { return fs.statSync(file).mtimeMs; } catch (_) { return 0; } };
+
+/*
+ * build() for every registered source, with Claude Code's filters applied to all of them. Rows are keyed by (sourceId,
+ * sessionId), since two sources can use the same session id.
+ */
+function assemble({ lists, folders, planOf, now = Date.now(), modified = mtimeOf, inFolder = waiting.folderTest(folders) }) {
+  const running = [], stopped = [], seen = new Set();
+  for (const { sourceId, conversations } of lists || []) {
+    for (const c of conversations || []) {
+      const key = JSON.stringify([sourceId, c.sessionId]);
+      if (seen.has(key) || !c.cwd || !inFolder(c.cwd)) continue;
+      const { plan, file } = planOf(sourceId, c.sessionId);
+      if (!c.running) {
+        if (!plan || !openCount(plan.nodes)) continue;
+        const at = file ? modified(file) : 0;
+        if (!at || now - at > CLOSED_DAYS * 86400e3) continue;
+      }
+      seen.add(key);
+      (c.running ? running : stopped).push(Object.assign(entry(c, plan, !!file), { sourceId }));
+    }
+  }
+  running.sort(order);
+  stopped.sort(order);
+  return { running, stopped, asks: running.reduce((n, c) => n + c.questions.length, 0), at: now };
+}
+
+module.exports = { build, assemble, entry, claudeTitle, stateOf, doingRows, openCount, transcriptCwd, stoppedWithOpenRows, RANK,
+  CLOSED_DAYS };

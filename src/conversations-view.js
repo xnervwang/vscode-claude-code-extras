@@ -6,10 +6,14 @@
 /*
  * The Conversations view, a tab of its own in the panel: one row per conversation of this workspace, and under it its
  * questions and its `doing` rows. src/conversations.js builds the list.
+ *
+ * With more than one source registered, the host sets `source` ({ id, label }) on each row, and `icon` when the logo can
+ * be drawn (src/sourceicons.js). Rows without `source` look as they do with Claude Code alone.
  */
 const vscode = require('vscode');
 const { ageSince } = require('./workplan-view');
 const { textFor } = require('./conversations-text');
+const { keyPart } = require('./sources');
 
 /* Shapes that differ, so the states can be told apart without colour. */
 const LOOK = {
@@ -78,9 +82,13 @@ class ConversationsProvider {
       return item;
     }
     const c = element.c;
+    const from = c.source && c.source.id ? c.source : null;
     const target = { sessionId: c.sessionId, id: c.id, kind: c.kind, cwd: c.cwd, title: c.title };
+    if (from) target.sourceId = from.id;
     const open = { command: 'claudeCodeWorkPlan.openWaitingConversation', title: 'Go to the conversation', arguments: [target] };
-    const where = (c.running ? '' : 'stopped/') + c.sessionId;
+    /* Encoded so that ('a', 'b/c') and ('a/b', 'c') give different ids. */
+    const where = (c.running ? '' : 'stopped/')
+      + (from ? keyPart(from.id) + '/' + keyPart(c.sessionId) : c.sessionId);
     if (element.kind === 'conversation') {
       const kids = c.questions.length + c.doing.length;
       const expanded = c.running && (c.state === 'needs' || c.state === 'prompt' || c.state === 'working');
@@ -88,10 +96,10 @@ class ConversationsProvider {
         : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
       item.id = 'conversations/' + where;
       const [icon, color] = LOOK[c.state] || LOOK.idle;
-      item.iconPath = new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
+      item.iconPath = (from && c.icon) || new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
       item.description = [t.state[c.state], c.questions.length ? t.questions(c.questions.length) : '',
         c.hasPlan ? t.open(c.open) : t.noPlan].filter(Boolean).join(' · ');
-      item.tooltip = [c.title, t.state[c.state], c.cwd ? t.folder(c.cwd) : ''].filter(Boolean).join('\n');
+      item.tooltip = [c.title, from ? from.label : '', t.state[c.state], c.cwd ? t.folder(c.cwd) : ''].filter(Boolean).join('\n');
       item.command = open;
       return item;
     }
@@ -104,10 +112,10 @@ class ConversationsProvider {
       item.tooltip = `${q.question}\n\n${q.row}. ${q.title}`;
       item.command = {
         command: 'claudeCodeWorkPlan.answerQuestion', title: 'Answer it',
-        arguments: [{
+        arguments: [Object.assign({
           sessionId: c.sessionId, row: q.row, rowTitle: q.title, question: q.question, note: q.note, detail: q.detail,
           since: q.since, conversation: c.title, running: c.running, open: target,
-        }],
+        }, from ? { sourceId: from.id } : {})],
       };
       return item;
     }
