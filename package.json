@@ -2,7 +2,7 @@
   "name": "claude-code-extras",
   "displayName": "Work Plan for Claude Code",
   "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk. See it in its own view beside the Claude Code panel and answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Conversations tab shows running conversations, their plan questions and \"doing\" rows, with a status bar count of questions to decide. The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "publisher": "xnervwang",
   "license": "BSD-3-Clause",
   "icon": "images/icon.png",
