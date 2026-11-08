@@ -28,7 +28,13 @@
     } catch (e) { /* left as it is */ }
     if (inputText(box)) box.textContent = '';
   };
+  /* The sidebar may have switched conversations since the host checked which one it shows. */
+  var showsOther = function(m){
+    var now = sigValue('sessionId');
+    return typeof now === 'string' && !!now && typeof m.sessionId === 'string' && !!m.sessionId && now !== m.sessionId;
+  };
   var sendAnswer = function(m){
+    if (showsOther(m)) { answerResult(m.id, false, 'not-shown'); return; }
     var box = document.querySelector(ANSWER_INPUT);
     if (!box) { answerResult(m.id, false, 'no-input'); return; }
     /* Text already in the input would be sent along with the answer. */
@@ -50,6 +56,7 @@
       return;
     }
     setTimeout(function(){
+      if (showsOther(m)) { emptyInput(box); answerResult(m.id, false, 'not-shown'); return; }
       /* With Ctrl, Enter sends whether or not Claude Code is set to send on Ctrl+Enter; Shift+Enter would be a new line. */
       try {
         box.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));

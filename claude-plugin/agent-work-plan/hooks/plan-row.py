@@ -191,7 +191,11 @@ def run(args):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         except OSError as e:
             raise Refused("Could not create %s for the plan (%s)." % (os.path.dirname(path), e.strerror or e))
-    with plan_lock(path, lambda why: print("Going ahead without the plan's lock: %s." % why, file=sys.stderr)):
+    missed = []
+    with plan_lock(path, missed.append) as held:
+        if not held and missed:
+            raise Refused("Nothing was written, because the plan's lock could not be taken: %s. Run the same command "
+                          "again." % missed[0])
         return change(path, args)
 
 
