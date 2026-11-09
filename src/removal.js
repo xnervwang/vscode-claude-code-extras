@@ -86,8 +86,8 @@ function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
 }
 
 /**
- * The folders in one extensions folder holding this extension under its earlier id as itself: not marked for deletion,
- * and not that id's last version, which only hands over to this one (src/carryover.js). Such a copy patches Claude Code
+ * The folders in one extensions folder that hold an earlier version of the old extension: not marked for deletion, and
+ * not that id's last version, which only hands over to this one (src/carryover.js). Such a copy patches Claude Code
  * and uses the companion plugin just as a copy of this extension does.
  */
 function earlierCopies(extensionsDir) {
@@ -99,7 +99,8 @@ function earlierCopies(extensionsDir) {
 /*
  * What the uninstall hook may put back: this editor's own folder, and any other editor's folder on this machine that no
  * longer holds a copy of this extension. Where another editor still has it installed, it patches Claude Code there again
- * at its next start, so that folder is left out; so is any folder, this editor's included, with an earlier copy in it.
+ * at its next start, so that folder is left out. The same goes for a folder holding an earlier version of the old
+ * extension, this editor's own included.
  * While one is left, the companion plugin and the plans in its data directory are still in use, so `lastCopy` is false
  * and they stay.
  */

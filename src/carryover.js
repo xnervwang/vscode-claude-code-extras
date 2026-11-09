@@ -7,15 +7,14 @@
  * What this extension takes over from xnervwang.claude-code-extras, the id it was published under before it became
  * Claude Code Plus.
  *
- * The editor keys an extension's storage by its id, so nothing kept under the old id is visible to this one. The global
- * storage folders sit side by side, named after the ids, which is how the old one is found. Only what the reader chose
- * is carried over: the pins and the colors of the session list. The rest of that folder is rebuilt here on its own or
- * asked for again: the panel-opening records, the tab icons, the staged plugin and a downloaded Python. The editor
- * deletes the old folder when it finishes removing that extension, right after its uninstall hook, at its next start, so
- * the pins and colors come over only if this extension starts before that.
+ * The editor keeps each extension's global storage in a folder named after its id, so the old id's folder sits beside
+ * this one's. Only what the user chose is carried over: the pins and the colors of the session list. The rest of that
+ * folder is rebuilt here on its own or asked for again: the panel-opening records, the tab icons, the staged plugin and
+ * a downloaded Python. The editor deletes the old folder after running the old extension's uninstall hook, at its next
+ * start, so the pins and colors come over only if this extension starts before that.
  *
- * Uninstalling the old extension also unregisters the plugin, which empties the plan directory; its uninstall hook copies
- * the plans aside first, and they are copied back from there (restoreRescued).
+ * Uninstalling the old extension also unregisters the plugin, which empties the plan directory; its uninstall hook
+ * copies the plans aside first, and they are copied back from there (restoreRescued).
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -34,8 +33,8 @@ function handsOver(pkg) {
   return Array.isArray(deps) && deps.some((d) => typeof d === 'string' && d.toLowerCase() === PLUS_ID);
 }
 
-/** The version of the old extension when the editor runs it as itself, from its description; '' when it is not here
-    or is the last version. */
+/** The old extension's version, from its manifest, when an earlier version of it is installed; '' when it is not
+    installed or is its last version. */
 function earlierBuild(ext) {
   if (!ext) return '';
   const pkg = ext.packageJSON || {};
@@ -46,13 +45,13 @@ function earlierBuild(ext) {
 const EXPORT_FILE = 'export.json';
 const EXPORTED_KEYS = ['claudeCodeExtras.removed', 'claudeCodeExtras.projectDirDays'];
 
-/** The old extension's global storage folder, beside `storage`, this extension's. */
+/** The old extension's global storage folder, next to `storage`, which is this extension's. */
 const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
 
 /*
  * Copy one file to `to` unless a file is there: 'copied', 'there' or 'failed'. The copy is written under a temporary name
  * and linked into place, so another window never reads half a file, and one that wrote its own meanwhile keeps it. It
- * keeps the original's modification time, which for a plan is how recent its conversation is taken to be.
+ * keeps the original's modification time, which for a plan decides whether its conversation counts as recent.
  */
 function copyNew(from, to) {
   if (fs.existsSync(to)) return 'there';
@@ -74,7 +73,7 @@ function copyNew(from, to) {
  * Copy each file of `names` from the old extension's storage into `storage`, unless `storage` has a file of that name.
  * Copied, not moved: the old extension can still be installed and reading its own.
  *
- * Returns { copied, failed }, file names.
+ * Returns { copied, failed }, each a list of file names.
  */
 function copyFiles(storage, names) {
   const from = legacyStorage(storage);
@@ -140,7 +139,7 @@ function restoreRescued({ home = os.homedir(), planDir, now = Date.now(), settle
       fs.writeFileSync(path.join(dir, COPIED_BACK), `Claude Code Plus copied ${copied.length} of the ${plans.length} plans in this folder back into `
         + `${planDir} on ${new Date(now).toISOString()}; ${there} were there already. This folder is not read again.\n`);
       out.dirs++;
-    } catch (_) { /* read again next time, which copies nothing twice */ }
+    } catch (_) { /* read again on the next start, skipping plans already copied */ }
   }
   return out;
 }

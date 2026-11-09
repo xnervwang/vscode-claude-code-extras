@@ -4567,9 +4567,7 @@ console.log('\nthe sweep of abandoned plans');
 }
 
 /* Settings were named claudeCodeExtras.* and then claudeCodeWorkPlan.*. Moving them is the one part of a rename that can
-   lose what a person set, so it is run against a stand-in for the editor's settings: what is copied and from which of
-   the two old names, what is never overwritten, what is left when the editor refuses to clear a name nobody declares,
-   and that a scope is done only once. */
+   lose what a person set, so it is run against a stand-in for the editor's settings. */
 console.log('\nsettings moved from their old names');
 {
   // A real path: on macOS the temporary folder is reached through a symbolic link, and a module required by two spellings
@@ -4667,9 +4665,8 @@ console.log('\nsettings moved from their old names');
   fs.rmSync(stub, { force: true });
 }
 
-/* The extension is xnervwang.claude-code-plus, and everything a person reads or types says Claude Code Plus; the names it
-   keeps its own state and files under are older and stay. A name left behind in one of these places is an old one coming
-   back. */
+/* The extension is xnervwang.claude-code-plus, and everything a person reads or types says Claude Code Plus; its state
+   and files keep their older names. A name left behind in one of these places is an old one coming back. */
 console.log('\nthe name a person sees');
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -4693,7 +4690,7 @@ console.log('\nthe name a person sees');
 }
 
 /* The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
-   runs extension.js against a stand-in editor in a child process with its own home folder, so what is checked is what
+   runs extension.js against a stand-in editor in a child process with its own home folder, so the checks see what
    activation does: which commands it registers, what it carries over from the old extension's storage, and what it leaves
    alone while the old extension still patches Claude Code itself. */
 const LEGACY_ID = 'xnervwang.claude-code-extras';
@@ -4823,8 +4820,8 @@ console.log('\ncommands under both old names');
 }
 
 /* The editor gives each extension id its own global storage folder, so the pins and colors chosen under the old id are in
-   a sibling folder this extension would never read. Those two are the reader's own choices. They are copied, not moved,
-   since the old extension can still be installed, and only when this extension has none of its own. Everything else in
+   a sibling folder this extension would never read. They are copied, not moved, since the old
+   extension can still be installed, and only when this extension has none of its own. Everything else in
    that folder is rebuilt or asked for again, and stays where it is. */
 console.log('\npins and colors from the old extension\'s storage');
 {
@@ -4849,9 +4846,9 @@ console.log('\npins and colors from the old extension\'s storage');
   } else bad(`with colors of its own: ${JSON.stringify({ threw: (r2.threw || '').slice(0, 300), colors: f2[NEW + 'session-colors.json'], pins: f2[NEW + 'session-pins.json'] })}`);
 }
 
-/* The old extension installed as itself patches Claude Code with its own build, and two extensions doing that take turns
-   rewriting the same files. So while it is, this one writes nothing anyone else reads, and says why once per version of
-   the old one. The last version of the old id depends on this extension and patches nothing, so
+/* An earlier version of the old extension patches Claude Code with its own build, and two extensions doing that take
+   turns rewriting the same files. So while it is installed, this extension writes nothing the old one reads, and says
+   why once per version of the old one. The last version of the old id depends on this extension and patches nothing, so
    with that one installed everything runs as usual. */
 console.log('\nwhile the old extension is still installed');
 {
@@ -4873,7 +4870,7 @@ console.log('\nwhile the old extension is still installed');
   const aside = run(real, { answer: 'Show It' });
   const t = touched(aside);
   if (!aside.threw && !t.patching && !t.core && !t.hooks && !t.oldCommands && !t.shared.length && !t.renamed) {
-    ok('with the old extension installed as itself: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
+    ok('with an earlier version of the old extension installed: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
   } else bad(`with the old extension installed: ${JSON.stringify(t)}${aside.threw ? ' threw ' + aside.threw.slice(0, 300) : ''}`);
   const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]) && /work plans come back/.test(s[0]));
   const opened = (aside.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID);
@@ -4923,7 +4920,7 @@ console.log('\nan uninstall while the old extension is still installed');
     if (!withOld.restore.includes(server) && withOld.lastCopy === false) ok('the old extension in this folder keeps its patch and the plugin');
     else bad(`uninstall plan beside the old extension: ${JSON.stringify(withOld)}`);
     const earlier = (d) => (typeof removal.earlierCopies === 'function' ? removal.earlierCopies(d).length : -1);
-    if (earlier(server) === 1 && earlier(stable) === 0) ok('a folder with the old extension installed as itself is told apart from one without');
+    if (earlier(server) === 1 && earlier(stable) === 0) ok('a folder with an earlier version of the old extension is told apart from one without');
     else bad(`earlier copies: ${JSON.stringify([earlier(server), earlier(stable)])}`);
     fs.rmSync(path.join(server, LEGACY_ID + '-1.0.21'), { recursive: true });
     put(server, LEGACY_ID + '-1.0.22', shimPkg);
@@ -5038,7 +5035,7 @@ console.log('\nthe old id\'s last version, shim/');
   /* This extension's side: export.json is read, each entry imported only where this extension has no value of its own,
      and a removed mark means what running Remove would: nothing is patched and no plugin is registered. The shim
      depends on this extension and so activates after it, and the file can appear after this activation has
-     returned; activation must not wait for it, and the start waits instead. */
+     returned; activation returns at once and the start waits for the file. */
   const OLD = 'User/globalStorage/' + LEGACY_ID + '/';
   const shimDesc = { packageJSON: pkg, extensionPath: '/x/' + LEGACY_ID + '-' + pkg.version };
   const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
@@ -5097,7 +5094,8 @@ console.log('\nplans an uninstall copied aside come back');
     const body = (n) => (has(n) ? fs.readFileSync(path.join(plans, n), 'utf8') : null);
     if (r && body(A + '.json') === 'old A' && body(C + '.json') === 'newer C') ok('a rescued plan comes back, from the newest folder when two hold it');
     else bad(`copied back: ${JSON.stringify({ r, A: body(A + '.json'), C: body(C + '.json') })}`);
-    /* A plan file's time is how recent the views take its conversation to be, so a copy is not made to look new. */
+    /* A plan file's modification time decides whether its conversation counts as recent, so a copy keeps the
+       original's. */
     if (has(A + '.json') && Math.abs(fs.statSync(path.join(plans, A + '.json')).mtimeMs - fs.statSync(path.join(older, A + '.json')).mtimeMs) < 1000) ok('a copied plan keeps the time its rescued copy has');
     else bad(`a copied plan was given the time ${has(A + '.json') ? new Date(fs.statSync(path.join(plans, A + '.json')).mtimeMs).toISOString() : 'none'}`);
     if (body(B + '.json') === 'mine') ok('a plan already in the plan directory is not overwritten');
@@ -5137,13 +5135,13 @@ console.log('\nplans an uninstall copied aside come back');
   if (!usual.threw && back(usual) && (usual.state || {})['claudeCodeExtras.workPlanPlugin'] && usual.state['claudeCodeExtras.workPlanPlugin'].registered === true) {
     ok('a start that registers the plugin copies the rescued plans back');
   } else bad(`usual start: ${JSON.stringify({ threw: (usual.threw || '').slice(0, 300), back: back(usual), plugin: (usual.state || {})['claudeCodeExtras.workPlanPlugin'], logs: (usual.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 5) })}`);
-  if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while the old extension is installed as itself, nothing is copied back');
+  if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while an earlier version of the old extension is installed, nothing is copied back');
   else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
 
   /* The old extension's uninstall hook runs when the editor deletes its folder, at a start of the editor's own, and can
      come after this extension has started: it copies the plans aside and unregisters the plugin, which deletes the plan
      directory, leaving Claude Code's two records without the plugin and its marketplace. The 30-second timer registers
-     the plugin again and copies the plans back, without the wait a folder that new otherwise gets. The plugin alone gone,
+     the plugin again and copies the plans back, without waiting for the folder to settle. The plugin alone gone,
      its marketplace still known, is someone's own removal and is left so. */
   const DATA = '.claude/plugins/data/agent-work-plan-claude-code-extras/';
   const startFiles = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '',

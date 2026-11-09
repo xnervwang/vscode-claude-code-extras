@@ -6,8 +6,8 @@
 /*
  * The last version of xnervwang.claude-code-extras, the id Claude Code Plus was published under before. It depends on
  * xnervwang.claude-code-plus, so updating to it installs that, and it touches nothing of Claude Code: the patch and the
- * plugin belong to Claude Code Plus now, and uninstalling this, which it asks for, must not take them out. So it has no
- * uninstall hook and deactivate does nothing.
+ * plugin belong to Claude Code Plus now, and uninstalling this one, as its notice suggests, must not take them out. So
+ * it has no uninstall hook and deactivate does nothing.
  *
  * Claude Code Plus cannot read another extension's state, and two entries of this id's are of use to it: whether the
  * extension was removed from Claude Code, and the folders remembered for scheduled prompts. They are written to

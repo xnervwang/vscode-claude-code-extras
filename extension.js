@@ -130,9 +130,9 @@ async function offerReload(text) {
   if (pick === 'Reload Window') vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
-/* Commands were once named under the old prefixes, and a keybinding someone made then still names them that way. The old
-   names stay registered, unlisted, so those keep working. The editor refuses a name that another extension in this host
-   holds already, as the old extension does until the host restarts after it was updated, and that name is left to it. */
+/* A keybinding made before a rename names a command under an old prefix, so the old names stay registered, unlisted.
+   The editor refuses a name that another extension in this host holds already, as the old extension does until the host
+   restarts after it was updated, and that name is left to it. */
 function registerCommand(name, fn) {
   const all = [vscode.commands.registerCommand(PREFIX + name, fn)];
   for (const p of LEGACY_PREFIXES) {
@@ -144,7 +144,7 @@ function registerCommand(name, fn) {
 /*
  * Settings were once named under the old prefixes. A value set under an old name is copied to its new name, in the same
  * scope, from the more recent prefix when both have one. The old ones are then cleared where the editor allows that;
- * it may refuse to write a name no extension declares any more, and then the old line stays behind, read by nothing.
+ * it may refuse to write a name no extension declares any more, and then the old line is left in place.
  *
  * A copy is made only where the new name has no value of its own, so nothing set under the new name is overwritten; and
  * each scope is done once, so putting a new name back to its default later does not bring the old value back.
@@ -204,11 +204,10 @@ function carryOver(context, log) {
 }
 
 /*
- * The old extension installed as itself rather than as its last version (src/carryover.js) patches Claude Code with its
- * own build, and two extensions doing that take turns rewriting the same files. Until it is updated or uninstalled
- * nothing here starts: no patch, no stylesheet beside the panel, no plugin, no source for Agent Plus, no hooks for the
- * patched bundles, no settings moved and nothing copied, since the old one still reads all of that. Its commands share
- * names with ours, and are left to it. The first start after it is gone runs as usual.
+ * An earlier version of the old extension (src/carryover.js) patches Claude Code with its own build, and two extensions
+ * doing that take turns rewriting the same files. Until it is updated or uninstalled nothing here starts, since the old
+ * one still owns the patch, the plugin and the settings. Its commands share names with ours, and are left to it. The
+ * first start after it is gone runs as usual.
  */
 const TOLD_KEY = PREFIX + 'toldEarlierBuild';
 /* How long the first start beside the old id's last version waits for its export.json. */
@@ -1220,11 +1219,10 @@ function start(context, log, renamed) {
     }
   };
   /*
-   * Plans an uninstall copied aside (src/carryover.js, restoreRescued) come back once the plugin is registered again:
-   * unregistering it is what emptied the plan directory, and while it is not registered nothing reads them there. A
-   * rescue folder still too new to read is tried again when it can be. `unregistered` is what syncPlugin returns, true
-   * when it registered the plugin again because the plugin and its marketplace were both gone: the unregister that
-   * empties the plan directory is then over, so no folder is too new.
+   * The plans an uninstall copied aside (restoreRescued in src/carryover.js) are copied back once the plugin is
+   * registered again. A rescue folder still too new to read is tried again when it can be. `unregistered` is what
+   * syncPlugin returns, true when it registered the plugin again because the plugin and its marketplace were both gone:
+   * the unregister that empties the plan directory is then over, so no folder is too new.
    */
   let rescueTimer = 0;
   const restorePlans = (unregistered) => {
@@ -1240,8 +1238,9 @@ function start(context, log, renamed) {
   /*
    * The old extension's uninstall hook takes the patch out of Claude Code and unregisters the plugin, and the editor runs
    * it when it deletes that extension's folder, at a start of its own, which can be after this extension has started.
-   * The plugin and its marketplace both gone while this extension had registered them is that (see registrationGone),
-   * and then the patch and the plugin are put back and the plans copied back, without waiting for the next start.
+   * When Claude Code lists neither the plugin nor its marketplace although this extension registered them, that is what
+   * happened (see registrationGone): the patch and the plugin are put back and the plans copied back, without waiting
+   * for the next start.
    */
   let recovering = false;
   const recover = () => {
@@ -1325,7 +1324,7 @@ function start(context, log, renamed) {
  */
 function deactivate() {
   if (!selfPath || !removal.beingUninstalled(selfPath, ID)) return;
-  /* The old extension installed as itself in this folder still uses the patch and the plugin. */
+  /* An earlier version of the old extension in this folder still uses the patch and the plugin. */
   if (removal.earlierCopies(path.dirname(selfPath)).length) return;
   /* Only the Claude Code installs in this editor's extensions folder. Another editor on this machine can have this
      extension installed and running, and restoring its folder would take the patch out from under it; the uninstall
