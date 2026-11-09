@@ -761,6 +761,9 @@ function apply(claudeExtensionPath, opts = {}) {
     if (r.error) return no(r.error);
     if (state === 'clean') writeAtomic(backup, original);
     writeAtomic(file, r.out);
+    /* A restore in another window can have moved the backup over the file after it was read here. The file is patched
+       now, so the backup is rewritten from `original`. */
+    if (!fs.existsSync(backup)) writeAtomic(backup, original);
     changed = true; message = 'patched';
   }
   const liveChanged = writeLive(claudeExtensionPath, opts);

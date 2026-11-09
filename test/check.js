@@ -4306,6 +4306,30 @@ console.log('\nan uninstall puts Claude Code back at once');
     const again = removal.restoreAll([root]);
     if (again.every((r) => !r.changed)) ok('a second restore changes nothing, so the editor running the hook later is harmless');
     else bad(`a second restore changed something: ${JSON.stringify(again)}`);
+    /* Another window restores while this one upgrades an older patch, moving the backup over the file just after this
+       window has read it. The upgrade must still leave a backup for Remove. */
+    const raced = [];
+    for (const [i, a] of ADAPTERS.entries()) {
+      const f = a.targetFile(copy), b = f + a.BACKUP_SUFFIX;
+      a.apply(copy, { enabled: true });
+      fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(a.MARK, a.MARK.replace(/v\d+-[0-9a-f]+ \*\/$/, 'v0-000000000000 */')));
+      const realRead = fs.readFileSync;
+      let moved = false;
+      fs.readFileSync = function (p, ...rest) {
+        const out = realRead.call(fs, p, ...rest);
+        if (!moved && String(p) === b) { moved = true; fs.renameSync(b, f); }
+        return out;
+      };
+      let r;
+      try { r = a.apply(copy, { enabled: true }); } finally { fs.readFileSync = realRead; }
+      const kept = fs.existsSync(b) && fs.readFileSync(b, 'utf8') === source.files[i].src;
+      const back = a.restore(copy);
+      if (!(moved && r.current && kept && back.changed && fs.readFileSync(f, 'utf8') === source.files[i].src)) {
+        raced.push(`${a.name}: moved ${moved}, ${r.message}, backup kept ${kept}, restore ${back.message}`);
+      }
+    }
+    if (!raced.length) ok('an upgrade that another window\'s restore raced still leaves a backup, and Remove then puts the original back');
+    else bad('restore during an upgrade: ' + raced.join('; '));
     fs.rmSync(root, { recursive: true, force: true });
   }
 
