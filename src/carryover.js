@@ -10,7 +10,9 @@
  * The editor keys an extension's storage by its id, so nothing kept under the old id is visible to this one. The global
  * storage folders sit side by side, named after the ids, which is how the old one is found. Only what the reader chose
  * is carried over - the pins and the colors of the session list. The rest of that folder is rebuilt here on its own or
- * asked for again: the panel-opening records, the tab icons, the staged plugin and a downloaded Python.
+ * asked for again: the panel-opening records, the tab icons, the staged plugin and a downloaded Python. The editor
+ * deletes the old folder when it finishes removing that extension, right after its uninstall hook, at its next start, so
+ * the pins and colors come over only if this extension starts before that.
  *
  * Uninstalling the old extension also unregisters the plugin, which empties the plan directory; its uninstall hook copies
  * the plans aside first, and they are copied back from there (restoreRescued).

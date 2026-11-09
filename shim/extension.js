@@ -43,7 +43,7 @@ function activate(context) {
   if (context.globalState.get(TOLD_KEY)) return;
   Promise.resolve(context.globalState.update(TOLD_KEY, true)).catch(() => {});
   vscode.window.showInformationMessage(
-    'Work Plan for Claude Code is now Claude Code Plus, which is installed. You can uninstall this one.', 'Uninstall',
+    'Claude Code Plus is installed. You can uninstall Work Plan for Claude Code.', 'Uninstall',
   ).then((pick) => {
     if (pick === 'Uninstall') vscode.commands.executeCommand('workbench.extensions.uninstallExtension', SELF).then(undefined, () => {});
   }, () => {});

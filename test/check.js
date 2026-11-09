@@ -4687,8 +4687,8 @@ console.log('\nthe name a person sees');
   } else bad('old names in the manifest: ' + JSON.stringify([manifest.name, manifest.displayName, manifest.repository, stray, oldTitle, titled]));
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').split('\n');
   const old = readme.filter((l) => /Extras for Claude Code|Work Plan for Claude Code|claudeCodeWorkPlan\.|claudeCodeExtras\.|xnervwang\.claude-code-extras/.test(l)
-    && !/used to be|are copied to the same names under/.test(l));
-  if (!old.length && readme[0] === '# Claude Code Plus') ok('the README is titled Claude Code Plus and names nothing by an old name, apart from saying what it used to be and where old settings went');
+    && !/^If you have Work Plan for Claude Code|are copied to the same names under/.test(l));
+  if (!old.length && readme[0] === '# Claude Code Plus') ok('the README is titled Claude Code Plus and names nothing by an old name, apart from the paragraph for people who have the old extension and where old settings went');
   else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
 }
 
@@ -4876,7 +4876,7 @@ console.log('\nwhile the old extension is still installed');
   if (!aside.threw && !t.patching && !t.core && !t.hooks && !t.oldCommands && !t.shared.length && !t.renamed) {
     ok('with the old extension installed as itself: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
   } else bad(`with the old extension installed: ${JSON.stringify(t)}${aside.threw ? ' threw ' + aside.threw.slice(0, 300) : ''}`);
-  const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]) && /copied back/.test(s[0]));
+  const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]) && /work plans come back/.test(s[0]));
   const opened = (aside.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID);
   if (warned.length === 1 && warned[0].includes('Show It') && opened && (aside.logs || []).some((l) => l.includes(LEGACY_ID) && l.includes('1.0.21'))
     && (aside.state || {})['claudeCodePlus.toldEarlierBuild'] === '1.0.21') {
