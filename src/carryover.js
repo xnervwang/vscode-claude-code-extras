@@ -49,7 +49,8 @@ const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
 
 /*
  * Copy one file to `to` unless a file is there: 'copied', 'there' or 'failed'. The copy is written under a temporary name
- * and linked into place, so another window never reads half a file, and one that wrote its own meanwhile keeps it.
+ * and linked into place, so another window never reads half a file, and one that wrote its own meanwhile keeps it. It
+ * keeps the original's modification time, which for a plan is how recent its conversation is taken to be.
  */
 function copyNew(from, to) {
   if (fs.existsSync(to)) return 'there';
@@ -57,6 +58,8 @@ function copyNew(from, to) {
   try {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(from, tmp);
+    const st = fs.statSync(from);
+    fs.utimesSync(tmp, st.atime, st.mtime);
     try { fs.linkSync(tmp, to); return 'copied'; } catch (e) { if (e.code === 'EEXIST') return 'there'; throw e; }
   } catch (_) {
     return 'failed';

@@ -5094,6 +5094,9 @@ console.log('\nplans an uninstall copied aside come back');
     const body = (n) => (has(n) ? fs.readFileSync(path.join(plans, n), 'utf8') : null);
     if (r && body(A + '.json') === 'old A' && body(C + '.json') === 'newer C') ok('a rescued plan comes back, from the newest folder when two hold it');
     else bad(`copied back: ${JSON.stringify({ r, A: body(A + '.json'), C: body(C + '.json') })}`);
+    /* A plan file's time is how recent the views take its conversation to be, so a copy is not made to look new. */
+    if (has(A + '.json') && Math.abs(fs.statSync(path.join(plans, A + '.json')).mtimeMs - fs.statSync(path.join(older, A + '.json')).mtimeMs) < 1000) ok('a copied plan keeps the time its rescued copy has');
+    else bad(`a copied plan was given the time ${has(A + '.json') ? new Date(fs.statSync(path.join(plans, A + '.json')).mtimeMs).toISOString() : 'none'}`);
     if (body(B + '.json') === 'mine') ok('a plan already in the plan directory is not overwritten');
     else bad(`the plan already there now holds ${JSON.stringify(body(B + '.json'))}`);
     if (!has('WHAT-THIS-IS.txt') && !has('config.json') && !has(A + '.tz') && !has('sub')) ok('the note and anything that is not <session id>.json stay behind');
