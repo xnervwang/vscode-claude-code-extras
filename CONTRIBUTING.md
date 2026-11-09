@@ -2,9 +2,9 @@
 
 ## Layout
 
-Agent Work Plan (`xnervwang.agent-work-plan`) provides the work plan view, the Conversations tab with its Answer view, and
-the status bar entry. This extension lists Agent Work Plan in `extensionDependencies` and registers Claude Code with it as a
-conversation source. Agent Work Plan's `docs/protocol.md` describes the interface.
+Agent Plus (`xnervwang.agent-plus`) provides the work plan view, the Conversations tab with its Answer view, and
+the status bar entry. This extension lists Agent Plus in `extensionDependencies` and registers Claude Code with it as a
+conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 
 - `extension.js` handles activation, settings, commands, and the status bar toggle.
 - `src/adapters.js` lists patch targets for both the entry point and the uninstall hook.
@@ -21,10 +21,10 @@ conversation source. Agent Work Plan's `docs/protocol.md` describes the interfac
 - `src/sessionpins.js` keeps the conversations pinned in the session list from Claude Code's transcript cleanup, by giving their files a later modification time before they reach its age, and records when each was really last active.
 - `src/sessioncolors.js` stores the text color picked for each conversation in the session list.
 - `src/bgsessions.js` tells which sessions in the session list are background sessions, so they can be left out.
-- `src/claude-source.js` is Claude Code's conversation source for Agent Work Plan, and `src/core-link.js` registers it.
+- `src/claude-source.js` is Claude Code's conversation source for Agent Plus, and `src/core-link.js` registers it.
 - `src/waiting.js` lists the running conversations with `claude agents --json`, merged by session.
 - `src/conversations.js` adds the stopped conversations whose plans have open rows, and gives each its title and state.
-- `src/page/91-answer.js` types an answer from Agent Work Plan into the conversation's message input.
+- `src/page/91-answer.js` types an answer from Agent Plus into the conversation's message input.
 - `src/bounded.js` reads a plan file only if it is a regular file under a size limit.
 - `build/plan-health.js` counts how current the plans on this machine are: stale `doing` rows, `waiting` rows that name nobody.
 - `src/python-runtime.js` downloads Python from python.org for a Windows machine that has none.
@@ -34,7 +34,7 @@ conversation source. Agent Work Plan's `docs/protocol.md` describes the interfac
 - `test/against-latest.js` checks the same edits against the current marketplace build.
 - `test/page-harness.js` runs the injected script in a headless browser against a stand-in panel, for the checks on what the page costs.
 - `test/reply-shape.js` reads what a reply element holds out of a real bundle, which the stand-in panel cannot contradict.
-- `test/with-core.js` runs this extension with Agent Work Plan from its checkout beside this one, in Agent Work Plan's
+- `test/with-core.js` runs this extension with Agent Plus from its checkout beside this one, in Agent Plus's
   fake VS Code (`test/fake-vscode.js`). Without that checkout its checks are skipped.
 - `build/pack.sh` produces the `.vsix` without npm.
 - `build/supported.js`, `build/update-versions.js`, and `supported-versions.json` maintain the record of verified Claude Code builds.

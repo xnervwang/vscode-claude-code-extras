@@ -2,11 +2,11 @@
 
 Claude can lose track of unfinished work when you switch topics before the work is done, or when compaction summarizes older turns. Claude starts a plan when there is work to track and updates it as you talk. The plan lists numbered rows, one piece of work each, with states like `discussing`, `todo`, `doing`, or `done`.
 
-The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. Agent Work Plan, a separate extension installed along with this one, shows the plan in a view beside the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
+The plan is stored in a file outside the conversation, and Claude gets its open rows every turn. Claude is asked to bring the rows it is working on up to date before automatic compaction and, after compaction, to read the plan file before anything else. Agent Plus, a separate extension installed along with this one, shows the plan in a view beside the Claude Code panel. You answer by row number and can settle several rows in one message, like "2.1: not now". Rows Claude proposes on its own start as `discussing` and become `todo` only when you agree.
 
-Agent Work Plan's Conversations tab in the VS Code panel lists running Claude Code conversations in this window's workspace folders. Stopped conversations also appear while their plan, written in the last 7 days, still has open rows. Each plan's questions appear under its conversation, and an answer entered in the Answer view goes into the conversation's message input.
+Agent Plus's Conversations tab in the VS Code panel lists running Claude Code conversations in this window's workspace folders. Stopped conversations also appear while their plan, written in the last 7 days, still has open rows. Each plan's questions appear under its conversation, and an answer entered in the Answer view goes into the conversation's message input.
 
-Requires Anthropic's Claude Code extension, Agent Work Plan and VS Code 1.96 or later. The work plan also needs Python 3.7 or later. On Windows without Python, the extension offers to download it from python.org (11 MB).
+Requires Anthropic's Claude Code extension, Agent Plus and VS Code 1.96 or later. The work plan also needs Python 3.7 or later. On Windows without Python, the extension offers to download it from python.org (11 MB).
 
 ## What it looks like
 
@@ -67,7 +67,7 @@ See [How the work plan works](docs/how-the-work-plan-works.md) for the hooks, th
 
 Search for **Work Plan for Claude Code** in the Extensions view, or run
 `code --install-extension xnervwang.claude-code-extras`. Anthropic's Claude Code extension and
-Agent Work Plan install as dependencies.
+Agent Plus install as dependencies.
 
 Reload the VS Code window twice after installing. Run
 `Work Plan for Claude Code: Show Status` for the patch status. In a Remote SSH window, install on the

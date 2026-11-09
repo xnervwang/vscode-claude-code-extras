@@ -34,16 +34,16 @@ jobs:
         run: |
           vsix=$(bash build/pack.sh | tail -n 1)
           mv "$vsix" extension.vsix
-      # This extension depends on Agent Work Plan, so the run installs it too. Checked out after the build above, whose
+      # This extension depends on Agent Plus, so the run installs it too. Checked out after the build above, whose
       # checks read the files under this folder.
       - uses: actions/checkout@v7
         with:
-          repository: xnervwang/vscode-agent-work-plan
-          path: agent-work-plan
-      - name: Build Agent Work Plan's .vsix
+          repository: xnervwang/vscode-agent-plus
+          path: agent-plus
+      - name: Build Agent Plus's .vsix
         shell: bash
         run: |
-          core=$(cd agent-work-plan && bash build/pack.sh | tail -n 1)
+          core=$(cd agent-plus && bash build/pack.sh | tail -n 1)
           mv "$core" core.vsix
       - uses: actions/upload-artifact@v7
         with:

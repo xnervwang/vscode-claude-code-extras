@@ -4,9 +4,9 @@
 
 'use strict';
 /*
- * Usage: node test/vscode/run.js <path to the .vsix> [<path to Agent Work Plan's .vsix>]. Downloads the newest stable
- * VS Code, installs the newest Claude Code, Agent Work Plan and the .vsix into it, and runs ./suite inside it; then runs
- * test/check.js against those installs. Exits non-zero if either fails. Agent Work Plan is installed from its .vsix when
+ * Usage: node test/vscode/run.js <path to the .vsix> [<path to Agent Plus's .vsix>]. Downloads the newest stable
+ * VS Code, installs the newest Claude Code, Agent Plus and the .vsix into it, and runs ./suite inside it; then runs
+ * test/check.js against those installs. Exits non-zero if either fails. Agent Plus is installed from its .vsix when
  * one is given, and from the marketplace otherwise; it has to be there before the .vsix, which depends on it.
  *
  * Needs @vscode/test-electron, which the workflow installs. On Linux it needs a display: run it under xvfb-run.
@@ -52,9 +52,9 @@ async function main() {
   // The extension registers its plugin in ~/.claude of whoever runs this, so it runs only on a throwaway machine.
   if (process.env.CI !== 'true') throw new Error('runs only where CI=true: it registers a plugin in your ~/.claude');
   const vsix = path.resolve(process.argv[2] || '');
-  if (!process.argv[2] || !fs.existsSync(vsix)) throw new Error('usage: node test/vscode/run.js <path to the .vsix> [<Agent Work Plan .vsix>]');
-  const core = process.argv[3] ? path.resolve(process.argv[3]) : 'xnervwang.agent-work-plan';
-  if (process.argv[3] && !fs.existsSync(core)) throw new Error(`no Agent Work Plan .vsix at ${core}`);
+  if (!process.argv[2] || !fs.existsSync(vsix)) throw new Error('usage: node test/vscode/run.js <path to the .vsix> [<Agent Plus .vsix>]');
+  const core = process.argv[3] ? path.resolve(process.argv[3]) : 'xnervwang.agent-plus';
+  if (process.argv[3] && !fs.existsSync(core)) throw new Error(`no Agent Plus .vsix at ${core}`);
   const work = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cce-vscode-'));
   const exts = path.join(work, 'extensions');
   const user = path.join(work, 'user');

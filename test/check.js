@@ -3445,7 +3445,7 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     fs.rmSync(t.dir, { recursive: true, force: true });
   }
   {
-    /* The setting has to reach the plugin. The views are Agent Work Plan's; with the setting off the source gives no plan
+    /* The setting has to reach the plugin. The views are Agent Plus's; with the setting off the source gives no plan
        path, so they show no plan either. */
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const setting = manifest.contributes.configuration.properties['claudeCodeWorkPlan.workPlan'];
@@ -7209,10 +7209,10 @@ console.log('\nplan rows in unknown states');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-/* ── Claude Code as a source of Agent Work Plan ──
-   Agent Work Plan (xnervwang.agent-work-plan) draws the work plan, Conversations and Answer views; this extension gives
+/* ── Claude Code as a source of Agent Plus ──
+   Agent Plus (xnervwang.agent-plus) draws the work plan, Conversations and Answer views; this extension gives
    it Claude Code's conversations through registerSource(), protocol 1 (its docs/protocol.md). */
-console.log('\nwhat the manifest declares for Agent Work Plan');
+console.log('\nwhat the manifest declares for Agent Plus');
 {
   const pkg = require('../package.json');
   const c = pkg.contributes;
@@ -7220,11 +7220,11 @@ console.log('\nwhat the manifest declares for Agent Work Plan');
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'claude-source.js'), 'utf8');
   const protocol = Number((/^const PROTOCOL = (\d+);$/m.exec(source) || [])[1]);
   const trust = (pkg.capabilities || {}).untrustedWorkspaces || {};
-  if ((pkg.extensionDependencies || []).includes('xnervwang.agent-work-plan') && pkg.agentWorkPlan && pkg.agentWorkPlan.protocol === protocol
+  if ((pkg.extensionDependencies || []).includes('xnervwang.agent-plus') && pkg.agentPlus && pkg.agentPlus.protocol === protocol
     && JSON.stringify(pkg.extensionKind) === '["workspace"]' && trust.supported === 'limited' && typeof trust.description === 'string'
     && trust.description.length > 40) {
-    ok('the manifest has what Agent Work Plan requires of a source');
-  } else bad(`manifest for Agent Work Plan: ${JSON.stringify([pkg.extensionDependencies, pkg.agentWorkPlan, pkg.extensionKind, trust, protocol])}`);
+    ok('the manifest has what Agent Plus requires of a source');
+  } else bad(`manifest for Agent Plus: ${JSON.stringify([pkg.extensionDependencies, pkg.agentPlus, pkg.extensionKind, trust, protocol])}`);
   const props = Object.keys(c.configuration.properties);
   if (!c.views && !c.viewsContainers && !c.viewsWelcome && !c.menus
     && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodeWorkPlan.workPlan')) {
@@ -7467,13 +7467,13 @@ console.log('\na panel\'s page getting the focus');
 console.log('\nRestricted Mode');
 {
   /* In a workspace that is not trusted, activation starts nothing: no timer, no hook for the patched host, no registration
-     with Agent Work Plan, and nothing written under the home folder. Trusting the workspace starts all of it. */
+     with Agent Plus, and nothing written under the home folder. Trusting the workspace starts all of it. */
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-restricted-')));
   try {
     const stub = path.join(home, 'vscode-stub.js');
     fs.writeFileSync(stub, `
       const disposable = { dispose() {} }, state = { trusted: false, grant: [], registered: 0 };
-      const core = { isActive: true, exports: { agentWorkPlan: { version: '1.0.0',
+      const core = { isActive: true, exports: { agentPlus: { version: '1.0.0',
         registerSource: () => { state.registered++; return { accepted: true, code: '', reason: '', registration: disposable }; } } } };
       module.exports = { state, TabInputWebview: class {}, version: '1.120.0', env: { language: 'en' },
         Uri: { file: (p) => ({ fsPath: p }) }, RelativePattern: class {}, ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
@@ -7483,7 +7483,7 @@ console.log('\nRestricted Mode');
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }), showInformationMessage: async () => undefined,
           showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null } },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
-        extensions: { getExtension: (id) => (id === 'xnervwang.agent-work-plan' ? core : undefined), onDidChange: () => disposable } };`);
+        extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');
     const script = `
       const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
@@ -7529,11 +7529,11 @@ console.log('\nRestricted Mode');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-/* ── with Agent Work Plan ──
-   test/with-core.js activates Agent Work Plan from its checkout beside this one, then this extension, in Agent Work
-   Plan's stand-in VS Code. It runs as a child with an empty home folder, since both extensions write under it. Without
+/* ── with Agent Plus ──
+   test/with-core.js activates Agent Plus from its checkout beside this one, then this extension, in Agent
+   Plus's stand-in VS Code. It runs as a child with an empty home folder, since both extensions write under it. Without
    that checkout it notes so, which is not a failure. */
-console.log('\nwith Agent Work Plan');
+console.log('\nwith Agent Plus');
 {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-with-core-')));
   try {
@@ -7542,7 +7542,7 @@ console.log('\nwith Agent Work Plan');
     const r = cp.spawnSync(process.execPath, [path.join(__dirname, 'with-core.js')], { encoding: 'utf8', timeout: 120000, env, cwd: home });
     let verdicts = null;
     try { verdicts = JSON.parse(r.stdout); } catch (_) { verdicts = null; }
-    if (!Array.isArray(verdicts) || !verdicts.length) bad(`the run with Agent Work Plan did not report: ${(r.stderr || r.stdout || '').slice(0, 400)}`);
+    if (!Array.isArray(verdicts) || !verdicts.length) bad(`the run with Agent Plus did not report: ${(r.stderr || r.stdout || '').slice(0, 400)}`);
     else for (const [kind, msg] of verdicts) (kind === 'ok' ? ok : kind === 'note' ? note : bad)(msg);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }

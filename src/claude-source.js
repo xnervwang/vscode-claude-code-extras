@@ -4,7 +4,7 @@
 
 'use strict';
 /*
- * Claude Code as a conversation source of Agent Work Plan (xnervwang.agent-work-plan, protocol 1; its docs/protocol.md).
+ * Claude Code as a conversation source of Agent Plus (xnervwang.agent-plus, protocol 1; its docs/protocol.md).
  *
  *   conversations    `claude agents --json` for the running ones (src/waiting.js), recent plans with open rows for the
  *                    stopped ones (src/conversations.js), states from the patched host (src/host.js)
@@ -24,12 +24,12 @@ const waiting = require('./waiting');
 const conversations = require('./conversations');
 const { SESSION } = require('./claude-files');
 
-/* The protocol major this source implements; package.json repeats it under "agentWorkPlan". */
+/* The protocol major this source implements; package.json repeats it under "agentPlus". */
 const PROTOCOL = 1;
 const ID = 'claude-code';
 const EXTENSION_ID = 'xnervwang.claude-code-extras';
 const AGENTS_FRESH_MS = 30000;
-/* Shorter than Agent Work Plan's 20-second wait, after which it reports the answer as uncertain and drops a late
+/* Shorter than Agent Plus's 20-second wait, after which it reports the answer as uncertain and drops a late
    "not received". */
 const ANSWER_WAIT_MS = 15000;
 
@@ -91,7 +91,7 @@ function createClaudeSource(deps) {
   const focused = emitter(), changed = emitter(), noticeChanged = emitter();
   let stale = true, agentsAt = 0, agentsLast = { records: null, error: '' }, stoppedLast = new Map(), pidsAsk = null;
   let lastChat = null;
-  /* The session id of the latest focus signal: Agent Work Plan asks isFocused() a moment after each one, and only the
+  /* The session id of the latest focus signal: Agent Plus asks isFocused() a moment after each one, and only the
      latest is still in front. It is cleared when another tab, such as a Codex one, becomes active after it. */
   let front = '';
   let frontTab;
@@ -232,7 +232,7 @@ function createClaudeSource(deps) {
       frontTab = tab;
       if (tab && !isPanelTab(tab)) front = '';
     },
-    /* Fires onDidFocus again for the conversation in front; called once registration with Agent Work Plan completes, which
+    /* Fires onDidFocus again for the conversation in front; called once registration with Agent Plus completes, which
        can be after the first signal. */
     refocus() {
       if (front) focused.fire({ sessionId: front });

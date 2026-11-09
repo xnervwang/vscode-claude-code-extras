@@ -22,7 +22,7 @@ Claude uses `plan-row.py`, a small command shipped with the plugin, to add rows 
 
 ## The view
 
-Agent Work Plan draws the plan. Row times use the time zone in which the Claude Code panel runs.
+Agent Plus draws the plan. Row times use the time zone in which the Claude Code panel runs.
 
 ## Files and cleanup
 

@@ -34,10 +34,10 @@ async function run() {
 
   const mine = vscode.extensions.getExtension('xnervwang.claude-code-extras');
   const claude = vscode.extensions.getExtension('anthropic.claude-code');
-  const core = vscode.extensions.getExtension('xnervwang.agent-work-plan');
+  const core = vscode.extensions.getExtension('xnervwang.agent-plus');
   ok(!!mine, 'this extension is installed');
   ok(!!claude, 'Claude Code is installed', claude ? '' : 'not found');
-  ok(!!core, 'Agent Work Plan is installed', core ? '' : 'not found');
+  ok(!!core, 'Agent Plus is installed', core ? '' : 'not found');
   if (!mine || !claude || !core) throw new Error('an extension is missing');
   // The installed copy's modules: that copy did the patching.
   const from = (name) => require(path.join(mine.extensionPath, 'src', name));

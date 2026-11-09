@@ -523,8 +523,8 @@ function start(context, log, renamed) {
   });
 
   /* The id of the conversation in front of the reader, or empty. The patched field writes it on every change; before
-     anything has, or when the panel has no conversation open, it is not a string and reads as empty, which Agent Work
-     Plan shows as no plan rather than another conversation's. */
+     anything has, or when the panel has no conversation open, it is not a string and reads as empty, which Agent Plus
+     shows as no plan rather than another conversation's. */
   const activeChat = () => {
     const v = globalThis.__cceActiveChat;
     return typeof v === 'string' ? v : '';
@@ -653,7 +653,7 @@ function start(context, log, renamed) {
     if (closing) { registration.dispose(); return; }
     context.subscriptions.push(registration);
     claude.refocus();
-  }).catch((e) => log.appendLine('registering with Agent Work Plan: ' + ((e && e.message) || e)));
+  }).catch((e) => log.appendLine('registering with Agent Plus: ' + ((e && e.message) || e)));
   /*
    * Following the conversation has to be immediate, so the patched field calls this the moment it is written. Waiting
    * for the periodic scan meant up to half a minute of showing the conversation you just left, which is not "follows
@@ -709,7 +709,7 @@ function start(context, log, renamed) {
   };
   context.subscriptions.push({ dispose: unwatchEffort });
   /* The background and effort scans are for Claude Code's own panel, so they follow activeSessionId even while the work
-     plan view in Agent Work Plan shows another source's conversation. */
+     plan view in Agent Plus shows another source's conversation. */
   const followChat = () => {
     if (!claude.followChat()) return;
     scanBackground();
