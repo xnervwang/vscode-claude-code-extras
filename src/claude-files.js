@@ -36,8 +36,9 @@ const planDir = () => path.join(dataRoot(), PLAN_DIR);
 const SESSION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /*
- * The project folders, or null when the projects folder itself cannot be read. A folder that is a symbolic link to a
- * directory is one Claude Code reads and writes through, so it counts as one.
+ * The project folders, or null when the projects folder itself cannot be read. A symbolic link to a directory counts,
+ * since Claude Code reads and writes through it. A link whose target is missing now (a drive that is not mounted)
+ * counts too, so listing it fails and nothing under it is treated as deleted.
  */
 function projectFolders(projects = projectsDir()) {
   let entries;
@@ -47,7 +48,7 @@ function projectFolders(projects = projectsDir()) {
     const dir = path.join(projects, e.name);
     if (e.isDirectory()) out.push(dir);
     else if (e.isSymbolicLink()) {
-      try { if (fs.statSync(dir).isDirectory()) out.push(dir); } catch (_) { /* a link to nothing */ }
+      try { if (fs.statSync(dir).isDirectory()) out.push(dir); } catch (_) { out.push(dir); }
     }
   }
   return out;

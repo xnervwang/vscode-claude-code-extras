@@ -2329,6 +2329,14 @@ console.log('\nabandoned work plans');
         return t;
       },
       (t, r) => CANNOT_LOCK || (r.deleted === 0 && !!r.why && left(t.dir).length === 1)],
+    /* A project folder linked to a drive that is not mounted now. */
+    ['nothing is deleted when a project folder links to something that cannot be reached',
+      () => {
+        const t = build([id(1)], [[id(2), OLD]]);
+        fs.symlinkSync(path.join(t.projects, '..', 'not-mounted'), path.join(t.projects, '-on-a-drive'));
+        return t;
+      },
+      (t, r) => r.deleted === 0 && !!r.why && left(t.dir).length === 1],
   ];
 
   for (const [what, make, want] of cases) {
