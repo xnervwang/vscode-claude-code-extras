@@ -1,0 +1,35 @@
+{
+  "name": "claude-code-extras",
+  "displayName": "Work Plan for Claude Code (now Claude Code Plus)",
+  "description": "This extension is now Claude Code Plus. This version installs Claude Code Plus and does nothing else, so it can be uninstalled.",
+  "version": "1.0.22",
+  "publisher": "xnervwang",
+  "license": "BSD-3-Clause",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xnervwang/vscode-claude-code-plus"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "extensionDependencies": [
+    "xnervwang.claude-code-plus"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js"
+}

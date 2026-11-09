@@ -4704,9 +4704,10 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
  * opts.taken        command ids another extension has registered already, which registerCommand refuses
  * opts.state        what this extension's globalState holds before it starts
  * opts.files        relative path under the home folder -> content, written before activation
+ * opts.later        like opts.files, written once activate has resolved
  * opts.after(ms)    how long to let it run after activate resolves
- * Returns { threw, commands, looked, hooks, said, executed, logs, state, files } - files being every file under the home
- * folder afterwards, relative, with its content when it is JSON.
+ * Returns { threw, commands, looked, hooks, said, executed, logs, state, files, activateMs } - files being every file
+ * under the home folder afterwards, relative, with its content when it is JSON.
  */
 const activateStub = (opts = {}) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-plus-')));
@@ -4754,9 +4755,15 @@ const activateStub = (opts = {}) => {
       (async () => {
         const out = { threw: '' };
         try {
+          const t0 = Date.now();
           await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState, workspaceState: memo(),
             extension: { id: 'xnervwang.claude-code-plus', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
             globalStorageUri: { fsPath: storage }, logUri: { fsPath: path.join(home, 'logs', 'exthost1', 'xnervwang.claude-code-plus') } });
+          out.activateMs = Date.now() - t0;
+          for (const [rel, body] of Object.entries(${JSON.stringify(opts.later || {})})) {
+            fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+            fs.writeFileSync(path.join(home, rel), body);
+          }
           await new Promise((r) => setTimeout(r, ${Number(opts.after) || 300}));
           out.hooks = typeof globalThis.__cceChatHook === 'function';
         } catch (e) { out.threw = String(e && e.stack); }
@@ -4875,7 +4882,8 @@ console.log('\nwhile the old extension is still installed');
   if (asideCommands.length === require('../package.json').contributes.commands.length) ok('its own commands are still there, each saying why nothing happens');
   else bad(`commands while standing aside: ${JSON.stringify(aside.commands)}`);
 
-  const handed = run(shim);
+  // What the last version writes as it activates, here already written by an earlier start.
+  const handed = run(shim, { files: Object.assign({ [`User/globalStorage/${LEGACY_ID}/export.json`]: '{}' }, base.files) });
   const h = touched(handed);
   if (!handed.threw && h.patching && h.core && h.hooks && h.oldCommands && h.renamed
     && !(handed.said || []).some((s) => /Work Plan for Claude Code/.test(s[0]))) {
@@ -4927,6 +4935,120 @@ console.log('\nan uninstall while the old extension is still installed');
   const deact = (/function deactivate\(\) \{([\s\S]*?)\n\}/.exec(ext) || [])[1] || '';
   if (/removal\.earlierCopies\(path\.dirname\(selfPath\)\)\.length/.test(deact)) ok('deactivate leaves the folder alone the same way');
   else bad('deactivate restores Claude Code even beside the old extension');
+}
+
+/* shim/ is the last version of the old id. Auto-update brings it to everyone who has the old extension, and the editor
+   installs what it depends on, which is how they get this one. It must never touch Claude Code: the patch and the plugin
+   belong to this extension by then, and uninstalling the shim is exactly what it asks people to do. */
+console.log('\nthe old id\'s last version, shim/');
+{
+  const dir = path.join(__dirname, '..', 'shim');
+  const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch (_) { return ''; } };
+  let pkg = {};
+  try { pkg = JSON.parse(read('package.json')); } catch (_) { pkg = {}; }
+  const plus = require('../package.json');
+  if (pkg.name === 'claude-code-extras' && pkg.publisher === 'xnervwang' && pkg.displayName === 'Work Plan for Claude Code (now Claude Code Plus)'
+    && JSON.stringify(pkg.extensionDependencies) === JSON.stringify(['xnervwang.claude-code-plus'])
+    && JSON.stringify(pkg.extensionKind) === JSON.stringify(plus.extensionKind) && pkg.engines && pkg.engines.vscode === plus.engines.vscode
+    && pkg.main === './extension.js' && /^\d+\.\d+\.\d+$/.test(pkg.version || '')) {
+    ok('its manifest is xnervwang.claude-code-extras, depends on xnervwang.claude-code-plus alone, and runs where this extension runs');
+  } else bad(`shim manifest: ${JSON.stringify([pkg.name, pkg.publisher, pkg.displayName, pkg.extensionDependencies, pkg.extensionKind, pkg.engines, pkg.main, pkg.version])}`);
+  if (pkg.name && !(pkg.scripts && pkg.scripts['vscode:uninstall']) && !pkg.contributes) ok('it has no uninstall hook and contributes nothing');
+  else bad(`shim scripts and contributions: ${JSON.stringify([pkg.scripts, pkg.contributes])}`);
+  const code = read('extension.js');
+  const required = Array.from(code.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)).map((m) => m[1]);
+  const deact = (/function deactivate\(\) \{([\s\S]*?)\}/.exec(code) || [])[1];
+  if (code && required.every((m) => ['vscode', 'fs', 'path'].includes(m)) && deact !== undefined && !deact.trim()) {
+    ok('it requires nothing but vscode, fs and path, and deactivate does nothing');
+  } else bad(`shim requires ${JSON.stringify(required)}, deactivate ${JSON.stringify(deact)}`);
+  const ascii = ['package.json', 'extension.js', 'README.md'].filter((f) => !read(f) || /[^\x00-\x7f]/.test(read(f)));
+  if (!ascii.length && read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')) ok('its files are ASCII and its LICENSE is this one');
+  else bad(`shim files missing or not ASCII: ${JSON.stringify(ascii)}, LICENSE same ${read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')}`);
+  const ignore = fs.readFileSync(path.join(__dirname, '..', '.vscodeignore'), 'utf8').split('\n');
+  if (ignore.includes('shim/**') && !/\bshim\b/.test((fs.readFileSync(path.join(__dirname, '..', 'build', 'pack.sh'), 'utf8').match(/^cp -r .*$/m) || [''])[0])) {
+    ok('this extension\'s own package leaves shim/ out');
+  } else bad('shim/ would ship inside this extension');
+  let carry = {};
+  try { carry = require('../src/carryover'); } catch (_) { carry = {}; }
+
+  /* Its activation, against a stand-in editor: the two state entries this extension imports are written to export.json,
+     and the notice is shown once, its button uninstalling this id. */
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-shim-')));
+  try {
+    const stub = path.join(home, 'vscode-stub.js');
+    fs.writeFileSync(stub, `
+      const rec = { said: [], executed: [] };
+      module.exports = { rec,
+        window: { showInformationMessage: async (text, ...items) => { rec.said.push([text].concat(items)); return 'Uninstall'; } },
+        commands: { executeCommand: async (...a) => { rec.executed.push(a); } } };`);
+    const script = `
+      const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
+      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
+      const vs = require(${JSON.stringify(stub)});
+      const shim = require(${JSON.stringify(path.join(dir, 'extension.js'))});
+      const memo = (init) => { const m = new Map(Object.entries(init)); return { m, get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { m.set(k, v); } }; };
+      const storage = path.join(${JSON.stringify(home)}, 'User', 'globalStorage', 'xnervwang.claude-code-extras');
+      const state = memo({ 'claudeCodeExtras.removed': true, 'claudeCodeExtras.projectDirDays': { '/w': 20000 }, 'claudeCodeExtras.workPlanPlugin': { registered: true } });
+      (async () => {
+        const out = {};
+        try {
+          await shim.activate({ subscriptions: [], globalState: state, globalStorageUri: { fsPath: storage } });
+          await new Promise((r) => setTimeout(r, 100));
+          out.first = JSON.parse(fs.readFileSync(path.join(storage, 'export.json'), 'utf8'));
+          out.said = vs.rec.said.length; out.executed = vs.rec.executed;
+          fs.rmSync(path.join(storage, 'export.json'));
+          await shim.activate({ subscriptions: [], globalState: state, globalStorageUri: { fsPath: storage } });
+          await new Promise((r) => setTimeout(r, 100));
+          out.again = fs.existsSync(path.join(storage, 'export.json'));
+          out.saidAgain = vs.rec.said.length;
+          out.left = fs.readdirSync(storage);
+          out.deactivated = shim.deactivate();
+        } catch (e) { out.threw = String(e && e.stack); }
+        process.stdout.write(JSON.stringify(out));
+      })();`;
+    let r;
+    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 })); }
+    catch (e) { r = { threw: e.message }; }
+    if (!r.threw && JSON.stringify(r.first) === JSON.stringify({ 'claudeCodeExtras.removed': true, 'claudeCodeExtras.projectDirDays': { '/w': 20000 } })
+      && r.again === true && JSON.stringify(r.left) === JSON.stringify(['export.json'])) {
+      ok('it writes the removed mark and the remembered folders to export.json on every activation, and nothing else');
+    } else bad(`shim export: ${JSON.stringify(r).slice(0, 500)}`);
+    if (!r.threw && r.said === 1 && r.saidAgain === 1
+      && JSON.stringify(r.executed) === JSON.stringify([['workbench.extensions.uninstallExtension', 'xnervwang.claude-code-extras']])) {
+      ok('its notice is shown once, and the Uninstall button uninstalls the old id');
+    } else bad(`shim notice: ${JSON.stringify([r.said, r.saidAgain, r.executed])}`);
+    const names = {};
+    try {
+      names.EXPORT_FILE = /const EXPORT_FILE = '([^']+)';/.exec(code)[1];
+      names.EXPORTED_KEYS = JSON.parse(/const EXPORTED_KEYS = (\[[^\]]*\]);/.exec(code)[1].replace(/'/g, '"'));
+    } catch (_) { /* reported below */ }
+    if (carry.EXPORT_FILE && JSON.stringify([names.EXPORT_FILE, names.EXPORTED_KEYS]) === JSON.stringify([carry.EXPORT_FILE, carry.EXPORTED_KEYS])) {
+      ok('the shim and this extension name the same file and the same entries');
+    } else bad(`export names: ${JSON.stringify([names.EXPORT_FILE, names.EXPORTED_KEYS, carry.EXPORT_FILE, carry.EXPORTED_KEYS])}`);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+
+  /* This extension's side: export.json is read, each entry imported only where this extension has no value of its own,
+     and a removed mark means what running Remove would - nothing is patched and no plugin is registered. The shim
+     activates only after this extension, which depends on it the other way, so the file can appear after this
+     activation has returned; activation must not wait for it, and the start waits instead. */
+  const OLD = 'User/globalStorage/' + LEGACY_ID + '/';
+  const shimDesc = { packageJSON: pkg, extensionPath: '/x/' + LEGACY_ID + '-' + pkg.version };
+  const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
+  const ccFiles = { 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '' };
+  const exported = JSON.stringify({ 'claudeCodeExtras.removed': true, 'claudeCodeExtras.projectDirDays': { '/w': 20000 } });
+  const imp = activateStub({ extensions: { [LEGACY_ID]: shimDesc, 'anthropic.claude-code': cc }, files: Object.assign({ [OLD + 'export.json']: exported }, ccFiles) });
+  const st = imp.state || {};
+  if (!imp.threw && st['claudeCodeExtras.removed'] === true && st['claudeCodeExtras.projectDirDays'] && st['claudeCodeExtras.projectDirDays']['/w'] === 20000
+    && !(imp.logs || []).some((l) => l.startsWith('work plan plugin:')) && !Object.keys(imp.files || {}).some((k) => /claude-code-extras\.css$/.test(k))) {
+    ok('the removed mark and the folders are imported, and with the mark nothing is patched and no plugin is registered');
+  } else bad(`import: ${JSON.stringify({ threw: (imp.threw || '').slice(0, 300), state: st, logs: (imp.logs || []).slice(0, 6) })}`);
+  const own = activateStub({ extensions: { [LEGACY_ID]: shimDesc }, files: { [OLD + 'export.json']: exported }, state: { 'claudeCodeExtras.removed': false } });
+  if (!own.threw && (own.state || {})['claudeCodeExtras.removed'] === false) ok('an entry this extension already has is not imported over');
+  else bad(`with a value of its own: ${JSON.stringify((own.state || {})['claudeCodeExtras.removed'])}`);
+  const late = activateStub({ extensions: { [LEGACY_ID]: shimDesc }, later: { [OLD + 'export.json']: exported }, after: 1500 });
+  if (!late.threw && late.activateMs < 1000 && (late.state || {})['claudeCodeExtras.removed'] === true && late.hooks === true) {
+    ok('with the shim installed and no export.json yet, activation returns at once, and the start waits for the file and imports it');
+  } else bad(`export.json written after activation: ${JSON.stringify({ threw: (late.threw || '').slice(0, 300), ms: late.activateMs, removed: (late.state || {})['claudeCodeExtras.removed'], hooks: late.hooks })}`);
 }
 
 /* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no

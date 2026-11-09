@@ -5,14 +5,14 @@
 'use strict';
 /*
  * Writes the two descriptor files a .vsix needs, derived from package.json so the identity and version cannot drift
- * from the manifest the editor actually reads. Called by pack.sh with the staging directory as its argument.
+ * from the manifest the editor actually reads. Called by pack.sh with the staging directory as its argument, and by
+ * pack-shim.sh with the shim's package.json after it.
  */
 const fs = require('fs');
 const path = require('path');
-const pkg = require('../package.json');
-
 const stage = process.argv[2];
-if (!stage) { console.error('usage: node make-manifest.js <staging-dir>'); process.exit(2); }
+if (!stage) { console.error('usage: node make-manifest.js <staging-dir> [<package.json>]'); process.exit(2); }
+const pkg = require(process.argv[3] ? path.resolve(process.argv[3]) : '../package.json');
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -27,7 +27,7 @@ const vsix = `<?xml version="1.0" encoding="utf-8"?>
     <GalleryFlags>Public</GalleryFlags>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="${esc(pkg.engines.vscode)}" />
-      <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
+      <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="${esc((pkg.extensionDependencies || []).join(','))}" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value="" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="${esc((pkg.extensionKind || ['workspace']).join(','))}" />
       <Property Id="Microsoft.VisualStudio.Code.LocalizedLanguages" Value="" />

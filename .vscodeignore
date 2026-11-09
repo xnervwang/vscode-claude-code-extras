@@ -23,3 +23,6 @@ images/tools-*.png
 
 # Source of images/icon.png, which the store reads.
 images/icon.svg
+
+# The last version of the old id, built by build/pack-shim.sh.
+shim/**

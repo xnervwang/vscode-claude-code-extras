@@ -211,6 +211,8 @@ function carryOver(context, log) {
  * names with ours, and are left to it. The first start after it is gone runs as usual.
  */
 const TOLD_KEY = PREFIX + 'toldEarlierBuild';
+/* How long the first start beside the old id's last version waits for its export.json. */
+const EXPORT_WAIT_MS = 20000;
 function standAside(context, log, version) {
   log.appendLine(`Work Plan for Claude Code ${version} (${carryover.LEGACY_ID}) is still installed and patches Claude Code itself; `
     + 'this extension does nothing until it is updated or uninstalled');
@@ -234,16 +236,38 @@ async function activate(context) {
   selfPath = context.extensionPath;
   const log = vscode.window.createOutputChannel('Claude Code Plus');
   context.subscriptions.push(log);
-  let earlier = '';
-  try { earlier = carryover.earlierBuild(vscode.extensions.getExtension(carryover.LEGACY_ID)); } catch (_) { /* not there */ }
+  let earlier = '', handing = false;
+  try {
+    const old = vscode.extensions.getExtension(carryover.LEGACY_ID);
+    earlier = carryover.earlierBuild(old);
+    handing = !!old && !earlier;
+  } catch (_) { /* not there */ }
   if (earlier) { standAside(context, log, earlier); return; }
+  /* The old id's last version writes what is imported here as it activates, and the editor activates it only after this
+     activation has returned, since it depends on this extension. So the start waits for the file, and activation does
+     not wait for the start. */
+  const storage = context.globalStorageUri.fsPath;
+  const exported = path.join(carryover.legacyStorage(storage), carryover.EXPORT_FILE);
+  const waiting = handing && !fs.existsSync(exported);
   const go = async () => {
+    if (waiting && !(await carryover.waitFor(exported, EXPORT_WAIT_MS))) {
+      log.appendLine(`${carryover.LEGACY_ID} wrote no ${carryover.EXPORT_FILE} within ${EXPORT_WAIT_MS / 1000}s; starting without it`);
+    }
+    try {
+      const taken = await carryover.importState(context.globalState, storage);
+      if (taken.length) log.appendLine(`taken from ${carryover.LEGACY_ID}: ${taken.join(', ')}`);
+    } catch (e) { log.appendLine(`reading ${exported}: ${e && e.message}`); }
     carryOver(context, log);
     let renamed = '';
     try { renamed = await renameSettings(context); } catch (e) { renamed = 'failed: ' + (e && e.message); }
     await start(context, log, renamed);
   };
-  if (vscode.workspace.isTrusted !== false) { await go(); return; }
+  if (vscode.workspace.isTrusted !== false) {
+    const started = go();
+    if (waiting) started.catch((e) => log.appendLine('starting: ' + ((e && e.stack) || e)));
+    else await started;
+    return;
+  }
   log.appendLine('Restricted Mode: nothing starts until this workspace is trusted');
   let started = false;
   const trusted = vscode.workspace.onDidGrantWorkspaceTrust(() => {

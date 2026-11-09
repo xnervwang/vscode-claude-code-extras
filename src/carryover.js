@@ -34,6 +34,10 @@ function earlierBuild(ext) {
   return handsOver(pkg) ? '' : String(pkg.version || '?');
 }
 
+/* What the old id's last version exports from its state (shim/extension.js), named as they are stored there and here. */
+const EXPORT_FILE = 'export.json';
+const EXPORTED_KEYS = ['claudeCodeExtras.removed', 'claudeCodeExtras.projectDirDays'];
+
 /** The old extension's global storage folder, beside `storage`, this extension's. */
 const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
 
@@ -65,4 +69,35 @@ function copyFiles(storage, names) {
   return out;
 }
 
-module.exports = { LEGACY_ID, PLUS_ID, handsOver, earlierBuild, legacyStorage, copyFiles };
+/**
+ * Take the entries of the old id's export.json into `state` (a Memento) where it has no value of its own: this
+ * extension's own value is newer than anything the old one kept. Returns the keys taken.
+ */
+async function importState(state, storage) {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(path.join(legacyStorage(storage), EXPORT_FILE), 'utf8')); } catch (_) { return []; }
+  const taken = [];
+  for (const k of EXPORTED_KEYS) {
+    if (!data || typeof data !== 'object' || data[k] === undefined || state.get(k) !== undefined) continue;
+    await state.update(k, data[k]);
+    taken.push(k);
+  }
+  return taken;
+}
+
+/** Resolves true once `file` exists, or false after `ms`. */
+function waitFor(file, ms, every = 200) {
+  return new Promise((resolve) => {
+    const end = Date.now() + ms;
+    const look = () => {
+      if (fs.existsSync(file)) resolve(true);
+      else if (Date.now() >= end) resolve(false);
+      else setTimeout(look, every);
+    };
+    look();
+  });
+}
+
+module.exports = {
+  LEGACY_ID, PLUS_ID, EXPORT_FILE, EXPORTED_KEYS, handsOver, earlierBuild, legacyStorage, copyFiles, importState, waitFor,
+};
