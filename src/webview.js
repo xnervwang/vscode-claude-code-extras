@@ -767,9 +767,9 @@ function apply(claudeExtensionPath, opts = {}) {
   return { changed, liveChanged, current: true, message };
 }
 
-/* The backup is moved over the file in one step, so no window can find a clean file beside its backup. One patching in
-   that moment would write a fresh backup for a separate delete to take, and leave a patched file with nothing to restore
-   from. Of two restores at once, the one whose move finds no backup has nothing left to do. */
+/* The backup is moved over the file in one step, so no window can find a clean file beside its backup. A window patching
+   in that moment would write a fresh backup that the delete then removes, and leave a patched file with nothing to
+   restore from. */
 function moveBack(backup, file) {
   try { fs.renameSync(backup, file); } catch (e) {
     if (e && e.code === 'ENOENT') return { changed: false, message: 'nothing to restore' };

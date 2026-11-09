@@ -4266,8 +4266,6 @@ console.log('\nan uninstall puts Claude Code back at once');
   }
 }
 
-/* The uninstall hook on a machine with two editors: the folder of an editor that still runs a copy is left to it, and
-   so are the plugin and its plans; a folder with no copy left is cleaned up. */
 console.log('\nthe uninstall hook with another editor on the machine');
 {
   const removal = require('../src/removal');

@@ -85,10 +85,10 @@ function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
 }
 
 /*
- * What the uninstall hook may put back. This editor's own folder, and any other editor's folder on this machine that no
- * longer holds a copy of this extension: a patch left there has nobody else to take it out. A folder whose editor still
- * runs a copy belongs to that copy, which would patch it again at its next start. While one is left, the companion plugin
- * and the plans in its data directory are still in use, so `lastCopy` is false and they stay.
+ * What the uninstall hook may put back: this editor's own folder, and any other editor's folder on this machine that no
+ * longer holds a copy of this extension. Where another editor still has it installed, it patches Claude Code there again
+ * at its next start, so that folder is left out. While one is left, the companion plugin and the plans in its data
+ * directory are still in use, so `lastCopy` is false and they stay.
  */
 function uninstallPlan(extensionsDir, id) {
   const others = roots(extensionsDir).filter((r) => r !== extensionsDir);

@@ -13,13 +13,13 @@
  * Without it, uninstalling this extension would leave every patched Claude Code file behind — still carrying our
  * marker, still running our script, with nothing left installed that knows how to undo it. So this restores the installs
  * in this editor's extensions folder, and in any other editor's folder on this machine that has no copy of this extension
- * left to undo them (src/removal.js, uninstallPlan). Another editor still running a copy keeps its patch.
+ * left to undo them (src/removal.js, uninstallPlan).
  *
  * The adapter list comes from src/adapters.js, the same list the entry point uses, so a target cannot be wired into
  * one and forgotten here.
  *
  * It also unregisters the companion Claude Code plugin, because one thing was installed and one thing has to be enough
- * to uninstall - unless another editor on this machine still runs a copy, which goes on using the plugin and its plans.
+ * to uninstall. Not while another editor on this machine still runs a copy, which goes on using the plugin and its plans.
  * Unregistering deletes the plugin's data directory, and the work plans live in it, so they are copied to
  * ~/.claude/agent-work-plan-plans-<timestamp>/ first, with a note in there saying what they are. They are somebody's own
  * writing; uninstalling an editor extension is not a request to delete it.
