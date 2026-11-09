@@ -27,7 +27,7 @@ const { SESSION } = require('./claude-files');
 /* The protocol major this source implements; package.json repeats it under "agentPlus". */
 const PROTOCOL = 1;
 const ID = 'claude-code';
-const EXTENSION_ID = 'xnervwang.claude-code-extras';
+const EXTENSION_ID = 'xnervwang.claude-code-plus';
 const AGENTS_FRESH_MS = 30000;
 /* Shorter than Agent Plus's 20-second wait, after which it reports the answer as uncertain and drops a late
    "not received". */
@@ -74,7 +74,7 @@ const isPanelTab = (tab) => !!tab && tab.input instanceof vscode.TabInputWebview
 /*
  * `deps`:
  *   planDir()                       the companion plugin's data directory
- *   enabled()                       claudeCodeWorkPlan.workPlan: off, no conversation has a plan
+ *   enabled()                       claudeCodePlus.workPlan: off, no conversation has a plan
  *   listAgents()                    `claude agents --json`, as { records, error }
  *   readPlan(sessionId)             for titles taken from the plan, and for stopped conversations
  *   titles(s), since(s)             from waiting.reader()

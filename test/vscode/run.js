@@ -38,7 +38,7 @@ function printLog(user) {
     for (const n of names) {
       const p = path.join(d, n.name);
       if (n.isDirectory()) walk(p);
-      else if (/Work Plan for Claude Code\.log$/.test(n.name)) found.push(p);
+      else if (/Claude Code Plus\.log$/.test(n.name)) found.push(p);
     }
   };
   walk(path.join(user, 'logs'));

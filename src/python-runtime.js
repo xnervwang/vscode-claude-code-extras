@@ -30,7 +30,7 @@ const executable = (storage, b = build()) => path.join(home(storage, b), 'python
 
 function fetchTo(url, file, hops = 5) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'claude-code-extras' } }, (res) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'claude-code-plus' } }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && hops > 0) {
         res.resume();
         resolve(fetchTo(new URL(res.headers.location, url).toString(), file, hops - 1));

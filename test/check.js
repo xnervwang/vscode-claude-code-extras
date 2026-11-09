@@ -2971,7 +2971,7 @@ console.log('\nthe waiting, paired out of the official log');
     else bad(`a slow CLI spawn measured ${JSON.stringify(got)}`);
   }
   {
-    const dir = path.join('/a', 'logs', '20260101T000000', 'exthost7', 'xnervwang.claude-code-extras');
+    const dir = path.join('/a', 'logs', '20260101T000000', 'exthost7', 'xnervwang.claude-code-plus');
     const want = path.join('/a', 'logs', '20260101T000000', 'exthost7', 'Anthropic.claude-code', 'Claude VSCode.log');
     if (L.logFile(dir) === want) ok('their log is found as a sibling of ours, not by taking the newest directory');
     else bad(`logFile gave ${L.logFile(dir)}`);
@@ -3232,11 +3232,11 @@ console.log('\none switch per addition, wired at both ends');
     .filter((f) => f.endsWith('.js'))
     .map((f) => fs.readFileSync(path.join(root, 'src', 'page', f), 'utf8')).join('\n');
 
-  const noSetting = webview.SWITCHES.filter((k) => !settings['claudeCodeWorkPlan.show.' + k]);
+  const noSetting = webview.SWITCHES.filter((k) => !settings['claudeCodePlus.show.' + k]);
   if (!noSetting.length) ok(`all ${webview.SWITCHES.length} switches have a setting a person can find`);
   else bad(`no setting for ${noSetting.join(', ')}`);
 
-  const onByDefault = webview.SWITCHES.every((k) => settings['claudeCodeWorkPlan.show.' + k].default === true);
+  const onByDefault = webview.SWITCHES.every((k) => settings['claudeCodePlus.show.' + k].default === true);
   if (onByDefault) ok('every switch defaults to on, so an upgrade turns nothing off');
   else bad('a switch does not default to on');
 
@@ -3448,7 +3448,7 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     /* The setting has to reach the plugin. The views are Agent Plus's; with the setting off the source gives no plan
        path, so they show no plan either. */
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    const setting = manifest.contributes.configuration.properties['claudeCodeWorkPlan.workPlan'];
+    const setting = manifest.contributes.configuration.properties['claudeCodePlus.workPlan'];
     const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
     if (setting && setting.default === true && /enabled: WORK_PLAN_SETTING,/.test(ext)
       && /enabled: \(\) => cfg\(\)\.get\(WORK_PLAN_SETTING, true\) !== false,/.test(ext)) {
@@ -4150,7 +4150,7 @@ console.log('\none copy of what the hooks share');
 console.log('\nan uninstall puts Claude Code back at once');
 {
   const removal = require('../src/removal');
-  const ID = 'xnervwang.claude-code-extras';
+  const ID = 'xnervwang.claude-code-plus';
   const me = ID + '-1.0.5';
   const stage = (folders, marked, body) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-uninst-'));
@@ -4271,7 +4271,7 @@ console.log('\nthe uninstall hook with another editor on the machine');
   const removal = require('../src/removal');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-two-editors-'));
   const realHome = process.env.HOME, realExt = process.env.VSCODE_EXTENSIONS;
-  const ID = 'xnervwang.claude-code-extras';
+  const ID = 'xnervwang.claude-code-plus';
   const dirOf = (p) => { const d = path.join(home, p, 'extensions'); fs.mkdirSync(d, { recursive: true }); return d; };
   try {
     process.env.HOME = home;
@@ -4566,9 +4566,10 @@ console.log('\nthe sweep of abandoned plans');
   } else bad('the sweep of abandoned plans is not called through the module');
 }
 
-/* Settings once lived under claudeCodeExtras.*. Moving them is the one part of the rename that can lose what a person set,
-   so it is run against a stand-in for the editor's settings: what is copied, what is never overwritten, what is left when
-   the editor refuses to clear a name nobody declares, and that a scope is done only once. */
+/* Settings were named claudeCodeExtras.* and then claudeCodeWorkPlan.*. Moving them is the one part of a rename that can
+   lose what a person set, so it is run against a stand-in for the editor's settings: what is copied and from which of
+   the two old names, what is never overwritten, what is left when the editor refuses to clear a name nobody declares,
+   and that a scope is done only once. */
 console.log('\nsettings moved from their old names');
 {
   // A real path: on macOS the temporary folder is reached through a symbolic link, and a module required by two spellings
@@ -4578,12 +4579,13 @@ console.log('\nsettings moved from their old names');
     class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
     const store = { values: {}, refuseLegacyClear: false, refuseWrite: false, folders: [{ name: 'f', uri: {} }] };
     const FIELD = { 1: 'globalValue', 2: 'workspaceValue', 3: 'workspaceFolderValue' };
+    const legacy = (k) => k.startsWith('claudeCodeExtras.') || k.startsWith('claudeCodeWorkPlan.');
     const conf = {
       inspect: (k) => ({ key: k, globalValue: (store.values.globalValue || {})[k], workspaceValue: (store.values.workspaceValue || {})[k],
         workspaceFolderValue: (store.values.workspaceFolderValue || {})[k] }),
       update: async (k, v, target) => {
-        if (store.refuseWrite && !k.startsWith('claudeCodeExtras.')) throw new Error('refused');
-        if (store.refuseLegacyClear && k.startsWith('claudeCodeExtras.')) throw new Error('not a registered configuration');
+        if (store.refuseWrite && !legacy(k)) throw new Error('refused');
+        if (store.refuseLegacyClear && legacy(k)) throw new Error('not a registered configuration');
         const f = FIELD[target], bag = store.values[f] || (store.values[f] = {});
         if (v === undefined) delete bag[k]; else bag[k] = v;
       },
@@ -4613,37 +4615,45 @@ console.log('\nsettings moved from their old names');
     const results = [];
     const reset = (values) => { vs.store.values = JSON.parse(JSON.stringify(values)); vs.store.refuseLegacyClear = false; vs.store.refuseWrite = false; };
 
-    reset({ globalValue: { 'claudeCodeExtras.enabled': false, 'claudeCodeExtras.userMessageColor': 'blue', 'claudeCodeWorkPlan.userMessageColor': 'red' },
-      workspaceValue: { 'claudeCodeExtras.workPlan': false } });
+    reset({ globalValue: { 'claudeCodeExtras.enabled': false, 'claudeCodeExtras.userMessageColor': 'blue', 'claudeCodePlus.userMessageColor': 'red',
+      'claudeCodeWorkPlan.show.chime': false, 'claudeCodeWorkPlan.sessionPins': false, 'claudeCodeExtras.sessionPins': true },
+      workspaceValue: { 'claudeCodeWorkPlan.workPlan': false } });
     const c1 = context();
     const said = await ext.renameSettings(c1);
-    results.push([at('globalValue', 'claudeCodeWorkPlan.enabled') === false && at('globalValue', 'claudeCodeExtras.enabled') === undefined,
-      'a value under an old name is copied to its new name and cleared from the old one']);
-    results.push([at('globalValue', 'claudeCodeWorkPlan.userMessageColor') === 'red' && at('globalValue', 'claudeCodeExtras.userMessageColor') === undefined,
+    results.push([at('globalValue', 'claudeCodePlus.enabled') === false && at('globalValue', 'claudeCodeExtras.enabled') === undefined,
+      'a value under the oldest name, claudeCodeExtras, is copied to its new name and cleared from the old one']);
+    results.push([at('globalValue', 'claudeCodePlus.show.chime') === false && at('globalValue', 'claudeCodeWorkPlan.show.chime') === undefined,
+      'a value under the later name, claudeCodeWorkPlan, is copied to its new name and cleared from the old one']);
+    results.push([at('globalValue', 'claudeCodePlus.sessionPins') === false && at('globalValue', 'claudeCodeWorkPlan.sessionPins') === undefined
+      && at('globalValue', 'claudeCodeExtras.sessionPins') === undefined,
+      'with a value under both old names, the later one is copied and both are cleared']);
+    results.push([at('globalValue', 'claudeCodePlus.userMessageColor') === 'red' && at('globalValue', 'claudeCodeExtras.userMessageColor') === undefined,
       'a value already set under the new name is not overwritten']);
-    results.push([at('workspaceValue', 'claudeCodeWorkPlan.workPlan') === false && at('globalValue', 'claudeCodeWorkPlan.workPlan') === undefined,
+    results.push([at('workspaceValue', 'claudeCodePlus.workPlan') === false && at('globalValue', 'claudeCodePlus.workPlan') === undefined,
       'a workspace value stays a workspace value']);
-    results.push([/2 in user/.test(said) && /1 in workspace/.test(said), \`what was moved is said, per scope ("\${said}")\`]);
+    results.push([/4 in user/.test(said) && /1 in workspace/.test(said) && c1.globalState.get('claudeCodePlus.settingsRenamed') === true,
+      \`what was moved is said, per scope, and the scope is recorded under the new prefix ("\${said}")\`]);
 
-    delete vs.store.values.globalValue['claudeCodeWorkPlan.enabled'];
+    delete vs.store.values.globalValue['claudeCodePlus.enabled'];
     vs.store.values.globalValue['claudeCodeExtras.enabled'] = false;
+    vs.store.values.globalValue['claudeCodeWorkPlan.enabled'] = false;
     await ext.renameSettings(c1);
-    results.push([at('globalValue', 'claudeCodeWorkPlan.enabled') === undefined,
-      'a scope is moved once: a new name put back to its default does not get the old value again']);
+    results.push([at('globalValue', 'claudeCodePlus.enabled') === undefined,
+      'a scope is moved once: a new name put back to its default does not get an old value again']);
 
-    reset({ globalValue: { 'claudeCodeExtras.show.chime': false } });
+    reset({ globalValue: { 'claudeCodeWorkPlan.show.chime': false } });
     vs.store.refuseLegacyClear = true;
     const c2 = context();
     const said2 = await ext.renameSettings(c2);
-    results.push([at('globalValue', 'claudeCodeWorkPlan.show.chime') === false && at('globalValue', 'claudeCodeExtras.show.chime') === false
-      && c2.globalState.get('claudeCodeExtras.settingsRenamed') === true && /left in place/.test(said2),
+    results.push([at('globalValue', 'claudeCodePlus.show.chime') === false && at('globalValue', 'claudeCodeWorkPlan.show.chime') === false
+      && c2.globalState.get('claudeCodePlus.settingsRenamed') === true && /left in place/.test(said2),
       'when the editor will not clear an old name, the value is still moved and the old line is left, as said']);
 
-    reset({ globalValue: { 'claudeCodeExtras.enabled': false } });
+    reset({ globalValue: { 'claudeCodeWorkPlan.enabled': false } });
     vs.store.refuseWrite = true;
     const c3 = context();
     await ext.renameSettings(c3);
-    results.push([c3.globalState.get('claudeCodeExtras.settingsRenamed') !== true && at('globalValue', 'claudeCodeExtras.enabled') === false,
+    results.push([c3.globalState.get('claudeCodePlus.settingsRenamed') !== true && at('globalValue', 'claudeCodeWorkPlan.enabled') === false,
       'a copy that fails leaves the old value and the scope not done, so the next start tries again']);
     return results;
   };
@@ -4657,23 +4667,170 @@ console.log('\nsettings moved from their old names');
   fs.rmSync(stub, { force: true });
 }
 
-/* The extension's identifier stays claude-code-extras, and so do the names it keeps its own state under; everything a
-   person reads or types is Work Plan. A name left behind in one of these places is the old one coming back. */
+/* The extension is xnervwang.claude-code-plus, and everything a person reads or types says Claude Code Plus; the names it
+   keeps its own state and files under are older and stay. A name left behind in one of these places is an old one coming
+   back. */
 console.log('\nthe name a person sees');
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const c = manifest.contributes;
   const keys = [].concat(c.configuration).flatMap((x) => Object.keys(x.properties));
-  const stray = keys.filter((k) => !k.startsWith('claudeCodeWorkPlan.'))
-    .concat(c.commands.filter((x) => !x.command.startsWith('claudeCodeWorkPlan.')).map((x) => x.command));
-  const shown = JSON.stringify([manifest.displayName, c.commands.map((x) => x.title), c.viewsContainers, [].concat(c.configuration).map((x) => x.title)]);
-  if (!stray.length && !/Extras for Claude Code/.test(shown) && /^Work Plan for Claude Code( \u2014 .+)?$/.test(manifest.displayName)) {
-    ok('every setting and command is named under claudeCodeWorkPlan, and every title says Work Plan for Claude Code');
-  } else bad('old names in the manifest: ' + JSON.stringify(stray) + (/Extras for Claude Code/.test(shown) ? ' and an old title' : ''));
+  const stray = keys.filter((k) => !k.startsWith('claudeCodePlus.'))
+    .concat(c.commands.filter((x) => !x.command.startsWith('claudeCodePlus.')).map((x) => x.command));
+  const shown = JSON.stringify([manifest.displayName, manifest.description, c.commands.map((x) => x.title), c.viewsContainers,
+    [].concat(c.configuration).map((x) => x.title), keys.map((k) => [].concat(c.configuration).map((x) => x.properties[k]).find(Boolean).markdownDescription)]);
+  const oldTitle = /Extras for Claude Code|Work Plan for Claude Code|claudeCodeWorkPlan\.|claudeCodeExtras\./.test(shown);
+  const titled = c.commands.every((x) => x.title.startsWith('Claude Code Plus: ')) && [].concat(c.configuration).every((x) => x.title === 'Claude Code Plus');
+  if (manifest.name === 'claude-code-plus' && manifest.publisher === 'xnervwang' && manifest.displayName === 'Claude Code Plus'
+    && manifest.repository.url === 'https://github.com/xnervwang/vscode-claude-code-plus' && !stray.length && !oldTitle && titled) {
+    ok('the manifest is xnervwang.claude-code-plus, every setting and command is named under claudeCodePlus, and every title says Claude Code Plus');
+  } else bad('old names in the manifest: ' + JSON.stringify([manifest.name, manifest.displayName, manifest.repository, stray, oldTitle, titled]));
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').split('\n');
-  const old = readme.filter((l) => /Extras for Claude Code/.test(l) || (/claudeCodeExtras\./.test(l) && !/by earlier versions are copied/.test(l)));
-  if (!old.length) ok('the README names nothing by its old name, apart from saying where old settings went');
-  else bad('the README still uses an old name: ' + old.map((l) => l.trim().slice(0, 80)).join(' | '));
+  const old = readme.filter((l) => /Extras for Claude Code|Work Plan for Claude Code|claudeCodeWorkPlan\.|claudeCodeExtras\.|xnervwang\.claude-code-extras/.test(l)
+    && !/used to be/.test(l));
+  if (!old.length && readme[0] === '# Claude Code Plus') ok('the README is titled Claude Code Plus and names nothing by an old name, apart from the line saying what it used to be');
+  else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
+}
+
+/* ── the rename to Claude Code Plus ──
+   The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
+   runs extension.js against a stand-in editor in a child process with its own home folder, so what is checked is what
+   activation does: which commands it registers, what it carries over from the old extension's storage, and what it leaves
+   alone while the old extension still patches Claude Code itself. */
+const LEGACY_ID = 'xnervwang.claude-code-extras';
+/*
+ * opts.extensions   id -> { packageJSON, extensionPath } the stand-in's getExtension answers for
+ * opts.taken        command ids another extension has registered already, which registerCommand refuses
+ * opts.state        what this extension's globalState holds before it starts
+ * opts.files        relative path under the home folder -> content, written before activation
+ * opts.after(ms)    how long to let it run after activate resolves
+ * Returns { threw, commands, looked, hooks, said, executed, logs, state, files } - files being every file under the home
+ * folder afterwards, relative, with its content when it is JSON.
+ */
+const activateStub = (opts = {}) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-plus-')));
+  try {
+    for (const [rel, body] of Object.entries(opts.files || {})) {
+      fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(home, rel), body);
+    }
+    const stub = path.join(home, 'vscode-stub.js');
+    fs.writeFileSync(stub, `
+      const disposable = { dispose() {} };
+      const rec = { commands: [], looked: [], said: [], executed: [], logs: [] };
+      const taken = new Set(${JSON.stringify(opts.taken || [])});
+      const exts = ${JSON.stringify(opts.extensions || {})};
+      const say = async (text, ...items) => { rec.said.push([text].concat(items.filter((i) => typeof i === 'string'))); return ${JSON.stringify(opts.answer || null)} || undefined; };
+      class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
+      module.exports = { rec, TreeItem, TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+        ThemeIcon: class {}, ThemeColor: class {}, MarkdownString: class {}, TabInputWebview: class {}, version: '1.120.0',
+        StatusBarAlignment: { Left: 1, Right: 2 }, env: { language: 'en' }, ProgressLocation: { Notification: 15 },
+        EventEmitter: class { constructor() { this.event = () => disposable; } fire() {} },
+        Uri: { file: (p) => ({ fsPath: p }) }, RelativePattern: class {}, ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+        workspace: { workspaceFolders: [], isTrusted: true, createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
+          getConfiguration: () => ({ get: (k, d) => d, inspect: () => undefined, update: async () => {} }),
+          onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable, onDidGrantWorkspaceTrust: () => disposable },
+        window: { createOutputChannel: () => ({ appendLine(l) { rec.logs.push(l); }, show() {}, dispose() {} }), createTreeView: () => ({ dispose() {} }),
+          createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }), registerWebviewViewProvider: () => disposable,
+          showInformationMessage: say, showWarningMessage: say, showErrorMessage: say, setStatusBarMessage() {},
+          tabGroups: { all: [], activeTabGroup: null }, showTextDocument: async () => {} },
+        commands: {
+          registerCommand: (id) => { if (taken.has(id)) throw new Error("command '" + id + "' already exists"); rec.commands.push(id); return disposable; },
+          executeCommand: async (...a) => { rec.executed.push(a); } },
+        extensions: { getExtension: (id) => { rec.looked.push(id); return exts[id]; }, onDidChange: () => disposable } };`);
+    const root = path.join(__dirname, '..');
+    const script = `
+      const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
+      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
+      const vs = require(${JSON.stringify(stub)});
+      const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
+      const home = ${JSON.stringify(home)};
+      const storage = path.join(home, 'User', 'globalStorage', 'xnervwang.claude-code-plus');
+      const memo = (init) => { const m = new Map(Object.entries(init || {})); return { m, get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { if (v === undefined) m.delete(k); else m.set(k, v); } }; };
+      const subs = [], keep = setInterval;
+      global.setInterval = (fn, ms) => keep(() => {}, 1 << 30);
+      const globalState = memo(${JSON.stringify(opts.state || {})});
+      (async () => {
+        const out = { threw: '' };
+        try {
+          await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState, workspaceState: memo(),
+            extension: { id: 'xnervwang.claude-code-plus', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
+            globalStorageUri: { fsPath: storage }, logUri: { fsPath: path.join(home, 'logs', 'exthost1', 'xnervwang.claude-code-plus') } });
+          await new Promise((r) => setTimeout(r, ${Number(opts.after) || 300}));
+          out.hooks = typeof globalThis.__cceChatHook === 'function';
+        } catch (e) { out.threw = String(e && e.stack); }
+        out.state = Object.fromEntries(globalState.m);
+        for (const s of subs) { try { s.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
+        Object.assign(out, vs.rec);
+        process.stdout.write(JSON.stringify(out));
+        process.exit(0);
+      })();
+      process.on('unhandledRejection', (e) => { process.stdout.write(JSON.stringify({ threw: 'unhandled: ' + (e && e.stack) })); process.exit(0); });`;
+    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
+    delete env.CLAUDE_CONFIG_DIR;
+    let r;
+    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
+    catch (e) { r = { threw: e.message }; }
+    r.files = {};
+    const walk = (dir) => {
+      for (const n of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, n.name);
+        if (n.isDirectory()) walk(p);
+        else if (n.name !== 'vscode-stub.js') {
+          const body = fs.readFileSync(p, 'utf8');
+          try { r.files[path.relative(home, p)] = JSON.parse(body); } catch (_) { r.files[path.relative(home, p)] = body; }
+        }
+      }
+    };
+    walk(home);
+    return r;
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+};
+
+/* A keybinding someone made under either old prefix names the command that way, so both old names stay registered,
+   unlisted. When another extension in the same host holds one of them - the old extension itself, in a window that has
+   not restarted its extensions since an update - the editor refuses it, and that must not stop the rest. */
+console.log('\ncommands under both old names');
+{
+  const declared = require('../package.json').contributes.commands.map((x) => x.command.replace(/^[^.]+\./, ''));
+  const r = activateStub({ taken: ['claudeCodeExtras.status'] });
+  const has = new Set(r.commands || []);
+  const missing = [];
+  for (const n of declared) {
+    for (const p of ['claudeCodePlus.', 'claudeCodeWorkPlan.', 'claudeCodeExtras.']) if (!has.has(p + n) && p + n !== 'claudeCodeExtras.status') missing.push(p + n);
+  }
+  if (!r.threw && declared.length && !missing.length) ok(`each of the ${declared.length} commands is registered as claudeCodePlus.*, claudeCodeWorkPlan.* and claudeCodeExtras.*`);
+  else bad(`commands not registered: ${JSON.stringify(missing)}${r.threw ? ' - threw ' + r.threw.slice(0, 300) : ''}`);
+  if (!r.threw && has.has('claudeCodePlus.status') && !has.has('claudeCodeExtras.status') && has.has('claudeCodePlus.toggle')) {
+    ok('an old command name another extension already holds is skipped, and activation carries on');
+  } else bad(`with claudeCodeExtras.status taken: threw ${JSON.stringify((r.threw || '').slice(0, 300))}`);
+}
+
+/* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no
+   longer be recognized in a Claude Code install patched by an earlier build, the marketplace and plugin names are what
+   Claude Code registered and named the plan directory after, and the state keys are what the last version of the old
+   extension exports for this one to read. */
+console.log('\nnames the rename leaves alone');
+{
+  const pi = require('../src/plugin-install');
+  const src = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const wv = src('src/webview.js'), hs = src('src/host.js'), ext = src('extension.js');
+  const market = JSON.parse(src('claude-plugin/.claude-plugin/marketplace.json'));
+  const checks = [
+    ['the patch markers', webview.ANY_MARK === '/* CLAUDE-CODE-EXTRAS-WEBVIEW ' && host.ANY_MARK === '/* CLAUDE-CODE-EXTRAS-HOST v'
+      && webview.MARK.startsWith(webview.ANY_MARK) && host.MARK.startsWith(host.ANY_MARK)],
+    ['the backup and temporary-file suffixes', webview.BACKUP_SUFFIX === '.claude-code-extras-webview.bak' && host.BACKUP_SUFFIX === '.claude-code-extras-host.bak'
+      && /const TMP_SUFFIX = '\.claude-code-extras-host\.tmp';/.test(hs) && /\$\{file\}\.claude-code-extras-webview\./.test(wv)],
+    ['the files written beside the panel', /const LIVE_CSS = 'claude-code-extras\.css';/.test(wv) && /const LIVE_REV = 'claude-code-extras\.rev\.svg';/.test(wv)
+      && webview.EFFORT_PREFIX === 'claude-code-extras.effort.' && /var OURS = '\/webview\/claude-code-extras\.';/.test(src('src/page/05-page-setup.js'))],
+    ['the page\'s console tag', /\[claude-code-extras\] /.test(src('src/page/99-sweep.js'))],
+    ['the marketplace, the plugin and the plan directory', pi.MARKETPLACE === 'claude-code-extras' && market.name === 'claude-code-extras'
+      && pi.PLUGIN === 'agent-work-plan' && pi.DATA_DIR === 'agent-work-plan-claude-code-extras'
+      && /"agent-work-plan-claude-code-extras"\)/.test(src('claude-plugin/agent-work-plan/hooks/plan_path.py'))],
+    ['the state keys the old extension\'s last version exports', /const REMOVED_KEY = 'claudeCodeExtras\.removed';/.test(ext)
+      && /DIRS_KEY = 'claudeCodeExtras\.projectDirDays'/.test(ext)],
+  ];
+  for (const [what, pass] of checks) (pass ? ok : bad)(pass ? what + ' keep their earlier names' : what + ' were renamed');
 }
 
 console.log('\nthe latest tool call, on the working line while Focus view folds the tool calls');
@@ -4799,7 +4956,7 @@ console.log('\na window whose install was replaced by a rebuild of the same vers
 console.log('\na window still running a version that another one has replaced');
 {
   const removal = require('../src/removal');
-  const ID = 'xnervwang.claude-code-extras';
+  const ID = 'xnervwang.claude-code-plus';
   const old = ID + '-1.0.17', next = ID + '-1.0.18';
   const stage = (folders, marked, stamp) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-standing-'));
@@ -5618,8 +5775,8 @@ console.log('\nconversations pinned in the session list');
     && /if \(keeping \|\| !pinsOn\(\)\) return;/.test(extSrc) && /pins: pinsOn\(\) \?/.test(extSrc)
     && /if \(replaced\(\) && !toldStale\) \{[\s\S]{0,80}offerReload\('The pin is saved/.test(extSrc)
     && /fs\.watch\(dir, \{ persistent: false \}, \(event, name\) => \{\s*if \(name && name !== sessionPins\.FILE && name !== sessionColors\.FILE\) return;/.test(extSrc)
-    && manifest['claudeCodeWorkPlan.sessionPins'] && manifest['claudeCodeWorkPlan.sessionPins'].default === true
-    && !manifest['claudeCodeWorkPlan.keepGroupedSessions']) {
+    && manifest['claudeCodePlus.sessionPins'] && manifest['claudeCodePlus.sessionPins'].default === true
+    && !manifest['claudeCodePlus.keepGroupedSessions']) {
     ok('one setting, on by default, decides whether pins are drawn, files are kept and pinned conversations escape the archive');
     ok('a pin made in a window that can no longer write the stylesheet is saved and the reader told to reload, and every window redraws when the pins or the text colors change');
   } else bad('extension.js or the manifest does not wire the pins to their setting');
@@ -5825,7 +5982,7 @@ console.log('\nopen sessions on the session list');
   const none = env.window.__cceOpenSessions(ui);
   if (off === null && none === null) ok('nothing is drawn with the switch off, or with no conversation open');
   else bad('the section was drawn with the switch off or with nothing open');
-  if (webview.SWITCHES.includes('openSessions') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.openSessions']) {
+  if (webview.SWITCHES.includes('openSessions') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.openSessions']) {
     ok('the switch is a setting of its own');
   } else bad('the openSessions switch has no setting');
 }
@@ -5939,7 +6096,7 @@ console.log('\nopening in a tab or the sidebar from the session list');
       ok('the sidebar request opens in the sidebar whatever the setting says, unless the conversation is open in a tab; the official requests choose as before');
     } else bad(`the location chooser gave ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
   }
-  if (webview.SWITCHES.includes('openInTabOrSidebar') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.openInTabOrSidebar']) {
+  if (webview.SWITCHES.includes('openInTabOrSidebar') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.openInTabOrSidebar']) {
     ok('the switch is a setting of its own');
   } else bad('the openInTabOrSidebar switch has no setting');
 }
@@ -6006,7 +6163,7 @@ console.log('\nhover text on the session list rows');
   if (!r.error && r.out.includes('return w("button",{ref:E,id:Z,onMouseEnter:(cceE)=>{typeof window.__cceRowHover==="function"&&window.__cceRowHover(J,cceE.currentTarget,!0)},onMouseLeave:(cceE)=>{typeof window.__cceRowHover==="function"&&window.__cceRowHover(J,cceE.currentTarget,!1)},className:')) {
     ok('the list\'s row component tells the page as the pointer enters and leaves a row, with the row\'s conversation');
   } else bad(`the row hover edit gave ${r.error || r.out}`);
-  if (webview.SWITCHES.includes('sessionHoverDetails') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.sessionHoverDetails']) ok('the switch is a setting of its own');
+  if (webview.SWITCHES.includes('sessionHoverDetails') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.sessionHoverDetails']) ok('the switch is a setting of its own');
   else bad('the sessionHoverDetails switch has no setting');
 }
 console.log('\nsearching the session list by session id');
@@ -6044,7 +6201,7 @@ console.log('\nsearching the session list by session id');
     if (JSON.stringify(got2) === JSON.stringify(want2)) ok('the list\'s filter keeps its title and branch matches and adds the ID test');
     else bad(`the patched filter gave ${JSON.stringify(got2)}, expected ${JSON.stringify(want2)}`);
   }
-  if (webview.SWITCHES.includes('sessionIdSearch') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.sessionIdSearch']) ok('the switch is a setting of its own');
+  if (webview.SWITCHES.includes('sessionIdSearch') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.sessionIdSearch']) ok('the switch is a setting of its own');
   else bad('the sessionIdSearch switch has no setting');
 }
 console.log('\na hidden sidebar in open sessions');
@@ -6205,7 +6362,7 @@ console.log('\ntabs VS Code did not restore');
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   if (/executeCommand\('claude-vscode\.editor\.open', t\.sessionId, undefined, undefined, undefined, t\.fullEditor,\s*\{ programmatic: 'pin-to-panel' \}\)/.test(extSrc)
       && /cfg\(\)\.get\(REOPEN_SETTING, true\) === false/.test(extSrc)
-      && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.reopenDroppedTabs']) {
+      && require('../package.json').contributes.configuration.properties['claudeCodePlus.reopenDroppedTabs']) {
     ok('the dropped tabs are reopened with Claude Code\'s own open command, without changing the preferred location, behind a setting of their own');
   } else bad('the reopening is not wired as expected');
 }
@@ -6337,7 +6494,7 @@ console.log('\ndeleting an archived conversation');
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   if (/showWarningMessage\([\s\S]{0,200}\{ modal: true, detail: lines\.join\('\\n'\) \}, 'Delete'\);\s*if \(pick !== 'Delete'\) return;/.test(extSrc)
       && /shown\.includes\(w\.id\) \|\| running\.has\(w\.id\)/.test(extSrc) && /const running = deleteSession\.runningSessions\(\);/.test(extSrc)
-      && webview.SWITCHES.includes('deleteArchived') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.deleteArchived']) {
+      && webview.SWITCHES.includes('deleteArchived') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.deleteArchived']) {
     ok('nothing is deleted before a modal confirmation is accepted, an open or running conversation is left alone, and the switch is a setting of its own');
   } else bad('the delete is not guarded as expected');
   /* The hook runs inside Claude Code's message handling and finding the files walks every project folder, so the work
@@ -6382,7 +6539,7 @@ console.log('\nthe pins\' margin setting');
   if (sp.pageData({ pinned: [], times: {} }, 90, 30)[2] === 30) ok('the page is told the same margin, for the pin\'s hover text');
   else bad('the page was not told the margin');
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  const setting = require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.sessionPinsMarginDays'];
+  const setting = require('../package.json').contributes.configuration.properties['claudeCodePlus.sessionPinsMarginDays'];
   if (setting && setting.default === 14 && setting.minimum === 1 && /margin: pinMargin\(\)/.test(extSrc) && /retentionDays\(\), pinMargin\(\)\)/.test(extSrc)) {
     ok('the setting, 14 by default, reaches both the pass and the page');
   } else bad('the margin setting is not wired as expected');
@@ -6499,7 +6656,7 @@ console.log('\nrecently closed sessions');
     ok('a click opens the conversation, and the section opened stays open the next time it is drawn');
   } else bad(`clicking opened ${JSON.stringify(env.opened)}; expanded ${store.data['cce.recentClosedExpanded']}`);
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  const setting = require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.recentClosedSessions'];
+  const setting = require('../package.json').contributes.configuration.properties['claudeCodePlus.recentClosedSessions'];
   if (setting && setting.default === 10 && setting.minimum === 0 && /context\.workspaceState\.update\(recentClosed\.KEY, recentList\)/.test(extSrc)
       && /recentClosed\.pageData\(recentList, enabled\(\) && !removed\(\) \? cfg\(\)\.get\(RECENT_SETTING, 10\) : 0\)/.test(extSrc)) {
     ok('the closed list is kept per workspace, and the setting, 10 by default, says how many to show');
@@ -6725,7 +6882,7 @@ console.log('\ntext colors in the session list');
   if (/globalThis\.__cceColorHook = \(ids, name\) => \{\s*setTimeout\(/.test(extSrc)
       && /sessionColors\.setColor\(colorsFile\(\), \[g\.id\], null\)/.test(extSrc)
       && /r\.live && sessionColors\.prune\(colorsFile\(\), r\.live\)/.test(extSrc)
-      && webview.SWITCHES.includes('sessionColors') && require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.show.sessionColors']) {
+      && webview.SWITCHES.includes('sessionColors') && require('../package.json').contributes.configuration.properties['claudeCodePlus.show.sessionColors']) {
     ok('a choice is handled outside the host\'s message handling, a deleted or vanished conversation loses its color, and the switch is a setting of its own');
   } else bad('the text colors are not wired into the extension as expected');
 }
@@ -6785,7 +6942,7 @@ console.log('\nbackground sessions left out of the session list');
     } else bad(`the patched list was ${child.stdout || child.stderr}`);
   }
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  const setting = require('../package.json').contributes.configuration.properties['claudeCodeWorkPlan.hideBackgroundSessions'];
+  const setting = require('../package.json').contributes.configuration.properties['claudeCodePlus.hideBackgroundSessions'];
   if (/globalThis\.__cceListedSessions = \(entries, cwd\) => \{\s*if \(removed\(\) \|\| cfg\(\)\.get\(HIDE_BG_SETTING, true\) === false\) return entries;/.test(extSrc)
       && /if \(e\.affectsConfiguration\(HIDE_BG_SETTING\)\) \{\s*try \{ if \(typeof globalThis\.__cceSessionsChanged === 'function'\) globalThis\.__cceSessionsChanged\(\);/.test(extSrc)
       && setting && setting.default === true) {
@@ -7227,10 +7384,10 @@ console.log('\nwhat the manifest declares for Agent Plus');
   } else bad(`manifest for Agent Plus: ${JSON.stringify([pkg.extensionDependencies, pkg.agentPlus, pkg.extensionKind, trust, protocol])}`);
   const props = Object.keys(c.configuration.properties);
   if (!c.views && !c.viewsContainers && !c.viewsWelcome && !c.menus
-    && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodeWorkPlan.workPlan')) {
+    && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodePlus.workPlan')) {
     ok('the manifest has no views, menus or view settings left');
   } else bad(`left over in the manifest: ${JSON.stringify({ views: c.views, containers: c.viewsContainers, menus: c.menus, props })}`);
-  const declared = c.commands.map((x) => x.command.replace(/^claudeCodeWorkPlan\./, ''));
+  const declared = c.commands.map((x) => x.command.replace(/^claudeCodePlus\./, ''));
   const missing = declared.filter((n) => !ext.includes(`registerCommand('${n}'`));
   if (!missing.length) ok(`each of the ${declared.length} commands it declares is registered`);
   else bad(`declared but not registered: ${missing.join(', ')}`);
@@ -7331,7 +7488,7 @@ console.log('\nClaude Code\'s own source');
     let o = {};
     try { o = JSON.parse(r.stdout); } catch (_) { o = { threw: r.stdout + r.stderr }; }
     const SID = 'abababab-1111-4222-8333-444444444444';
-    if (JSON.stringify(o.shape) === JSON.stringify([1, 'claude-code', 'Claude Code', '[]', 'xnervwang.claude-code-extras',
+    if (JSON.stringify(o.shape) === JSON.stringify([1, 'claude-code', 'Claude Code', '[]', 'xnervwang.claude-code-plus',
       path.join('/plans', SID + '.json'), null, '/plans', null, 'Asia/Tokyo']) && o.planOff === null) {
       ok('Claude Code\'s source has the protocol 1 members and plan paths');
     } else bad(`claude source shape ${JSON.stringify(o.shape || o)}, with the plan off ${JSON.stringify(o.planOff)}`);

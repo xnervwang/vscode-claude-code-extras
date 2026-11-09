@@ -32,7 +32,7 @@ async function run() {
   };
   console.log(`\nin VS Code ${vscode.version} on ${process.platform}-${process.arch}`);
 
-  const mine = vscode.extensions.getExtension('xnervwang.claude-code-extras');
+  const mine = vscode.extensions.getExtension('xnervwang.claude-code-plus');
   const claude = vscode.extensions.getExtension('anthropic.claude-code');
   const core = vscode.extensions.getExtension('xnervwang.agent-plus');
   ok(!!mine, 'this extension is installed');

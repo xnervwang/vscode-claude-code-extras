@@ -1,6 +1,6 @@
 {
-  "name": "claude-code-extras",
-  "displayName": "Work Plan for Claude Code",
+  "name": "claude-code-plus",
+  "displayName": "Claude Code Plus",
   "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk; Agent Plus installs with this extension and shows the plan beside the Claude Code panel, and you can answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
   "version": "1.0.22",
   "publisher": "xnervwang",
@@ -8,7 +8,7 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xnervwang/vscode-claude-code-extras"
+    "url": "https://github.com/xnervwang/vscode-claude-code-plus"
   },
   "engines": {
     "vscode": "^1.96.0"
@@ -68,227 +68,227 @@
   "contributes": {
     "commands": [
       {
-        "command": "claudeCodeWorkPlan.openSettings",
-        "title": "Work Plan for Claude Code: Settings"
+        "command": "claudeCodePlus.openSettings",
+        "title": "Claude Code Plus: Settings"
       },
       {
-        "command": "claudeCodeWorkPlan.toggle",
-        "title": "Work Plan for Claude Code: Toggle On/Off"
+        "command": "claudeCodePlus.toggle",
+        "title": "Claude Code Plus: Toggle On/Off"
       },
       {
-        "command": "claudeCodeWorkPlan.enable",
-        "title": "Work Plan for Claude Code: Turn On"
+        "command": "claudeCodePlus.enable",
+        "title": "Claude Code Plus: Turn On"
       },
       {
-        "command": "claudeCodeWorkPlan.disable",
-        "title": "Work Plan for Claude Code: Turn Off"
+        "command": "claudeCodePlus.disable",
+        "title": "Claude Code Plus: Turn Off"
       },
       {
-        "command": "claudeCodeWorkPlan.remove",
-        "title": "Work Plan for Claude Code: Remove from Claude Code (restore original files)"
+        "command": "claudeCodePlus.remove",
+        "title": "Claude Code Plus: Remove from Claude Code (restore original files)"
       },
       {
-        "command": "claudeCodeWorkPlan.status",
-        "title": "Work Plan for Claude Code: Show Status"
+        "command": "claudeCodePlus.status",
+        "title": "Claude Code Plus: Show Status"
       },
       {
-        "command": "claudeCodeWorkPlan.installWorkPlanPlugin",
-        "title": "Work Plan for Claude Code: Install the Work Plan Plugin for Claude Code"
+        "command": "claudeCodePlus.installWorkPlanPlugin",
+        "title": "Claude Code Plus: Install the Work Plan Plugin for Claude Code"
       },
       {
-        "command": "claudeCodeWorkPlan.showOpenLatency",
-        "title": "Work Plan for Claude Code: Show How Long Opening a Panel Took"
+        "command": "claudeCodePlus.showOpenLatency",
+        "title": "Claude Code Plus: Show How Long Opening a Panel Took"
       },
       {
-        "command": "claudeCodeWorkPlan.disableWorkPlanPlugin",
-        "title": "Work Plan for Claude Code: Stop Loading the Work Plan Plugin"
+        "command": "claudeCodePlus.disableWorkPlanPlugin",
+        "title": "Claude Code Plus: Stop Loading the Work Plan Plugin"
       }
     ],
     "configuration": {
-      "title": "Work Plan for Claude Code",
+      "title": "Claude Code Plus",
       "properties": {
-        "claudeCodeWorkPlan.enabled": {
+        "claudeCodePlus.enabled": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show three of the panel additions: a timestamp on every message and content block, a line on each reply with its duration, context share, estimated cost and model, and a name tag on sub-agent messages. Off leaves those out and shows Claude Code's own message times again; the other additions have their own settings. Changes apply live, without a reload."
         },
-        "claudeCodeWorkPlan.userMessageColor": {
+        "claudeCodePlus.userMessageColor": {
           "type": "string",
           "default": "",
           "markdownDescription": "Text color of **your own messages** in the Claude Code panel, as a CSS color — e.g. `#90EE90`, `lightgreen` or `rgb(144,238,144)`. Leave empty to keep the panel's own color. Changes apply live."
         },
-        "claudeCodeWorkPlan.userMessageEdge": {
+        "claudeCodePlus.userMessageEdge": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Mark **your own messages** in the Claude Code panel with a bar down their left edge, in the theme's focus colour. The panel already outlines them, but in most themes that outline lands within a shade of the editor background, so a question and a reply read as one stream. Off leaves the panel's own outline alone. Changes apply live."
         },
-        "claudeCodeWorkPlan.latencyThresholdSeconds": {
+        "claudeCodePlus.latencyThresholdSeconds": {
           "type": "number",
           "default": 10,
           "minimum": 1,
-          "markdownDescription": "How long a panel or conversation has to take before it is recorded one by one, in seconds. Anything faster is only counted, so an ordinary day leaves a single line rather than one per open - the count is still what says whether a slow open is the exception or the rule. Read them with **Work Plan for Claude Code: Show How Long Opening a Panel Took**."
+          "markdownDescription": "How long a panel or conversation has to take before it is recorded one by one, in seconds. Anything faster is only counted, so an ordinary day leaves a single line rather than one per open - the count is still what says whether a slow open is the exception or the rule. Read them with **Claude Code Plus: Show How Long Opening a Panel Took**."
         },
-        "claudeCodeWorkPlan.recordOpenLatency": {
+        "claudeCodePlus.recordOpenLatency": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Record how long a panel takes before it starts loading, read out of Claude Code's own log. Each panel also writes into that same log one line as it starts, and more when its own files take over 3 s to arrive or never do - including a panel that stays blank, which nothing else can see from inside. Turned off, nothing is read and nothing is written - not even the check for whether the log grew - and panels opened afterwards carry no report."
         },
-        "claudeCodeWorkPlan.workPlanOfferMinTurns": {
+        "claudeCodePlus.workPlanOfferMinTurns": {
           "type": "number",
           "default": 3,
           "minimum": 1,
           "markdownDescription": "How many times you have to have spoken before a conversation with no work plan is told it could keep one. A plan is for a conversation that branches, and a session handed one task and left to do it cannot branch: of 61 conversations offered a plan, the 53 that were single-task workers all declined, while every one that wanted a plan had spoken at least three times."
         },
-        "claudeCodeWorkPlan.workPlanQuietWhenReplyMatches": {
+        "claudeCodePlus.workPlanQuietWhenReplyMatches": {
           "type": "string",
           "default": "",
           "markdownDescription": "A regular expression (Python syntax) tested against the conversation's latest reply. When it matches, the hooks that ask for the plan to be brought up to date before a compaction, and point at it after one, say nothing. Meant for a conversation that relays another model's replies word for word. Empty matches nothing."
         },
-        "claudeCodeWorkPlan.workPlanOfferMinToolCalls": {
+        "claudeCodePlus.workPlanOfferMinToolCalls": {
           "type": "number",
           "default": 25,
           "minimum": 1,
           "markdownDescription": "How much a turn has to cost before the same offer is made. 25 is where the busiest quarter of turns begins, measured over 691 of them; the median turn uses 6."
         },
-        "claudeCodeWorkPlan.show.timestamps": {
+        "claudeCodePlus.show.timestamps": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The time in front of your messages and every block of a reply. While it is on, Claude Code's own message times are hidden, so one kind of time shows everywhere. Turning it off stops the work, not only the drawing, brings Claude Code's times back, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.replyDuration": {
+        "claudeCodePlus.show.replyDuration": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "How long a reply took, at the front of its figures. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.contextShare": {
+        "claudeCodePlus.show.contextShare": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "`ctx N%` in a reply's figures - the share of the whole context window in use. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.cost": {
+        "claudeCodePlus.show.cost": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "`cost $N` in a reply's figures. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.modelName": {
+        "claudeCodePlus.show.modelName": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Which model, effort level and fast mode produced a reply. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.subAgentTags": {
+        "claudeCodePlus.show.subAgentTags": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The name of the sub-agent a row came from. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.toc": {
+        "claudeCodePlus.show.toc": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The handle on the right edge, and the list of your own messages behind it. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.contextMeter": {
+        "claudeCodePlus.show.contextMeter": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Keep the usage meter on screen after the panel would have hidden it. Turning it off lets Claude Code show and hide the meter by its own rule again from the meter's next update, without a reload."
         },
-        "claudeCodeWorkPlan.show.chime": {
+        "claudeCodePlus.show.chime": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The three sounds at the end of a turn. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.sessionDates": {
+        "claudeCodePlus.show.sessionDates": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "How long each session ran and the dates it covers, on the session list. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.sessionPins": {
+        "claudeCodePlus.sessionPins": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "A pin at the start of each row of the session list, hollow until clicked. A pinned conversation is not deleted by Claude Code's transcript cleanup (`cleanupPeriodDays`) and is not moved to Archived sessions. Off hides the pins and stops both, and keeps what was pinned for when it is turned on again."
         },
-        "claudeCodeWorkPlan.sessionPinsMarginDays": {
+        "claudeCodePlus.sessionPinsMarginDays": {
           "type": "number",
           "default": 14,
           "minimum": 1,
           "markdownDescription": "Days a pinned conversation stays safe from Claude Code's transcript cleanup while no VS Code window with this extension connects to the machine that holds its transcript. After each refresh its files are this many days, or at most one day more, short of `cleanupPeriodDays` (Claude Code's setting, 30 days by default). A larger value covers longer gaps but sorts old pinned conversations higher in the session list; a smaller one keeps the order closer to their real activity. A value above half of `cleanupPeriodDays` counts as half."
         },
-        "claudeCodeWorkPlan.show.footerInfo": {
+        "claudeCodePlus.show.footerInfo": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The info button in the footer, and what it shows. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.footerPlainView": {
+        "claudeCodePlus.show.footerPlainView": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The footer button that turns Claude Code's Focus view on and off, and, while Focus view has the tool calls folded away, the latest tool call at the end of the working line: which tool, and how long it has been running or since it finished. Shown only with a Claude Code build that has Focus view. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.footerViewFilter": {
+        "claudeCodePlus.show.footerViewFilter": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The footer filter for the main thread or one sub-agent. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.footerMute": {
+        "claudeCodePlus.show.footerMute": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The footer button that silences the chimes. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.backgroundSessions": {
+        "claudeCodePlus.show.backgroundSessions": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The `claude --bg` sessions a conversation started, listed in its agents button with how each is doing and how it ended. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.openInTabOrSidebar": {
+        "claudeCodePlus.show.openInTabOrSidebar": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "On the session list, **New in tab** and **New in sidebar** replace New session, and a closed conversation's right-click menu offers **Resume in tab** and **Resume in sidebar** instead of Resume session. The choice applies to that conversation only; `claudeCode.preferredLocation` is not changed. Off shows Claude Code's own New session and Resume session. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.reopenDroppedTabs": {
+        "claudeCodePlus.reopenDroppedTabs": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Reopen the Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection. Tabs you closed while connected stay closed. Takes effect the next time the window starts."
         },
-        "claudeCodeWorkPlan.show.deleteArchived": {
+        "claudeCodePlus.show.deleteArchived": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Add **Delete session…** to the right-click menu of a conversation in Archived sessions. After you confirm, it permanently deletes the conversation from disk: its transcripts, sub-agent conversations, saved tool outputs, file checkpoints (Claude Code's copies, not your files), debug log and work plan. It cannot be undone. A conversation open in a tab or the sidebar, or still running, is left alone. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.sessionHoverDetails": {
+        "claudeCodePlus.show.sessionHoverDetails": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Hovering over a conversation in the session list shows its session ID and where it sits in the list below Open sessions: its group, Ungrouped or Archived sessions. Rows in Open sessions show the same. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.sessionIdSearch": {
+        "claudeCodePlus.show.sessionIdSearch": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The session list's search also finds a conversation by part of its session ID, such as `69f9`: four or more characters, using only 0-9, a-f and hyphens. Shorter searches, and ones with other characters, match titles and branches only. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.sessionColors": {
+        "claudeCodePlus.show.sessionColors": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Add **Text color** to the right-click menu of a conversation in the session list, to give its title one of the colors of Claude Code's `/color`. The color shows wherever the conversation is listed. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.hideBackgroundSessions": {
+        "claudeCodePlus.hideBackgroundSessions": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Hide sessions started with `claude --bg` or `claude -p` from Claude Code's session list, and transcripts that have no messages. A `claude --bg` session still shows in the agent map of the conversation that started it. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.recentClosedSessions": {
+        "claudeCodePlus.recentClosedSessions": {
           "type": "integer",
           "default": 10,
           "minimum": 0,
           "maximum": 50,
           "markdownDescription": "Maximum number of conversations listed in **RECENTLY CLOSED**, directly above Open sessions in the session list. It lists the conversations whose Claude Code editor tabs you closed in this workspace, most recently closed first; open ones are not listed. 0 hides the section. Takes effect without a reload."
         },
-        "claudeCodeWorkPlan.show.openSessions": {
+        "claudeCodePlus.show.openSessions": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "OPEN SESSIONS at the top of the session list: the conversations this window has open in an editor tab or in the sidebar, most recently active first, each with its status dot. Clicking one switches to it. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
-        "claudeCodeWorkPlan.workPlan": {
+        "claudeCodePlus.workPlan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Hooks put the plan's open rows in front of Claude every turn and remind it to reconcile them at the end of a turn. With the setting off, Claude is told nothing about the plan and plan files cannot be written.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Work Plan for Claude Code: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
+          "markdownDescription": "Hooks put the plan's open rows in front of Claude every turn and remind it to reconcile them at the end of a turn. With the setting off, Claude is told nothing about the plan and plan files cannot be written.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Claude Code Plus: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
         },
-        "claudeCodeWorkPlan.tellClaudeYourTimeZone": {
+        "claudeCodePlus.tellClaudeYourTimeZone": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Tell Claude the time zone you read the panel in, and the time there, so it gives you times in your zone rather than in the zone of the machine it runs on. It is said, in about 90 tokens, when a conversation starts, and again after a compaction, when either side's date turns over, when the offset changes, and after every 100k tokens of context. Nothing is said while the two zones agree, as they usually do when VS Code and Claude Code run on the same machine. Takes effect from your next message, without a reload."

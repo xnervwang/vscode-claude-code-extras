@@ -86,7 +86,7 @@ async function run() {
   const corePkg = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8'));
   const selfPkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const coreEntry = { id: 'xnervwang.agent-plus', packageJSON: corePkg, isActive: false, exports: undefined, extensionPath: core };
-  control.state.extensions = [coreEntry, { id: 'xnervwang.claude-code-extras', packageJSON: selfPkg, extensionPath: root },
+  control.state.extensions = [coreEntry, { id: 'xnervwang.claude-code-plus', packageJSON: selfPkg, extensionPath: root },
     { id: 'anthropic.claude-code', packageJSON: { version: '2.1.999' }, extensionPath: claudeExt }];
   const context = (name, at, id, pkg) => {
     const storage = path.join(home, 'storage', name);
@@ -96,7 +96,7 @@ async function run() {
       extension: { id, packageJSON: pkg } };
   };
   const coreContext = context('core', core, coreEntry.id, corePkg);
-  const selfContext = context('self', root, 'xnervwang.claude-code-extras', selfPkg);
+  const selfContext = context('self', root, 'xnervwang.claude-code-plus', selfPkg);
   const handed = [];
   let report = { sent: true, reason: '' };
   globalThis.__cceAnswer = (id, text, key) => {
@@ -142,7 +142,7 @@ async function run() {
     const top = plan.provider.getChildren()[0];
     const item = top && plan.provider.getTreeItem(top);
     eq([top && top.kind, item && item.label, item && item.command && item.command.command],
-      ['problem', 'The plugin that writes work plans is not installed', 'claudeCodeWorkPlan.installWorkPlanPlugin'],
+      ['problem', 'The plugin that writes work plans is not installed', 'claudeCodePlus.installWorkPlanPlugin'],
       'the failed plugin install is shown as a notice above the plan');
     /* A new conversation's tab in the same group, which hides the first one's panel. */
     Object.assign(panel, { visible: false, active: false });

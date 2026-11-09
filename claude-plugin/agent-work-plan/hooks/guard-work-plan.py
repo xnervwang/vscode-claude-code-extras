@@ -149,7 +149,7 @@ def main():
             "hookEventName": payload.get("hook_event_name", "PreToolUse"),
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                "Work plans are switched off for this editor (claudeCodeWorkPlan.workPlan), so nothing reads this file and "
+                "Work plans are switched off for this editor (claudeCodePlus.workPlan), so nothing reads this file and "
                 "the view for it is hidden. Do not keep one, and do not work around this by writing somewhere else: "
                 "track what is left in your reply instead. Turn the setting back on to use plans again."),
         }}))

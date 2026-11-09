@@ -1,4 +1,4 @@
-# Work Plan for Claude Code
+# Claude Code Plus
 
 Claude can lose track of unfinished work when you switch topics before the work is done, or when compaction summarizes older turns. Claude starts a plan when there is work to track and updates it as you talk. The plan lists numbered rows, one piece of work each, with states like `discussing`, `todo`, `doing`, or `done`.
 
@@ -65,12 +65,12 @@ See [How the work plan works](docs/how-the-work-plan-works.md) for the hooks, th
 
 ## Install
 
-Search for **Work Plan for Claude Code** in the Extensions view, or run
-`code --install-extension xnervwang.claude-code-extras`. Anthropic's Claude Code extension and
+Search for **Claude Code Plus** in the Extensions view, or run
+`code --install-extension xnervwang.claude-code-plus`. Anthropic's Claude Code extension and
 Agent Plus install as dependencies.
 
 Reload the VS Code window twice after installing. Run
-`Work Plan for Claude Code: Show Status` for the patch status. In a Remote SSH window, install on the
+`Claude Code Plus: Show Status` for the patch status. In a Remote SSH window, install on the
 remote.
 
 The extension works by editing files inside the installed Claude Code extension.
@@ -93,11 +93,11 @@ Verified against Claude Code 2.1.319.
 | **Delete archived conversations:** **Delete session…** in an archived conversation's right-click menu permanently deletes it from disk once you confirm: its transcripts, sub-agent conversations, saved tool outputs, file checkpoints (Claude Code's copies, not your files), debug log and work plan. It cannot be undone. A conversation open in a tab or the sidebar, or still running, is left alone. | Archived sessions in the session list |
 | **Section and session ID on hover:** Hovering over a conversation shows its session ID and where it sits in the list below Open sessions: its group, Ungrouped or Archived sessions. Rows in Open sessions show the same. | Session list |
 | **Search by session ID:** The search box also finds a conversation by part of its session ID, such as `69f9`: four or more characters, using only 0-9, a-f and hyphens. Shorter searches, and ones with other characters, match titles and branches only. | Session list |
-| **RECENTLY CLOSED:** The conversations whose Claude Code editor tabs you closed in this workspace, most recently closed first; the list is kept across reloads. Click one to open it again. The section starts collapsed. Open conversations are not listed, and up to `claudeCodeWorkPlan.recentClosedSessions` are shown (10 by default). | Session list, directly above Open sessions |
+| **RECENTLY CLOSED:** The conversations whose Claude Code editor tabs you closed in this workspace, most recently closed first; the list is kept across reloads. Click one to open it again. The section starts collapsed. Open conversations are not listed, and up to `claudeCodePlus.recentClosedSessions` are shown (10 by default). | Session list, directly above Open sessions |
 | **Session dates:** `11d · 09/05→09/16` adds a date span after Claude Code's last-active time. | Session list |
 | **Pinned conversations:** Click the pin at the start of a session-list row to keep that conversation from Claude Code's transcript cleanup (`cleanupPeriodDays`) and out of Archived sessions, as long as a window keeps connecting to its machine (see Known limits). | Session list |
 | **Text colors:** Right-click a conversation and choose **Text color** to give its title one of the colors of Claude Code's `/color`. The color shows wherever the conversation is listed. | Session list |
-| **Background sessions left out:** The list skips sessions started with `claude --bg` or `claude -p`, and empty transcripts. Turn off `claudeCodeWorkPlan.hideBackgroundSessions` to see them. | Session list |
+| **Background sessions left out:** The list skips sessions started with `claude --bg` or `claude -p`, and empty transcripts. Turn off `claudeCodePlus.hideBackgroundSessions` to see them. | Session list |
 | **Chimes:** A short sound when a turn finishes, permission is requested or Claude asks a question, played on the machine showing the panel; mute it in the footer. | Footer; machine showing the panel |
 | **Background sessions:** This conversation's `claude --bg` sessions, each state in its own colour and counted at the top, with what each waits for, its result, and the attach and logs commands. | Agents button in the footer and its map |
 | **Scheduled prompts:** See timers this conversation set through Claude Code's scheduled tasks, with each schedule, last-fired time and prompt. | Agents button in the footer and its map |
@@ -112,31 +112,31 @@ With Claude Code's Focus view on, the tool calls are folded:
 
 ## Settings
 
-Open `Work Plan for Claude Code: Settings` for all 36 settings. Most apply without a reload; installing or upgrading the patch needs a reload.
+Open `Claude Code Plus: Settings` for all 36 settings. Most apply without a reload; installing or upgrading the patch needs a reload.
 
 **Work plan settings**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `claudeCodeWorkPlan.workPlan` | on | Off stops the work plan: turns carry nothing about it, and Claude cannot write one. |
-| `claudeCodeWorkPlan.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
-| `claudeCodeWorkPlan.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
-| `claudeCodeWorkPlan.workPlanQuietWhenReplyMatches` | empty | Regular expression tested on the latest reply. A match silences the prompts before and after compaction, for conversations relaying another model's replies word for word. Empty matches nothing. |
+| `claudeCodePlus.workPlan` | on | Off stops the work plan: turns carry nothing about it, and Claude cannot write one. |
+| `claudeCodePlus.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
+| `claudeCodePlus.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
+| `claudeCodePlus.workPlanQuietWhenReplyMatches` | empty | Regular expression tested on the latest reply. A match silences the prompts before and after compaction, for conversations relaying another model's replies word for word. Empty matches nothing. |
 
 **To turn off**
 
 | What | How |
 | --- | --- |
-| Timestamps, reply figures and sub-agent tags | Set `claudeCodeWorkPlan.enabled` to off. Every other addition has its own `claudeCodeWorkPlan.show.*` setting. The patch stays and its scripts keep running. |
-| Your time zone in Claude's context | Set `claudeCodeWorkPlan.tellClaudeYourTimeZone` to off. |
-| Work plan plugin, skill description included | Run `Work Plan for Claude Code: Stop Loading the Work Plan Plugin`. |
-| Reopening Claude Code tabs VS Code did not restore | Set `claudeCodeWorkPlan.reopenDroppedTabs` to off. |
-| Pins on the session list | Set `claudeCodeWorkPlan.sessionPins` to off. Pinned conversations are then cleaned up and archived as usual. |
-| Patch and restore Claude Code's files | Run `Work Plan for Claude Code: Remove from Claude Code (restore original files)`, or uninstall. |
+| Timestamps, reply figures and sub-agent tags | Set `claudeCodePlus.enabled` to off. Every other addition has its own `claudeCodePlus.show.*` setting. The patch stays and its scripts keep running. |
+| Your time zone in Claude's context | Set `claudeCodePlus.tellClaudeYourTimeZone` to off. |
+| Work plan plugin, skill description included | Run `Claude Code Plus: Stop Loading the Work Plan Plugin`. |
+| Reopening Claude Code tabs VS Code did not restore | Set `claudeCodePlus.reopenDroppedTabs` to off. |
+| Pins on the session list | Set `claudeCodePlus.sessionPins` to off. Pinned conversations are then cleaned up and archived as usual. |
+| Patch and restore Claude Code's files | Run `Claude Code Plus: Remove from Claude Code (restore original files)`, or uninstall. |
 
-Message appearance: `claudeCodeWorkPlan.userMessageColor` and `claudeCodeWorkPlan.userMessageEdge`.
+Message appearance: `claudeCodePlus.userMessageColor` and `claudeCodePlus.userMessageEdge`.
 
-Settings named `claudeCodeExtras.*` by earlier versions are copied to the same names under `claudeCodeWorkPlan.*` the first time this version starts. Ones kept in a remote machine's own settings file are not moved; rename those by hand.
+This extension used to be Work Plan for Claude Code (`xnervwang.claude-code-extras`). Settings named `claudeCodeWorkPlan.*`, or `claudeCodeExtras.*` before that, are copied to the same names under `claudeCodePlus.*` the first time Claude Code Plus starts. Ones kept in a remote machine's own settings file are not moved; rename those by hand.
 
 ## Commands
 
@@ -144,36 +144,36 @@ Settings named `claudeCodeExtras.*` by earlier versions are copied to the same n
 
 | Command | What it does |
 | --- | --- |
-| `Work Plan for Claude Code: Install the Work Plan Plugin for Claude Code` | Register the plugin again. |
-| `Work Plan for Claude Code: Stop Loading the Work Plan Plugin` | Remove the plugin from Claude Code's settings. |
+| `Claude Code Plus: Install the Work Plan Plugin for Claude Code` | Register the plugin again. |
+| `Claude Code Plus: Stop Loading the Work Plan Plugin` | Remove the plugin from Claude Code's settings. |
 
 **Settings and switches**
 
 | Command | What it does |
 | --- | --- |
-| `Work Plan for Claude Code: Settings` | Open this extension's settings. |
-| `Work Plan for Claude Code: Toggle On/Off` | Toggle the timestamps, reply figures and sub-agent tags. |
-| `Work Plan for Claude Code: Turn On` | Show the timestamps, reply figures and sub-agent tags. |
-| `Work Plan for Claude Code: Turn Off` | Hide the timestamps, reply figures and sub-agent tags. |
+| `Claude Code Plus: Settings` | Open this extension's settings. |
+| `Claude Code Plus: Toggle On/Off` | Toggle the timestamps, reply figures and sub-agent tags. |
+| `Claude Code Plus: Turn On` | Show the timestamps, reply figures and sub-agent tags. |
+| `Claude Code Plus: Turn Off` | Hide the timestamps, reply figures and sub-agent tags. |
 
 **Repair and diagnostics**
 
 | Command | What it does |
 | --- | --- |
-| `Work Plan for Claude Code: Remove from Claude Code (restore original files)` | Restore Claude Code's files. |
-| `Work Plan for Claude Code: Show Status` | Show patch status and what was patched. |
-| `Work Plan for Claude Code: Show How Long Opening a Panel Took` | Show recorded panel-opening times. |
+| `Claude Code Plus: Remove from Claude Code (restore original files)` | Restore Claude Code's files. |
+| `Claude Code Plus: Show Status` | Show patch status and what was patched. |
+| `Claude Code Plus: Show How Long Opening a Panel Took` | Show recorded panel-opening times. |
 
 ## Known limits
 
 - A plan file is deleted once its conversation's transcript is gone and the file has not been written for a week. Claude Code removes old transcripts, apart from those of conversations pinned on the session list.
 - Uninstalling tries to copy plans to `~/.claude/agent-work-plan-plans-<timestamp>/` before unregistering the plugin, which deletes its data directory. Uninstalling continues if the copy fails, so keep your own copy of a plan that matters.
-- Disabling the extension leaves the patch in place. Run `Work Plan for Claude Code: Remove from Claude Code (restore original files)` first.
+- Disabling the extension leaves the patch in place. Run `Claude Code Plus: Remove from Claude Code (restore original files)` first.
 - After you reload a window that lost its remote connection, the remote machine keeps the Claude Code processes from before the reload running for five minutes, then stops them. A Claude Code tab that VS Code did not restore, and whose conversation is still running there, opens only then, about five minutes after the reload. If Claude was writing a reply in it, the reply stops at that point; what it had written so far stays in the conversation.
 - If you close a Claude Code tab while the window cannot reach its remote machine, the tab opens again the next time the window starts, because the close could not be recorded. Close it again once connected.
 - An orange exclamation mark at the panel's top right means a Claude Code build changed something the patch relies on, and some panel features are not working.
 - To protect a pinned conversation, the extension moves its files' modification time forward once they are old enough for the cleanup. The row still shows when the conversation was last active, but the list sorts it by the moved time. Uninstalling the extension removes the pins; the conversations stay, and the cleanup treats them as usual again.
-- A pin protects a conversation only while some VS Code window with this extension connects to the machine that holds its transcript, and stays open for at least a minute, at least once every `claudeCodeWorkPlan.sessionPinsMarginDays` days (14 by default, and never more than half of `cleanupPeriodDays`). The folder the window has open does not matter: each window refreshes every pinned conversation on that machine a minute after it starts and every 30 minutes while it stays open. After a longer gap, Claude Code's cleanup can delete pinned conversations the next time Claude Code runs on that machine, in a terminal or as a background session.
+- A pin protects a conversation only while some VS Code window with this extension connects to the machine that holds its transcript, and stays open for at least a minute, at least once every `claudeCodePlus.sessionPinsMarginDays` days (14 by default, and never more than half of `cleanupPeriodDays`). The folder the window has open does not matter: each window refreshes every pinned conversation on that machine a minute after it starts and every 30 minutes while it stays open. After a longer gap, Claude Code's cleanup can delete pinned conversations the next time Claude Code runs on that machine, in a terminal or as a background session.
 - Pins are kept on the machine that holds the transcripts. Pins on your computer do not protect a remote machine's conversations, or the other way round; a remote machine's pins are refreshed only by windows connected to it.
 - Editor-tab panels that stay blank in every window after running version 1.0.8 or earlier: quit VS Code and delete the `CacheStorage` folders under `WebStorage` in VS Code's data folder (`~/Library/Application Support/Code` on macOS, `%APPDATA%\Code` on Windows, `~/.config/Code` on Linux).
 

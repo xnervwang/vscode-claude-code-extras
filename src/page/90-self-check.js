@@ -16,7 +16,7 @@
       WARN = document.createElement('div');
       WARN.id = 'cce-warn';
       WARN.textContent = '!';
-      setLabel(WARN, 'Work Plan for Claude Code: this Claude Code build no longer matches the message selectors, so the '
+      setLabel(WARN, 'Claude Code Plus: this Claude Code build no longer matches the message selectors, so the '
         + 'timestamps, agent tags and view filter are inactive. The patch itself applied; '
         + 'the page structure changed.');
       var s = WARN.style;

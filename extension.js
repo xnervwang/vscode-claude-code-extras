@@ -4,7 +4,7 @@
 
 'use strict';
 /*
- * Work Plan for Claude Code — user interface additions for the Claude Code panel in VS Code.
+ * Claude Code Plus - user interface additions for the Claude Code panel in VS Code.
  *
  * This extension owns no user interface of its own. It patches the Claude Code extension's own files at rest, one
  * adapter per target file (see src/adapters.js), and every write is guarded the same way: match the expected code
@@ -51,8 +51,9 @@ let selfPath = '';
 
 /* Settings and commands are named under this prefix. The keys this extension keeps in its own state are not settings,
    are not seen by anyone, and keep the names they were first stored under. */
-const PREFIX = 'claudeCodeWorkPlan.';
-const LEGACY_PREFIX = 'claudeCodeExtras.';
+const PREFIX = 'claudeCodePlus.';
+/* The prefixes settings and commands had before, the more recent first. */
+const LEGACY_PREFIXES = ['claudeCodeWorkPlan.', 'claudeCodeExtras.'];
 const SETTING = PREFIX + 'enabled';
 const COLOR_SETTING = PREFIX + 'userMessageColor';
 const EDGE_SETTING = PREFIX + 'userMessageEdge';
@@ -128,23 +129,26 @@ async function offerReload(text) {
   if (pick === 'Reload Window') vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
-/* Commands were once named under the old prefix, and a keybinding someone made then still names them that way. The old
-   names stay registered, unlisted, so those keep working. */
+/* Commands were once named under the old prefixes, and a keybinding someone made then still names them that way. The old
+   names stay registered, unlisted, so those keep working. The editor refuses a name another extension in this host holds
+   already - the old extension itself, until the host restarts after it was updated - and that name is left to it. */
 function registerCommand(name, fn) {
-  const current = vscode.commands.registerCommand(PREFIX + name, fn);
-  const legacy = vscode.commands.registerCommand(LEGACY_PREFIX + name, fn);
-  return { dispose() { current.dispose(); legacy.dispose(); } };
+  const all = [vscode.commands.registerCommand(PREFIX + name, fn)];
+  for (const p of LEGACY_PREFIXES) {
+    try { all.push(vscode.commands.registerCommand(p + name, fn)); } catch (_) { /* held by another extension */ }
+  }
+  return { dispose() { for (const d of all) d.dispose(); } };
 }
 
 /*
- * Settings were once named under the old prefix. A value set under an old name is copied to its new name, in the same
- * scope, and the old one is then cleared where the editor allows that - it may refuse to write a name no extension
- * declares any more, and then the old line stays behind, read by nothing.
+ * Settings were once named under the old prefixes. A value set under an old name is copied to its new name, in the same
+ * scope - from the more recent prefix when both have one - and the old ones are then cleared where the editor allows
+ * that: it may refuse to write a name no extension declares any more, and then the old line stays behind, read by nothing.
  *
  * A copy is made only where the new name has no value of its own, so nothing set under the new name is overwritten; and
  * each scope is done once, so putting a new name back to its default later does not bring the old value back.
  */
-const RENAMED_KEY = LEGACY_PREFIX + 'settingsRenamed';
+const RENAMED_KEY = PREFIX + 'settingsRenamed';
 async function renameSettings(context) {
   const contrib = (context.extension.packageJSON.contributes || {}).configuration || {};
   const names = [].concat(contrib).flatMap((c) => Object.keys((c && c.properties) || {}))
@@ -170,15 +174,17 @@ async function renameSettings(context) {
       const conf = sc.conf();
       let moved = 0, left = 0;
       for (const name of names) {
-        const old = conf.inspect(LEGACY_PREFIX + name);
-        const value = old ? old[sc.field] : undefined;
-        if (value === undefined) continue;
+        const found = LEGACY_PREFIXES.map((p) => {
+          const old = conf.inspect(p + name);
+          return { key: p + name, value: old ? old[sc.field] : undefined };
+        }).filter((o) => o.value !== undefined);
+        if (!found.length) continue;
         const now = conf.inspect(PREFIX + name);
         try {
-          if (!now || now[sc.field] === undefined) await conf.update(PREFIX + name, value, sc.target);
+          if (!now || now[sc.field] === undefined) await conf.update(PREFIX + name, found[0].value, sc.target);
           moved++;
         } catch (_) { complete = false; continue; }
-        try { await conf.update(LEGACY_PREFIX + name, undefined, sc.target); } catch (_) { left++; }
+        for (const o of found) { try { await conf.update(o.key, undefined, sc.target); } catch (_) { left++; } }
       }
       if (moved) done.push(`${moved} in ${sc.where}` + (left ? ` (${left} old line${left > 1 ? 's' : ''} left in place)` : ''));
     }
@@ -193,7 +199,7 @@ async function renameSettings(context) {
  */
 async function activate(context) {
   selfPath = context.extensionPath;
-  const log = vscode.window.createOutputChannel('Work Plan for Claude Code');
+  const log = vscode.window.createOutputChannel('Claude Code Plus');
   context.subscriptions.push(log);
   const go = async () => {
     let renamed = '';
@@ -212,7 +218,7 @@ async function activate(context) {
 }
 
 function start(context, log, renamed) {
-  if (renamed) log.appendLine(`settings moved from ${LEGACY_PREFIX}* to ${PREFIX}*: ${renamed}`);
+  if (renamed) log.appendLine(`settings moved from ${LEGACY_PREFIXES.map((p) => p + '*').join(' and ')} to ${PREFIX}*: ${renamed}`);
   const removed = () => context.globalState.get(REMOVED_KEY, false) === true;
   /*
    * Install state of the copy this window runs (src/removal.js), memoized per turn of the event loop.
@@ -316,7 +322,7 @@ function start(context, log, renamed) {
   async function sync({ interactive = false } = {}) {
     if (replaced()) {
       log.appendLine('sync: this window runs a build that has since been installed again; leaving the files to the windows running it');
-      if (interactive) offerReload('This window is running an earlier build of Work Plan for Claude Code than the one now installed. Reload the window to run it.');
+      if (interactive) offerReload('This window is running an earlier build of Claude Code Plus than the one now installed. Reload the window to run it.');
       return;
     }
     const patched = [], restored = [], problems = [];
@@ -347,12 +353,12 @@ function start(context, log, renamed) {
         }
       }
     }
-    if (!found && interactive) vscode.window.showWarningMessage('Work Plan for Claude Code: the Claude Code extension is not installed, so there is nothing to patch.');
+    if (!found && interactive) vscode.window.showWarningMessage('Claude Code Plus: the Claude Code extension is not installed, so there is nothing to patch.');
     // A shape mismatch after a Claude Code update would otherwise be silent, so it is said out loud.
-    if (problems.length) vscode.window.showWarningMessage('Work Plan for Claude Code: ' + problems.join(' | '));
-    if (patched.length) offerReload(`Work Plan for Claude Code is installed in ${patched.join(' and ')}. Reload the window once to start; after that, On/Off and colors change live.`);
+    if (problems.length) vscode.window.showWarningMessage('Claude Code Plus: ' + problems.join(' | '));
+    if (patched.length) offerReload(`Claude Code Plus is installed in ${patched.join(' and ')}. Reload the window once to start; after that, On/Off and colors change live.`);
     // An uninstall already has the editor asking for a restart of its extensions; a second prompt would only compete.
-    if (restored.length && !leaving) offerReload(`Work Plan for Claude Code was removed from ${restored.join(' and ')}. Reload the window to finish.`);
+    if (restored.length && !leaving) offerReload(`Claude Code Plus was removed from ${restored.join(' and ')}. Reload the window to finish.`);
   }
 
   /* No status bar item for on and off.
@@ -382,7 +388,7 @@ function start(context, log, renamed) {
     registerCommand('status', () => {
       const lines = [];
       for (const adapter of ADAPTERS) for (const d of installs(adapter, true)) lines.push(`${adapter.name} ${path.basename(d)}: ${adapter.status(d)}`);
-      vscode.window.showInformationMessage('Work Plan for Claude Code — ' + (lines.join(' | ') || 'Claude Code is not installed') + (removed() ? ' (removed)' : ''));
+      vscode.window.showInformationMessage('Claude Code Plus — ' + (lines.join(' | ') || 'Claude Code is not installed') + (removed() ? ' (removed)' : ''));
     }),
     /* Every setting this extension has, in the editor's own settings UI: search, per-workspace values, sync and a JSON
        view come with it, and none of it is ours to maintain. */
@@ -823,7 +829,7 @@ function start(context, log, renamed) {
         log.appendLine(`pinned conversations: ${on ? 'pinned' : 'unpinned'} ${id}`);
         if (replaced() && !toldStale) {
           toldStale = true;
-          offerReload('The pin is saved, but this window is running an earlier build of Work Plan for Claude Code than '
+          offerReload('The pin is saved, but this window is running an earlier build of Claude Code Plus than '
             + 'the one now installed, so the session list here cannot show it. Reload the window to see it.');
         }
         writeLiveNow();
@@ -841,7 +847,7 @@ function start(context, log, renamed) {
         log.appendLine(`session colors: ${name || 'default'} for ${ids.length} conversation${ids.length === 1 ? '' : 's'}`);
         if (replaced() && !toldColorStale) {
           toldColorStale = true;
-          offerReload('The color is saved, but this window is running an earlier build of Work Plan for Claude Code than '
+          offerReload('The color is saved, but this window is running an earlier build of Claude Code Plus than '
             + 'the one now installed, so the session list here cannot show it. Reload the window to see it.');
         }
         writeLiveNow();
@@ -1011,7 +1017,7 @@ function start(context, log, renamed) {
     try { if (typeof globalThis.__cceSessionsChanged === 'function') globalThis.__cceSessionsChanged(); } catch (_) { /* the list catches up on its next read */ }
     if (failed.length) {
       log.appendLine('Could not delete:\n  ' + failed.join('\n  '));
-      vscode.window.showWarningMessage(`${failed.length} file${failed.length === 1 ? '' : 's'} could not be deleted; the output "Work Plan for Claude Code" lists them.`);
+      vscode.window.showWarningMessage(`${failed.length} file${failed.length === 1 ? '' : 's'} could not be deleted; the output "Claude Code Plus" lists them.`);
     }
   };
   context.subscriptions.push({ dispose: () => {
@@ -1094,11 +1100,11 @@ function start(context, log, renamed) {
       const r = await pythonRuntime.download(storage);
       log.appendLine('python download: ' + r.said);
       if (!r.ok) {
-        vscode.window.showErrorMessage('Work Plan for Claude Code: downloading Python failed. ' + r.said);
+        vscode.window.showErrorMessage('Claude Code Plus: downloading Python failed. ' + r.said);
         return;
       }
       await syncPlugin(true);
-      vscode.window.showInformationMessage('Work Plan for Claude Code: Python is installed. Start a new conversation to get a work plan.');
+      vscode.window.showInformationMessage('Claude Code Plus: Python is installed. Start a new conversation to get a work plan.');
     }).finally(() => { gettingPython = null; }));
   const syncPlugin = async (retry) => {
     if (removed()) return;
@@ -1205,7 +1211,7 @@ function start(context, log, renamed) {
     }
     if (!LIVE_SETTINGS.some((k) => e.affectsConfiguration(k))) return;
     const c = cfg().get(COLOR_SETTING, '');
-    if (c && !safeColor(c)) vscode.window.showWarningMessage(`Work Plan for Claude Code: "${c}" is not a CSS color (use e.g. #90EE90, lightgreen or rgb(144,238,144)); your message color is left unchanged.`);
+    if (c && !safeColor(c)) vscode.window.showWarningMessage(`Claude Code Plus: "${c}" is not a CSS color (use e.g. #90EE90, lightgreen or rgb(144,238,144)); your message color is left unchanged.`);
     /* A switch has to reach the panel the moment it is flipped, which is what writing the stylesheet does. */
     writeLiveNow();
   }));

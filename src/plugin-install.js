@@ -240,7 +240,7 @@ async function install({ claudeBin, from, to, refreshOnly, python }) {
 const RESCUE_NOTE = `These are the work plans kept by the agent-work-plan plugin for Claude Code: one file per
 conversation, named by that conversation's session id, holding what it still had to do.
 
-They were copied here because the Work Plan for Claude Code extension was uninstalled. Unregistering a plugin makes
+They were copied here because the Claude Code Plus extension was uninstalled. Unregistering a plugin makes
 Claude Code delete the plugin's data directory along with it - "the removal also deletes their saved options, secrets and
 data where it can" - and these are not the extension's to delete. Nothing reads this folder; it is yours to keep or
 throw away.

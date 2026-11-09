@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          path: vscode-claude-code-extras
+          path: vscode-claude-code-plus
           # The commit-message scan reads the history, and a shallow clone would leave it with almost nothing to read.
           fetch-depth: 0
 
@@ -42,7 +42,7 @@ jobs:
           node-version: '22'
 
       - name: Run the checks
-        working-directory: vscode-claude-code-extras
+        working-directory: vscode-claude-code-plus
         shell: bash
         env:
           CCE_REQUIRE_BROWSER: '1'
@@ -52,7 +52,7 @@ jobs:
 
       - name: Put the count in the run summary
         if: always()
-        working-directory: vscode-claude-code-extras
+        working-directory: vscode-claude-code-plus
         shell: bash
         run: |
           {

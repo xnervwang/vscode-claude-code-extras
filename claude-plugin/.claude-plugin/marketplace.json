@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "claude-code-extras",
-  "description": "Keeps each conversation's work plan: a tree of what is still to do, with the state of every row and who each waiting row is waiting for. Shipped with the Work Plan for Claude Code VS Code extension, which displays it, but it stands alone.",
+  "description": "Keeps each conversation's work plan: a tree of what is still to do, with the state of every row and who each waiting row is waiting for. Shipped with the Claude Code Plus VS Code extension, which displays it, but it stands alone.",
   "owner": {
     "name": "xnerv"
   },
