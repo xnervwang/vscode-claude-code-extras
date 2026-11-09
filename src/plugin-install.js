@@ -31,7 +31,6 @@
 const cp = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 const MARKETPLACE = 'claude-code-extras';
@@ -40,8 +39,10 @@ const PLUGIN = 'agent-work-plan';
 const REF = PLUGIN + '@' + MARKETPLACE;
 /** The directory the platform gives the plugin for its own data, named from those two. */
 const DATA_DIR = PLUGIN + '-' + MARKETPLACE;
-const dataPath = () => path.join(os.homedir(), '.claude', 'plugins', 'data', DATA_DIR);
-/** Where an uninstall copies the plans first, under ~/.claude/, followed by a time stamp. */
+/* Claude Code's own directory. Required when called, since src/claude-files.js requires this module for DATA_DIR. */
+const configDir = () => require('./claude-files').claudeDir();
+const dataPath = () => path.join(configDir(), 'plugins', 'data', DATA_DIR);
+/** Where an uninstall copies the plans first, in Claude Code's own directory, followed by a time stamp. */
 const RESCUE_PREFIX = PLUGIN + '-plans-';
 /** Where Claude Code keeps the command-line binary inside its own extension directory; the Windows build names it
     claude.exe. */
@@ -51,8 +52,8 @@ const BINARY = path.join('resources', 'native-binary', process.platform === 'win
 const TIMEOUT_MS = 60000;
 
 /* One of Claude Code's records of installed plugins and known marketplaces, or null when it cannot be read. */
-const readRecord = (home, name) => {
-  try { return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', name), 'utf8')); } catch (_) { return null; }
+const readRecord = (dir, name) => {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, 'plugins', name), 'utf8')); } catch (_) { return null; }
 };
 
 /**
@@ -64,8 +65,8 @@ const readRecord = (home, name) => {
  * with its marketplace still known, is what removing the plugin on purpose leaves, and that is not this. False whenever
  * the records cannot be read: not knowing is no reason to register anything.
  */
-function registrationGone(home = os.homedir()) {
-  const read = (name) => readRecord(home, name);
+function registrationGone(dir = configDir()) {
+  const read = (name) => readRecord(dir, name);
   const plugins = read('installed_plugins.json');
   const markets = read('known_marketplaces.json');
   if (!plugins || typeof plugins !== 'object' || !markets || typeof markets !== 'object') return false;
@@ -279,7 +280,7 @@ function rescuePlans(stamp) {
   let names;
   try { names = fs.readdirSync(from); } catch (e) { return { to: '', failed: !(e && e.code === 'ENOENT') }; }
   if (!names.length) return { to: '', failed: false };
-  const to = path.join(os.homedir(), '.claude', RESCUE_PREFIX + stamp);
+  const to = path.join(configDir(), RESCUE_PREFIX + stamp);
   try {
     fs.mkdirSync(to, { recursive: true });
     fs.cpSync(from, to, { recursive: true });
@@ -327,8 +328,8 @@ async function disable(dirs) {
 
 
 /** Whether Claude Code's own records list the plugin as installed. */
-function listed(home = os.homedir()) {
-  const plugins = readRecord(home, 'installed_plugins.json');
+function listed(dir = configDir()) {
+  const plugins = readRecord(dir, 'installed_plugins.json');
   const all = plugins && typeof plugins === 'object' && plugins.plugins && typeof plugins.plugins === 'object' ? plugins.plugins : {};
   return Object.prototype.hasOwnProperty.call(all, REF);
 }

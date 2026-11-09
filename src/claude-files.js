@@ -28,9 +28,9 @@ const projectsDir = () => path.join(claudeDir(), 'projects');
 /* Where every plugin keeps its own data, and the name of the companion plugin's. The two are kept apart because a file
    watcher needs a base that already exists, and the plugin's is created when the plugin is installed, which may be
    after this extension has started. */
-const DATA_ROOT = path.join(os.homedir(), '.claude', 'plugins', 'data');
+const dataRoot = () => path.join(claudeDir(), 'plugins', 'data');
 const PLAN_DIR = require('./plugin-install').DATA_DIR;
-const planDir = () => path.join(DATA_ROOT, PLAN_DIR);
+const planDir = () => path.join(dataRoot(), PLAN_DIR);
 
 /** A session id as Claude Code writes it. */
 const SESSION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -209,6 +209,6 @@ function writeAtomic(file, text) {
 }
 
 module.exports = {
-  claudeDir, projectsDir, planDir, DATA_ROOT, PLAN_DIR, SESSION, projectFolders, transcriptOf, liveSessions,
+  claudeDir, projectsDir, planDir, dataRoot, PLAN_DIR, SESSION, projectFolders, transcriptOf, liveSessions,
   readLines, oneAtATime, writeAtomic, MISS_MS, CHUNK,
 };

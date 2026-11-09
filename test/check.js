@@ -4425,10 +4425,35 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
   ];
   for (const [what, plugins, markets, want] of cases) {
     const h = home(plugins, markets);
-    const got = pi.registrationGone(h);
+    const got = pi.registrationGone(path.join(h, '.claude'));
     if (got === want) ok(what);
     else bad(`${what}: said ${got}`);
     fs.rmSync(h, { recursive: true, force: true });
+  }
+  /* With CLAUDE_CONFIG_DIR set, Claude Code keeps its plugin records and every plugin's data there instead of in
+     ~/.claude, and so does this extension. */
+  {
+    const h = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-cfgdir-')));
+    const cfg = path.join(h, 'elsewhere');
+    try {
+      fs.mkdirSync(path.join(cfg, 'plugins', 'data', pi.DATA_DIR), { recursive: true });
+      fs.writeFileSync(path.join(cfg, 'plugins', 'data', pi.DATA_DIR, 'abababab-1111-4222-8333-444444444444.json'), '{}');
+      fs.writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { [pi.REF]: [{ scope: 'user' }] } }));
+      fs.writeFileSync(path.join(cfg, 'plugins', 'known_marketplaces.json'), JSON.stringify({ [pi.MARKETPLACE]: {} }));
+      const script = `const files = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'claude-files.js'))});
+        const pi = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'plugin-install.js'))});
+        const saved = pi.rescuePlans('t1');
+        process.stdout.write(JSON.stringify({ plans: files.planDir(), listed: pi.listed(), gone: pi.registrationGone(), saved: saved.to }));`;
+      const env = Object.assign({}, process.env, { HOME: h, USERPROFILE: h, CLAUDE_CONFIG_DIR: cfg });
+      const got = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', env }));
+      const py = cp.spawnSync('python3', ['-c', 'import sys; sys.path.insert(0, sys.argv[1]); import plan_path; print(plan_path.FALLBACK)',
+        path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks')], { encoding: 'utf8', env });
+      const want = { plans: path.join(cfg, 'plugins', 'data', pi.DATA_DIR), listed: true, gone: false, saved: path.join(cfg, pi.RESCUE_PREFIX + 't1') };
+      if (JSON.stringify(got) === JSON.stringify(want) && fs.existsSync(path.join(want.saved, 'abababab-1111-4222-8333-444444444444.json'))
+          && String(py.stdout).trim() === want.plans) {
+        ok('with CLAUDE_CONFIG_DIR set, the plans, the plugin records and an uninstall\'s copy of the plans are all in that folder');
+      } else bad(`with CLAUDE_CONFIG_DIR: ${JSON.stringify(got)}, the hooks fall back to ${JSON.stringify(String(py.stdout).trim() || py.stderr)}`);
+    } catch (e) { bad('with CLAUDE_CONFIG_DIR: ' + e.message); } finally { fs.rmSync(h, { recursive: true, force: true }); }
   }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   const body = (/const syncPlugin = async \(retry\) => \{([\s\S]*?)\n  \};/.exec(ext) || [])[1] || '';
@@ -5271,7 +5296,7 @@ console.log('\nplans an uninstall copied aside come back');
     fs.utimesSync(dir, t, t);
     return dir;
   };
-  const run = () => (typeof carry.restoreRescued === 'function' ? carry.restoreRescued({ home, planDir: plans }) : null);
+  const run = () => (typeof carry.restoreRescued === 'function' ? carry.restoreRescued({ dir: path.join(home, '.claude'), planDir: plans }) : null);
   try {
     const none = run();
     if (none && !none.copied.length && !fs.existsSync(plans)) ok('with no rescue folder nothing is done');

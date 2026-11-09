@@ -20,7 +20,8 @@ import time
 # The platform gives every plugin a data directory named <plugin>-<marketplace>, and hooks.json passes ours in as
 # ${CLAUDE_PLUGIN_DATA}. This is that same name spelled out, for the case where the expansion did not happen. It is
 # also the one directory the VS Code extension reads, so falling back to it keeps the two halves looking at one place.
-FALLBACK = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "data", "agent-work-plan-claude-code-extras")
+FALLBACK = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
+                        "plugins", "data", "agent-work-plan-claude-code-extras")
 
 # The states a row can be in, in the order a row usually passes through them. The extension's view keeps the same list
 # (STATES in src/workplan.js) and the skill tabulates it; test/check.js holds the three together.

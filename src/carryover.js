@@ -18,7 +18,6 @@
  */
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { SESSION } = require('./claude-files');
 const { RESCUE_PREFIX } = require('./plugin-install');
@@ -102,16 +101,16 @@ const RESCUE_SETTLE_MS = 30000;
 const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return 0; } };
 
 /**
- * Copy the plans in every rescue folder (~/.claude/<RESCUE_PREFIX><stamp>/, src/plugin-install.js) back into `planDir`:
- * only <session id>.json files, never over a plan already there, newest folder first, so that of two copies of one plan
- * the later wins. A folder whose plans were all dealt with gets COPIED_BACK; one written within RESCUE_SETTLE_MS is left
- * for later, and waitMs says how long until the first of those can be read.
+ * Copy the plans in every rescue folder (<RESCUE_PREFIX><stamp>/ in Claude Code's own directory, src/plugin-install.js)
+ * back into `planDir`: only <session id>.json files, never over a plan already there, newest folder first, so that of two
+ * copies of one plan the later wins. A folder whose plans were all dealt with gets COPIED_BACK; one written within
+ * RESCUE_SETTLE_MS is left for later, and waitMs says how long until the first of those can be read.
  *
  * Returns { copied, dirs, waitMs }: plan file names copied, folders finished.
  */
-function restoreRescued({ home = os.homedir(), planDir, now = Date.now(), settleMs = RESCUE_SETTLE_MS } = {}) {
+function restoreRescued({ dir = require('./claude-files').claudeDir(), planDir, now = Date.now(), settleMs = RESCUE_SETTLE_MS } = {}) {
   const out = { copied: [], dirs: 0, waitMs: 0 };
-  const root = path.join(home, '.claude');
+  const root = dir;
   let names;
   try { names = fs.readdirSync(root); } catch (_) { return out; }
   for (const name of names.filter((n) => n.startsWith(RESCUE_PREFIX)).sort().reverse()) {

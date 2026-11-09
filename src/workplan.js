@@ -44,7 +44,7 @@ const fs = require('fs');
 const path = require('path');
 /* The plan directory and the list of live transcripts come from src/claude-files.js; the directory name derives from
    the plugin and marketplace names. */
-const { DATA_ROOT, PLAN_DIR, planDir, projectsDir, liveSessions } = require('./claude-files');
+const { dataRoot, PLAN_DIR, planDir, projectsDir, liveSessions } = require('./claude-files');
 const { readBounded } = require('./bounded');
 
 /*
@@ -231,6 +231,6 @@ const OPEN_STATES = ['discussing', 'todo', 'doing', 'waiting', 'parked'];
 
 module.exports = {
   readPlan, readPlanAt, planDir, liveSessions, sweepOrphans,
-  DATA_ROOT, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
+  dataRoot, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
   STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS,
 };
