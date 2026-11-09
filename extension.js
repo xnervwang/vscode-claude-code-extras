@@ -1218,7 +1218,21 @@ function start(context, log, renamed) {
       showProblem(result);
     }
   };
-  syncPlugin(false);
+  /*
+   * Plans an uninstall copied aside (src/carryover.js, restoreRescued) come back once the plugin is registered again:
+   * unregistering it is what emptied the plan directory, and while it is not registered nothing reads them there. A
+   * rescue folder still too new to read is tried again when it can be.
+   */
+  let rescueTimer = 0;
+  const restorePlans = () => {
+    if (removed() || closing || context.globalState.get(PLUGIN_KEY, {}).registered !== true || !pluginInstall.listed()) return;
+    let r;
+    try { r = carryover.restoreRescued({ planDir: planDir() }); } catch (e) { log.appendLine('copying rescued work plans back: ' + e.message); return; }
+    if (r.copied.length) log.appendLine(`work plans copied back from a rescue folder: ${r.copied.length}`);
+    if (r.waitMs && !rescueTimer) rescueTimer = setTimeout(() => { rescueTimer = 0; restorePlans(); }, r.waitMs + 1000);
+  };
+  context.subscriptions.push({ dispose: () => { if (rescueTimer) clearTimeout(rescueTimer); } });
+  syncPlugin(false).then(restorePlans, (e) => log.appendLine('work plan plugin: ' + ((e && e.message) || e)));
 
   /*
    * A single 30-second timer has the next list of conversations run `claude agents` again and sweeps abandoned plans,
@@ -1238,7 +1252,7 @@ function start(context, log, renamed) {
   }, REFRESH_MS);
   context.subscriptions.push({ dispose: () => clearInterval(tick) });
   context.subscriptions.push(
-    registerCommand('installWorkPlanPlugin', () => syncPlugin(true)),
+    registerCommand('installWorkPlanPlugin', () => syncPlugin(true).then(restorePlans)),
     registerCommand('downloadPython', async () => {
       const pick = await vscode.window.showInformationMessage(
         `Download Python ${pythonRuntime.VERSION} from python.org?`,

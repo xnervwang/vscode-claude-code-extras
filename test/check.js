@@ -4705,6 +4705,8 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
  * opts.state        what this extension's globalState holds before it starts
  * opts.files        relative path under the home folder -> content, written before activation
  * opts.later        like opts.files, written once activate has resolved
+ * opts.aged         opts.files are given a modification time an hour back
+ * opts.executable   relative paths of opts.files to make executable
  * opts.after(ms)    how long to let it run after activate resolves
  * Returns { threw, commands, looked, hooks, said, executed, logs, state, files, activateMs } - files being every file
  * under the home folder afterwards, relative, with its content when it is JSON.
@@ -4712,9 +4714,12 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
 const activateStub = (opts = {}) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-plus-')));
   try {
+    const hourAgo = new Date(Date.now() - 3600000);
     for (const [rel, body] of Object.entries(opts.files || {})) {
       fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
       fs.writeFileSync(path.join(home, rel), body);
+      if ((opts.executable || []).includes(rel)) fs.chmodSync(path.join(home, rel), 0o755);
+      if (opts.aged) { fs.utimesSync(path.join(home, rel), hourAgo, hourAgo); fs.utimesSync(path.dirname(path.join(home, rel)), hourAgo, hourAgo); }
     }
     const stub = path.join(home, 'vscode-stub.js');
     fs.writeFileSync(stub, `
@@ -5049,6 +5054,85 @@ console.log('\nthe old id\'s last version, shim/');
   if (!late.threw && late.activateMs < 1000 && (late.state || {})['claudeCodeExtras.removed'] === true && late.hooks === true) {
     ok('with the shim installed and no export.json yet, activation returns at once, and the start waits for the file and imports it');
   } else bad(`export.json written after activation: ${JSON.stringify({ threw: (late.threw || '').slice(0, 300), ms: late.activateMs, removed: (late.state || {})['claudeCodeExtras.removed'], hooks: late.hooks })}`);
+}
+
+/* Uninstalling the old extension unregisters the plugin, and its uninstall hook first copies the plans to
+   ~/.claude/agent-work-plan-plans-<stamp>/, since Claude Code deletes the plan directory along with the plugin. Once
+   this extension has registered the plugin again, the plans come back: copied, never over a plan already there, and
+   each rescue folder only once. A folder still being written is left for later, because the same uninstall goes on to
+   delete the plan directory and anything copied into it. */
+console.log('\nplans an uninstall copied aside come back');
+{
+  let carry = {};
+  try { carry = require('../src/carryover'); } catch (_) { carry = {}; }
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-rescue-'));
+  const plans = path.join(home, '.claude', 'plugins', 'data', 'agent-work-plan-claude-code-extras');
+  const A = 'aaaaaaaa-1111-4222-8333-444444444444', B = 'bbbbbbbb-1111-4222-8333-444444444444', C = 'cccccccc-1111-4222-8333-444444444444';
+  const rescue = (stamp, files, ageMs) => {
+    const dir = path.join(home, '.claude', 'agent-work-plan-plans-' + stamp);
+    for (const [name, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      fs.writeFileSync(path.join(dir, name), body);
+    }
+    const t = new Date(Date.now() - ageMs);
+    for (const name of fs.readdirSync(dir)) fs.utimesSync(path.join(dir, name), t, t);
+    fs.utimesSync(dir, t, t);
+    return dir;
+  };
+  const run = () => (typeof carry.restoreRescued === 'function' ? carry.restoreRescued({ home, planDir: plans }) : null);
+  try {
+    const none = run();
+    if (none && !none.copied.length && !fs.existsSync(plans)) ok('with no rescue folder nothing is done');
+    else bad(`with no rescue folder: ${JSON.stringify(none)}`);
+    fs.mkdirSync(plans, { recursive: true });
+    fs.writeFileSync(path.join(plans, B + '.json'), 'mine');
+    const older = rescue('20261101-000000', { [A + '.json']: 'old A', [B + '.json']: 'old B', [C + '.json']: 'older C', 'WHAT-THIS-IS.txt': 'note',
+      'config.json': '{}', [A + '.tz']: 'tz', ['sub/' + A + '.json']: 'nested' }, 3600000);
+    const newer = rescue('20261102-000000', { [C + '.json']: 'newer C' }, 3600000);
+    const r = run();
+    const has = (n) => fs.existsSync(path.join(plans, n));
+    const body = (n) => (has(n) ? fs.readFileSync(path.join(plans, n), 'utf8') : null);
+    if (r && body(A + '.json') === 'old A' && body(C + '.json') === 'newer C') ok('a rescued plan comes back, from the newest folder when two hold it');
+    else bad(`copied back: ${JSON.stringify({ r, A: body(A + '.json'), C: body(C + '.json') })}`);
+    if (body(B + '.json') === 'mine') ok('a plan already in the plan directory is not overwritten');
+    else bad(`the plan already there now holds ${JSON.stringify(body(B + '.json'))}`);
+    if (!has('WHAT-THIS-IS.txt') && !has('config.json') && !has(A + '.tz') && !has('sub')) ok('the note and anything that is not <session id>.json stay behind');
+    else bad(`copied besides plans: ${JSON.stringify(fs.readdirSync(plans))}`);
+    if (fs.readFileSync(path.join(older, A + '.json'), 'utf8') === 'old A' && carry.COPIED_BACK && fs.existsSync(path.join(older, carry.COPIED_BACK))
+      && fs.existsSync(path.join(newer, carry.COPIED_BACK))) {
+      ok('the rescue folders keep their files and get a mark');
+    } else bad(`rescue folders afterwards: ${JSON.stringify([fs.readdirSync(older), fs.readdirSync(newer)])}`);
+    fs.rmSync(path.join(plans, A + '.json'), { force: true });
+    const again = run();
+    if (again && !again.copied.length && !has(A + '.json')) ok('a marked folder is not read again');
+    else bad(`second pass: ${JSON.stringify(again)}`);
+    const young = rescue('20261103-000000', { [A + '.json']: 'young A' }, 10000);
+    const wait = run();
+    if (wait && !wait.copied.length && wait.waitMs > 0 && !has(A + '.json') && !fs.existsSync(path.join(young, carry.COPIED_BACK || 'x'))) {
+      ok('a folder written moments ago is left alone, and the wait before it can be read is said');
+    } else bad(`young folder: ${JSON.stringify(wait)}`);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+
+  /* The wiring: only on a start that runs as usual and has the plugin registered. The stand-in claude records a
+     registration the way Claude Code does. */
+  const bin = 'ext/anthropic.claude-code-2.1.999-linux-x64/resources/native-binary/claude';
+  const claudeSh = '#!/bin/sh\nif [ "$1" = plugin ]; then\n  mkdir -p "$HOME/.claude/plugins"\n'
+    + '  printf %s \'{"version":2,"plugins":{"agent-work-plan@claude-code-extras":[{"scope":"user"}]}}\' > "$HOME/.claude/plugins/installed_plugins.json"\n'
+    + '  printf %s \'{"claude-code-extras":{"source":{"source":"directory"}}}\' > "$HOME/.claude/plugins/known_marketplaces.json"\n  exit 0\nfi\nexit 1\n';
+  const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
+  const files = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '',
+    ['.claude/agent-work-plan-plans-20261101-000000/' + A + '.json']: '{"nodes":[]}', '.claude/agent-work-plan-plans-20261101-000000/WHAT-THIS-IS.txt': 'note' };
+  const back = (r) => Object.keys(r.files || {}).includes('.claude/plugins/data/agent-work-plan-claude-code-extras/' + A + '.json');
+  const real = { packageJSON: { name: 'claude-code-extras', version: '1.0.21', extensionDependencies: ['anthropic.claude-code'] }, extensionPath: '/x' };
+  const usual = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 4000 });
+  const removedRun = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 2000,
+    state: { 'claudeCodeExtras.removed': true } });
+  const asideRun = activateStub({ extensions: { 'anthropic.claude-code': cc, [LEGACY_ID]: real }, files, aged: true, executable: [bin], after: 2000 });
+  if (!usual.threw && back(usual) && (usual.state || {})['claudeCodeExtras.workPlanPlugin'] && usual.state['claudeCodeExtras.workPlanPlugin'].registered === true) {
+    ok('a start that registers the plugin copies the rescued plans back');
+  } else bad(`usual start: ${JSON.stringify({ threw: (usual.threw || '').slice(0, 300), back: back(usual), plugin: (usual.state || {})['claudeCodeExtras.workPlanPlugin'], logs: (usual.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 5) })}`);
+  if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while the old extension is installed as itself, nothing is copied back');
+  else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
 }
 
 /* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no

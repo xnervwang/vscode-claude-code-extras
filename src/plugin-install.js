@@ -41,12 +41,19 @@ const REF = PLUGIN + '@' + MARKETPLACE;
 /** The directory the platform gives the plugin for its own data, named from those two. */
 const DATA_DIR = PLUGIN + '-' + MARKETPLACE;
 const dataPath = () => path.join(os.homedir(), '.claude', 'plugins', 'data', DATA_DIR);
+/** Where an uninstall copies the plans first, under ~/.claude/, followed by a time stamp. */
+const RESCUE_PREFIX = PLUGIN + '-plans-';
 /** Where Claude Code keeps the command-line binary inside its own extension directory; the Windows build names it
     claude.exe. */
 const BINARY = path.join('resources', 'native-binary', process.platform === 'win32' ? 'claude.exe' : 'claude');
 /* Generous, because this binary is a 241 MB single file: a cold start of it is slow on a machine that has just booted,
    and a timeout here would be reported as a failure that is really only a wait. */
 const TIMEOUT_MS = 60000;
+
+/* One of Claude Code's records of installed plugins and known marketplaces, or null when it cannot be read. */
+const readRecord = (home, name) => {
+  try { return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', name), 'utf8')); } catch (_) { return null; }
+};
 
 /**
  * Whether Claude Code's own records have lost both the plugin and the marketplace it came from - which is exactly what
@@ -58,9 +65,7 @@ const TIMEOUT_MS = 60000;
  * the records cannot be read: not knowing is no reason to register anything.
  */
 function registrationGone(home = os.homedir()) {
-  const read = (name) => {
-    try { return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', name), 'utf8')); } catch (_) { return null; }
-  };
+  const read = (name) => readRecord(home, name);
   const plugins = read('installed_plugins.json');
   const markets = read('known_marketplaces.json');
   if (!plugins || typeof plugins !== 'object' || !markets || typeof markets !== 'object') return false;
@@ -267,7 +272,7 @@ function rescuePlans(stamp) {
   let names;
   try { names = fs.readdirSync(from); } catch (e) { return { to: '', failed: !(e && e.code === 'ENOENT') }; }
   if (!names.length) return { to: '', failed: false };
-  const to = path.join(os.homedir(), '.claude', PLUGIN + '-plans-' + stamp);
+  const to = path.join(os.homedir(), '.claude', RESCUE_PREFIX + stamp);
   try {
     fs.mkdirSync(to, { recursive: true });
     fs.cpSync(from, to, { recursive: true });
@@ -314,8 +319,15 @@ async function disable(dirs) {
 }
 
 
+/** Whether Claude Code's own records list the plugin as installed. */
+function listed(home = os.homedir()) {
+  const plugins = readRecord(home, 'installed_plugins.json');
+  const all = plugins && typeof plugins === 'object' && plugins.plugins && typeof plugins.plugins === 'object' ? plugins.plugins : {};
+  return Object.prototype.hasOwnProperty.call(all, REF);
+}
+
 module.exports = {
-  install, disable, removeSync, rescuePlans, findClaude, findPython, fitHooks, digest, stage, registrationGone, MARKETPLACE,
+  install, disable, removeSync, rescuePlans, listed, RESCUE_PREFIX, findClaude, findPython, fitHooks, digest, stage, registrationGone, MARKETPLACE,
   PLUGIN, REF, BINARY, PYTHONS, SKILL_RUN,
   DATA_DIR,
 };
