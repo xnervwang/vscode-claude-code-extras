@@ -5343,6 +5343,18 @@ console.log('\nplans an uninstall copied aside come back');
     if (wait && !wait.copied.length && wait.waitMs > 0 && !has(A + '.json') && !fs.existsSync(path.join(young, carry.COPIED_BACK || 'x'))) {
       ok('a folder written moments ago is left alone, and the wait before it can be read is said');
     } else bad(`young folder: ${JSON.stringify(wait)}`);
+    /* Some network and FAT drives have no hard links; the plans still come back there. */
+    const D = 'dddddddd-1111-4222-8333-444444444444';
+    rescue('20261104-000000', { [D + '.json']: 'D without links' }, 3600000);
+    const realLink = fs.linkSync;
+    let unlinked = null;
+    try {
+      fs.linkSync = () => { const e = new Error('operation not permitted'); e.code = 'EPERM'; throw e; };
+      unlinked = run();
+    } finally { fs.linkSync = realLink; }
+    if (unlinked && unlinked.copied.includes(D + '.json') && has(D + '.json') && fs.readFileSync(path.join(plans, D + '.json'), 'utf8') === 'D without links') {
+      ok('on a drive without hard links the rescued plans still come back');
+    } else bad(`without hard links: ${JSON.stringify(unlinked)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 
   /* The copy runs only on a normal start with the plugin registered. The stand-in claude records a

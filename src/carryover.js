@@ -52,7 +52,8 @@ const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
  * Copy one file to `to` unless a file is there: 'copied', 'there' or 'failed'. The copy is written under a temporary
  * name and linked into place. That way another window never reads half a file, and a file another window wrote in the
  * meantime is kept. It keeps the original's modification time, which for a plan decides whether its conversation counts
- * as recent.
+ * as recent. On a drive without hard links (some network and FAT drives) it is renamed into place instead, which can
+ * replace a copy another window made in the same instant.
  */
 function copyNew(from, to) {
   if (fs.existsSync(to)) return 'there';
@@ -62,7 +63,10 @@ function copyNew(from, to) {
     fs.copyFileSync(from, tmp);
     const st = fs.statSync(from);
     fs.utimesSync(tmp, st.atime, st.mtime);
-    try { fs.linkSync(tmp, to); return 'copied'; } catch (e) { if (e.code === 'EEXIST') return 'there'; throw e; }
+    try { fs.linkSync(tmp, to); return 'copied'; } catch (e) { if (e.code === 'EEXIST') return 'there'; }
+    if (fs.existsSync(to)) return 'there';
+    fs.renameSync(tmp, to);
+    return 'copied';
   } catch (_) {
     return 'failed';
   } finally {
