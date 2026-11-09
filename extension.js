@@ -218,13 +218,39 @@ function standAside(context, log, version) {
   const tell = () => vscode.window.showWarningMessage(
     'An earlier version of Work Plan for Claude Code is installed. Update or uninstall it to use Claude Code Plus; your work plans come back after uninstall.',
     'Show It',
-  ).then((pick) => { if (pick === 'Show It') vscode.commands.executeCommand('workbench.extensions.search', '@id:' + carryover.LEGACY_ID); }, () => {});
+  ).then((pick) => { if (pick === 'Show It') showOldExtension(); }, () => {});
   for (const c of (context.extension.packageJSON.contributes || {}).commands || []) {
     context.subscriptions.push(vscode.commands.registerCommand(c.command, tell));
   }
   if (context.globalState.get(TOLD_KEY) === version) return;
   Promise.resolve(context.globalState.update(TOLD_KEY, version)).catch(() => {});
   tell();
+}
+
+/* The old extension's page in the Extensions view, where it can be updated or uninstalled; a search for its id when the
+   editor cannot open the page. */
+function showOldExtension() {
+  return Promise.resolve(vscode.commands.executeCommand('extension.open', carryover.LEGACY_ID))
+    .catch(() => vscode.commands.executeCommand('workbench.extensions.search', '@id:' + carryover.LEGACY_ID))
+    .then(undefined, () => {});
+}
+
+/*
+ * The old id's last version does nothing, and once this extension runs in its place it can be uninstalled. The question
+ * is not asked at a start that asks for a reload, so that reload comes first. It is asked again at later starts until
+ * its button is used.
+ */
+const TOLD_OLD_KEY = PREFIX + 'toldUninstallOld';
+function offerUninstallOld(context) {
+  if (context.globalState.get(TOLD_OLD_KEY) === true) return;
+  vscode.window.showInformationMessage(
+    'Claude Code Plus is now running. Work Plan for Claude Code is still installed but no longer does anything; you can uninstall it from its Extensions page.',
+    'Show Extension',
+  ).then((pick) => {
+    if (pick !== 'Show Extension') return;
+    Promise.resolve(context.globalState.update(TOLD_OLD_KEY, true)).catch(() => {});
+    showOldExtension();
+  }, () => {});
 }
 
 /*
@@ -259,7 +285,7 @@ async function activate(context) {
     carryOver(context, log);
     let renamed = '';
     try { renamed = await renameSettings(context); } catch (e) { renamed = 'failed: ' + (e && e.message); }
-    await start(context, log, renamed);
+    await start(context, log, renamed, handing);
   };
   if (vscode.workspace.isTrusted !== false) {
     const started = go();
@@ -277,7 +303,7 @@ async function activate(context) {
   context.subscriptions.push(trusted);
 }
 
-function start(context, log, renamed) {
+function start(context, log, renamed, handing = false) {
   if (renamed) log.appendLine(`settings moved from ${LEGACY_PREFIXES.map((p) => p + '*').join(' and ')} to ${PREFIX}*: ${renamed}`);
   const removed = () => context.globalState.get(REMOVED_KEY, false) === true;
   /*
@@ -377,6 +403,8 @@ function start(context, log, renamed) {
       .catch((e) => log.appendLine('background sessions: ' + e.message));
   };
 
+  /* Set when a sync here has patched or restored Claude Code's files; either asks for a reload. */
+  let reloadOffered = false;
   /* Bring every install in line with the current settings. Only installing, upgrading or removing the patch itself
      asks for a reload; on and off and the color are picked up by an open panel within a couple of seconds. */
   async function sync({ interactive = false } = {}) {
@@ -417,6 +445,7 @@ function start(context, log, renamed) {
     // A shape mismatch after a Claude Code update would otherwise be silent, so it is said out loud.
     if (problems.length) vscode.window.showWarningMessage('Claude Code Plus: ' + problems.join(' | '));
     if (patched.length) offerReload(`Claude Code Plus is installed in ${patched.join(' and ')}. Reload the window once to start; after that, On/Off and colors change live.`);
+    if (patched.length || restored.length) reloadOffered = true;
     // An uninstall already has the editor asking for a restart of its extensions; a second prompt would only compete.
     if (restored.length && !leaving) offerReload(`Claude Code Plus was removed from ${restored.join(' and ')}. Reload the window to finish.`);
   }
@@ -1311,7 +1340,7 @@ function start(context, log, renamed) {
     writeLiveNow();
   }));
 
-  return sync();
+  return sync().then(() => { if (handing && !reloadOffered) offerUninstallOld(context); });
 }
 
 /*

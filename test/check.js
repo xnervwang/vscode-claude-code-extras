@@ -4702,6 +4702,7 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
  * opts.later        like opts.files, written once activate has resolved and opts.laterMs have passed
  * opts.gone         relative paths under the home folder deleted at the same moment
  * opts.tickMs       run the 30-second timer this often instead of never
+ * opts.refuse       command ids executeCommand fails for, as for a command the editor does not have
  * opts.aged         opts.files are given a modification time an hour back
  * opts.executable   relative paths of opts.files to make executable
  * opts.after(ms)    how long to let it run after activate resolves
@@ -4723,6 +4724,7 @@ const activateStub = (opts = {}) => {
       const disposable = { dispose() {} };
       const rec = { commands: [], looked: [], said: [], executed: [], logs: [] };
       const taken = new Set(${JSON.stringify(opts.taken || [])});
+      const refuse = new Set(${JSON.stringify(opts.refuse || [])});
       const exts = JSON.parse(${JSON.stringify(JSON.stringify(opts.extensions || {}))}.split('$HOME').join(${JSON.stringify(home)}));
       const say = async (text, ...items) => { rec.said.push([text].concat(items.filter((i) => typeof i === 'string'))); return ${JSON.stringify(opts.answer || null)} || undefined; };
       class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
@@ -4740,7 +4742,7 @@ const activateStub = (opts = {}) => {
           tabGroups: { all: [], activeTabGroup: null }, showTextDocument: async () => {} },
         commands: {
           registerCommand: (id) => { if (taken.has(id)) throw new Error("command '" + id + "' already exists"); rec.commands.push(id); return disposable; },
-          executeCommand: async (...a) => { rec.executed.push(a); } },
+          executeCommand: async (...a) => { rec.executed.push(a); if (refuse.has(a[0])) throw new Error("command '" + a[0] + "' not found"); } },
         extensions: { getExtension: (id) => { rec.looked.push(id); return exts[id]; }, onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');
     const script = `
@@ -4872,10 +4874,10 @@ console.log('\nwhile the old extension is still installed');
     ok('with an earlier version of the old extension installed: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
   } else bad(`with the old extension installed: ${JSON.stringify(t)}${aside.threw ? ' threw ' + aside.threw.slice(0, 300) : ''}`);
   const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]) && /work plans come back/.test(s[0]));
-  const opened = (aside.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID);
+  const opened = (aside.executed || []).some((a) => a[0] === 'extension.open' && a[1] === LEGACY_ID);
   if (warned.length === 1 && warned[0].includes('Show It') && opened && (aside.logs || []).some((l) => l.includes(LEGACY_ID) && l.includes('1.0.21'))
     && (aside.state || {})['claudeCodePlus.toldEarlierBuild'] === '1.0.21') {
-    ok('it says so in the output and once in a notification, which says the plans come back after an uninstall and whose button searches the Extensions view for the old id');
+    ok('it says so in the output and once in a notification, which says the plans come back after an uninstall and whose button opens the old extension\'s page');
   } else bad(`what it said: ${JSON.stringify({ said: aside.said, executed: aside.executed, logs: (aside.logs || []).slice(0, 4), told: (aside.state || {})['claudeCodePlus.toldEarlierBuild'] })}`);
   const again = run(real, { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });
   const newer = run(Object.assign({}, real, { packageJSON: Object.assign({}, real.packageJSON, { version: '1.0.22' }) }), { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });
@@ -4890,7 +4892,7 @@ console.log('\nwhile the old extension is still installed');
   const handed = run(shim, { files: Object.assign({ [`User/globalStorage/${LEGACY_ID}/export.json`]: '{}' }, base.files) });
   const h = touched(handed);
   if (!handed.threw && h.patching && h.core && h.hooks && h.oldCommands && h.renamed
-    && !(handed.said || []).some((s) => /Work Plan for Claude Code/.test(s[0]))) {
+    && !(handed.said || []).some((s) => /earlier version of Work Plan for Claude Code/.test(s[0]))) {
     ok('with the old id\'s last version installed, the one that hands over, everything runs as usual');
   } else bad(`with the old id's last version: ${JSON.stringify(h)}${handed.threw ? ' threw ' + handed.threw.slice(0, 300) : ''}`);
 }
@@ -4943,7 +4945,7 @@ console.log('\nan uninstall while the old extension is still installed');
 
 /* shim/ is the last version of the old id. Auto-update brings it to everyone who has the old extension, and the editor
    installs what it depends on. It must never touch Claude Code: the patch and the plugin belong to this extension by
-   then, and the shim's notice asks people to uninstall it. */
+   then, and this extension asks people to uninstall the shim. */
 console.log('\nthe old id\'s last version, shim/');
 {
   const dir = path.join(__dirname, '..', 'shim');
@@ -4976,7 +4978,7 @@ console.log('\nthe old id\'s last version, shim/');
   try { carry = require('../src/carryover'); } catch (_) { carry = {}; }
 
   /* Its activation, against a stand-in editor: the two state entries this extension imports are written to export.json,
-     and the notice is shown once, its button uninstalling this id. */
+     and nothing is shown. */
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-shim-')));
   try {
     const stub = path.join(home, 'vscode-stub.js');
@@ -5017,9 +5019,8 @@ console.log('\nthe old id\'s last version, shim/');
       && r.again === true && JSON.stringify(r.left) === JSON.stringify(['export.json'])) {
       ok('it writes the removed mark and the remembered folders to export.json on every activation, and nothing else');
     } else bad(`shim export: ${JSON.stringify(r).slice(0, 500)}`);
-    if (!r.threw && r.said === 1 && r.saidAgain === 1
-      && JSON.stringify(r.executed) === JSON.stringify([['workbench.extensions.uninstallExtension', 'xnervwang.claude-code-extras']])) {
-      ok('its notice is shown once, and the Uninstall button uninstalls the old id');
+    if (!r.threw && r.said === 0 && r.saidAgain === 0 && JSON.stringify(r.executed) === '[]') {
+      ok('it shows nothing and runs no command: asking to uninstall it is this extension\'s part');
     } else bad(`shim notice: ${JSON.stringify([r.said, r.saidAgain, r.executed])}`);
     const names = {};
     try {
@@ -5053,6 +5054,36 @@ console.log('\nthe old id\'s last version, shim/');
   if (!late.threw && late.activateMs < 1000 && (late.state || {})['claudeCodeExtras.removed'] === true && late.hooks === true) {
     ok('with the shim installed and no export.json yet, activation returns at once, and the start waits for the file and imports it');
   } else bad(`export.json written after activation: ${JSON.stringify({ threw: (late.threw || '').slice(0, 300), ms: late.activateMs, removed: (late.state || {})['claudeCodeExtras.removed'], hooks: late.hooks })}`);
+
+  /* This extension asks to uninstall the shim, but not at a start that asks for a reload. The button opens the old
+     extension's page, or searches the Extensions view for it where the editor cannot open the page. The question stops
+     once the button is used. */
+  const ASK = 'Claude Code Plus is now running.';
+  const folders = JSON.stringify({ 'claudeCodeExtras.projectDirDays': { '/w': 20000 } });
+  const ask = (opts) => activateStub(Object.assign({ extensions: { [LEGACY_ID]: shimDesc, 'anthropic.claude-code': cc },
+    files: Object.assign({ [OLD + 'export.json']: folders }, ccFiles), after: 800 }, opts));
+  const asked = (r) => (r.said || []).filter((s) => s[0].startsWith(ASK));
+  const shown = ask({ answer: 'Show Extension' });
+  if (!shown.threw && asked(shown).length === 1 && asked(shown)[0].includes('Show Extension')
+    && (shown.executed || []).some((a) => a[0] === 'extension.open' && a[1] === LEGACY_ID) && (shown.state || {})['claudeCodePlus.toldUninstallOld'] === true) {
+    ok('beside the shim, a start that asks for no reload asks to uninstall it, and its button opens the old extension\'s page');
+  } else bad(`uninstall question: ${JSON.stringify({ threw: (shown.threw || '').slice(0, 300), said: shown.said, executed: shown.executed, told: (shown.state || {})['claudeCodePlus.toldUninstallOld'] })}`);
+  const searched = ask({ answer: 'Show Extension', refuse: ['extension.open'] });
+  if (!searched.threw && (searched.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID)) {
+    ok('where the page cannot be opened, the button searches the Extensions view for the old id');
+  } else bad(`with extension.open refused: ${JSON.stringify(searched.executed)}`);
+  const dismissed = ask({});
+  const toldBefore = ask({ state: { 'claudeCodePlus.toldUninstallOld': true } });
+  const alone = activateStub({ extensions: { 'anthropic.claude-code': cc }, files: ccFiles, after: 800 });
+  if (asked(dismissed).length === 1 && (dismissed.state || {})['claudeCodePlus.toldUninstallOld'] === undefined
+    && !asked(toldBefore).length && !asked(alone).length) {
+    ok('closing the question leaves it to be asked again; after the button, or without the shim, it is not asked');
+  } else bad(`asked: dismissed ${asked(dismissed).length} told ${JSON.stringify((dismissed.state || {})['claudeCodePlus.toldUninstallOld'])}, after the button ${asked(toldBefore).length}, alone ${asked(alone).length}`);
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  if (/if \(patched\.length \|\| restored\.length\) reloadOffered = true;/.test(ext)
+    && /return sync\(\)\.then\(\(\) => \{ if \(handing && !reloadOffered\) offerUninstallOld\(context\); \}\);/.test(ext)) {
+    ok('the question waits while the first sync asks for a reload');
+  } else bad('the uninstall question is not held back by a reload the first sync asks for');
 }
 
 /* Uninstalling the old extension unregisters the plugin, and its uninstall hook first copies the plans to
