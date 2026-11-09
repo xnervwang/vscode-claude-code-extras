@@ -5689,6 +5689,23 @@ console.log('\nwhat a tick and a change of setting cost');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
+/* Deleting after the confirmation, when the conversation was opened meanwhile. */
+console.log('\na conversation opened while its deletion is being confirmed');
+{
+  const SID = 'cdcdcdcd-1111-4222-8333-444444444444';
+  const transcript = '.claude/projects/-work/' + SID + '.jsonl';
+  const run = (shownAfter) => activateStub({ answer: 'Delete',
+    files: { [transcript]: JSON.stringify({ parentUuid: null, type: 'user', message: { content: 'hi' } }) + '\n' },
+    preamble: `globalThis.__shownCalls = 0; globalThis.__cceSessionsShown = () => (globalThis.__shownCalls++ ? ${JSON.stringify(shownAfter)} : []);`
+      + `setTimeout(() => globalThis.__cceDeleteHook([{ id: '${SID}', title: 'old talk' }]), 50);`,
+    report: `require('fs').existsSync(require('path').join(process.env.HOME, ${JSON.stringify(transcript)}))` });
+  const opened = run([SID]), left = run([]);
+  const told = (opened.said || []).some((s) => /opened or started meanwhile/.test(s[0]));
+  if (opened.extra === true && told && left.extra === false) {
+    ok('a conversation opened while the question was up is left on disk, and one still closed is deleted');
+  } else bad(`delete after confirming: opened meanwhile kept ${opened.extra} (told ${told}), still closed kept ${left.extra}`);
+}
+
 /* ── 24. a panel whose bundle never arrives says so ──
    The watch runs inline in the panel's HTML, ahead of the panel's stylesheet (src/panel-load-watch.js says why). Two
    things are checked against a fake page whose clock the test drives. It must never break the panel it watches: the

@@ -1106,8 +1106,18 @@ function start(context, log, renamed, handing = false) {
       go.length === 1 ? `Delete "${go[0].title}" from disk?` : `Delete ${go.length} conversations from disk?`,
       { modal: true, detail: lines.join('\n') }, 'Delete');
     if (pick !== 'Delete') return;
+    /* A conversation opened or resumed while the question was up is left alone, and so is everything when the list of
+       open ones can no longer be read. */
+    let shownNow;
+    try { shownNow = typeof globalThis.__cceSessionsShown === 'function' ? globalThis.__cceSessionsShown() : null; } catch (_) { shownNow = null; }
+    const runningNow = deleteSession.runningSessions();
+    const late = go.filter((g) => !Array.isArray(shownNow) || shownNow.includes(g.id) || runningNow.has(g.id));
+    if (late.length) {
+      vscode.window.showWarningMessage(`Not deleted: ${late.map((g) => `"${g.title}"`).join(', ')} ${late.length === 1 ? 'was' : 'were'} opened or started meanwhile.`);
+    }
     const failed = [];
     for (const g of go) {
+      if (late.includes(g)) continue;
       failed.push(...deleteSession.remove(g.found));
       try { sessionPins.setPinned(pinsFile(), g.id, false); } catch (_) { /* not pinned */ }
       try { sessionColors.setColor(colorsFile(), [g.id], null); } catch (_) { /* not colored */ }
