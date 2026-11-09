@@ -204,6 +204,29 @@ function carryOver(context, log) {
 }
 
 /*
+ * The old extension installed as itself rather than as its last version (src/carryover.js) patches Claude Code with its
+ * own build, and two extensions doing that take turns rewriting the same files. Until it is updated or uninstalled
+ * nothing here starts - no patch, no stylesheet beside the panel, no plugin, no source for Agent Plus, no hooks for the
+ * patched bundles, no settings moved and nothing copied, since the old one still reads all of that. Its commands share
+ * names with ours, and are left to it. The first start after it is gone runs as usual.
+ */
+const TOLD_KEY = PREFIX + 'toldEarlierBuild';
+function standAside(context, log, version) {
+  log.appendLine(`Work Plan for Claude Code ${version} (${carryover.LEGACY_ID}) is still installed and patches Claude Code itself; `
+    + 'this extension does nothing until it is updated or uninstalled');
+  const tell = () => vscode.window.showWarningMessage(
+    'Work Plan for Claude Code, the earlier name of this extension, is still installed. Claude Code Plus does nothing until you update or uninstall it.',
+    'Show It',
+  ).then((pick) => { if (pick === 'Show It') vscode.commands.executeCommand('workbench.extensions.search', '@id:' + carryover.LEGACY_ID); }, () => {});
+  for (const c of (context.extension.packageJSON.contributes || {}).commands || []) {
+    context.subscriptions.push(vscode.commands.registerCommand(c.command, tell));
+  }
+  if (context.globalState.get(TOLD_KEY) === version) return;
+  Promise.resolve(context.globalState.update(TOLD_KEY, version)).catch(() => {});
+  tell();
+}
+
+/*
  * In Restricted Mode nothing starts until the workspace is trusted: everything this extension does writes files or runs
  * Claude Code's command line. deactivate() still restores Claude Code's files on an uninstall, in Restricted Mode too.
  */
@@ -211,6 +234,9 @@ async function activate(context) {
   selfPath = context.extensionPath;
   const log = vscode.window.createOutputChannel('Claude Code Plus');
   context.subscriptions.push(log);
+  let earlier = '';
+  try { earlier = carryover.earlierBuild(vscode.extensions.getExtension(carryover.LEGACY_ID)); } catch (_) { /* not there */ }
+  if (earlier) { standAside(context, log, earlier); return; }
   const go = async () => {
     carryOver(context, log);
     let renamed = '';
@@ -1240,6 +1266,8 @@ function start(context, log, renamed) {
  */
 function deactivate() {
   if (!selfPath || !removal.beingUninstalled(selfPath, ID)) return;
+  /* The old extension installed as itself in this folder still uses the patch and the plugin. */
+  if (removal.earlierCopies(path.dirname(selfPath)).length) return;
   /* Only the Claude Code installs in this editor's extensions folder. Another editor on this machine can have this
      extension installed and running, and restoring its folder would take the patch out from under it; the uninstall
      hook, which runs when this folder is deleted, is what looks in every editor's folder. */

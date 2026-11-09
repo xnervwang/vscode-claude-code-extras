@@ -17,6 +17,22 @@ const fs = require('fs');
 const path = require('path');
 
 const LEGACY_ID = 'xnervwang.claude-code-extras';
+const PLUS_ID = 'xnervwang.claude-code-plus';
+
+/** Whether a manifest of the old id is its last version, shim/ in this repository: it depends on this extension and
+    patches nothing. */
+function handsOver(pkg) {
+  const deps = pkg && pkg.extensionDependencies;
+  return Array.isArray(deps) && deps.some((d) => typeof d === 'string' && d.toLowerCase() === PLUS_ID);
+}
+
+/** The version of the old extension when the editor runs it as itself, from its description; '' when it is not here
+    or is the last version. */
+function earlierBuild(ext) {
+  if (!ext) return '';
+  const pkg = ext.packageJSON || {};
+  return handsOver(pkg) ? '' : String(pkg.version || '?');
+}
 
 /** The old extension's global storage folder, beside `storage`, this extension's. */
 const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
@@ -49,4 +65,4 @@ function copyFiles(storage, names) {
   return out;
 }
 
-module.exports = { LEGACY_ID, legacyStorage, copyFiles };
+module.exports = { LEGACY_ID, PLUS_ID, handsOver, earlierBuild, legacyStorage, copyFiles };

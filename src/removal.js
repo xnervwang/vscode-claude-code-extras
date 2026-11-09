@@ -32,6 +32,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const adapters = require('./adapters');
+const { LEGACY_ID, handsOver } = require('./carryover');
 
 /** Every extensions folder Claude Code could be installed in, starting with the one this extension sits in. */
 function roots(extensionsDir) {
@@ -84,16 +85,30 @@ function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
   return names.filter((n) => own.test(n) && marked[n] !== true).map((n) => path.join(extensionsDir, n));
 }
 
+/**
+ * The folders in one extensions folder holding this extension under its earlier id as itself: not marked for deletion,
+ * and not that id's last version, which only hands over to this one (src/carryover.js). Such a copy patches Claude Code
+ * and uses the companion plugin just as a copy of this extension does.
+ */
+function earlierCopies(extensionsDir) {
+  return liveCopies(extensionsDir, LEGACY_ID).filter((dir) => {
+    try { return !handsOver(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))); } catch (_) { return false; }
+  });
+}
+
 /*
  * What the uninstall hook may put back: this editor's own folder, and any other editor's folder on this machine that no
  * longer holds a copy of this extension. Where another editor still has it installed, it patches Claude Code there again
- * at its next start, so that folder is left out. While one is left, the companion plugin and the plans in its data
- * directory are still in use, so `lastCopy` is false and they stay.
+ * at its next start, so that folder is left out; so is any folder, this editor's included, with an earlier copy in it.
+ * While one is left, the companion plugin and the plans in its data directory are still in use, so `lastCopy` is false
+ * and they stay.
  */
 function uninstallPlan(extensionsDir, id) {
   const others = roots(extensionsDir).filter((r) => r !== extensionsDir);
-  const owned = others.filter((r) => liveCopies(r, id).length);
-  return { restore: [extensionsDir, ...others.filter((r) => !owned.includes(r))], lastCopy: !owned.length, owned };
+  const owned = others.filter((r) => liveCopies(r, id).length || earlierCopies(r).length);
+  const here = earlierCopies(extensionsDir).length ? [extensionsDir] : [];
+  return { restore: (here.length ? [] : [extensionsDir]).concat(others.filter((r) => !owned.includes(r))),
+    lastCopy: !owned.length && !here.length, owned: here.concat(owned) };
 }
 
 /** Put back every Claude Code install that carries a patch of ours. Synchronous, since the host exits right after. */
@@ -187,6 +202,6 @@ function unmarked(dirs, keep, marked) {
 }
 
 module.exports = {
-  roots, obsolete, beingUninstalled, liveCopies, uninstallPlan, restoreAll, finishLater, replacedSince, installStamp, standing,
+  roots, obsolete, beingUninstalled, liveCopies, earlierCopies, uninstallPlan, restoreAll, finishLater, replacedSince, installStamp, standing,
   unmarked,
 };

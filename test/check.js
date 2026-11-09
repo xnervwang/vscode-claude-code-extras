@@ -4699,7 +4699,8 @@ console.log('\nthe name a person sees');
    alone while the old extension still patches Claude Code itself. */
 const LEGACY_ID = 'xnervwang.claude-code-extras';
 /*
- * opts.extensions   id -> { packageJSON, extensionPath } the stand-in's getExtension answers for
+ * opts.extensions   id -> { packageJSON, extensionPath } the stand-in's getExtension answers for, $HOME in it standing for the
+ *                   home folder
  * opts.taken        command ids another extension has registered already, which registerCommand refuses
  * opts.state        what this extension's globalState holds before it starts
  * opts.files        relative path under the home folder -> content, written before activation
@@ -4719,7 +4720,7 @@ const activateStub = (opts = {}) => {
       const disposable = { dispose() {} };
       const rec = { commands: [], looked: [], said: [], executed: [], logs: [] };
       const taken = new Set(${JSON.stringify(opts.taken || [])});
-      const exts = ${JSON.stringify(opts.extensions || {})};
+      const exts = JSON.parse(${JSON.stringify(JSON.stringify(opts.extensions || {}))}.split('$HOME').join(${JSON.stringify(home)}));
       const say = async (text, ...items) => { rec.said.push([text].concat(items.filter((i) => typeof i === 'string'))); return ${JSON.stringify(opts.answer || null)} || undefined; };
       class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
       module.exports = { rec, TreeItem, TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
@@ -4831,6 +4832,101 @@ console.log('\npins and colors from the old extension\'s storage');
   if (!r2.threw && JSON.stringify(f2[NEW + 'session-colors.json']) === JSON.stringify(mine) && JSON.stringify(f2[NEW + 'session-pins.json']) === JSON.stringify(pins)) {
     ok('a file this extension already has is not overwritten, while the one it lacks is still copied');
   } else bad(`with colors of its own: ${JSON.stringify({ threw: (r2.threw || '').slice(0, 300), colors: f2[NEW + 'session-colors.json'], pins: f2[NEW + 'session-pins.json'] })}`);
+}
+
+/* The old extension installed as itself patches Claude Code with its own build, and two extensions doing that take turns
+   rewriting the same files. So while it is, this one writes nothing anyone else reads, and says why once per version of
+   the old one. The last version of the old id hands over instead - it depends on this extension and patches nothing - and
+   with that one installed everything runs as usual. */
+console.log('\nwhile the old extension is still installed');
+{
+  const cc = '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64';
+  const base = { files: { 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '',
+    [`User/globalStorage/${LEGACY_ID}/session-pins.json`]: '{"pinned":[],"times":{}}' } };
+  const claude = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: cc };
+  const real = { packageJSON: { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.21', extensionDependencies: ['anthropic.claude-code', 'xnervwang.agent-work-plan'] }, extensionPath: '/x/' + LEGACY_ID + '-1.0.21' };
+  const shim = { packageJSON: { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.22', extensionDependencies: ['xnervwang.claude-code-plus'] }, extensionPath: '/x/' + LEGACY_ID + '-1.0.22' };
+  const run = (legacy, more = {}) => activateStub(Object.assign({}, base, more, { extensions: Object.assign({ 'anthropic.claude-code': claude }, legacy ? { [LEGACY_ID]: legacy } : {}) }));
+  const touched = (r) => ({
+    patching: (r.looked || []).includes('anthropic.claude-code'),
+    core: (r.looked || []).includes('xnervwang.agent-plus'),
+    hooks: r.hooks === true,
+    oldCommands: (r.commands || []).filter((c) => !c.startsWith('claudeCodePlus.')).length,
+    shared: Object.keys(r.files || {}).filter((k) => k.startsWith('.claude/') || /claude-code-extras\.(css|rev\.svg)$/.test(k) || k.startsWith('User/globalStorage/xnervwang.claude-code-plus/')),
+    renamed: !!(r.state || {})['claudeCodePlus.settingsRenamed'],
+  });
+  const aside = run(real, { answer: 'Show It' });
+  const t = touched(aside);
+  if (!aside.threw && !t.patching && !t.core && !t.hooks && !t.oldCommands && !t.shared.length && !t.renamed) {
+    ok('with the old extension installed as itself: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
+  } else bad(`with the old extension installed: ${JSON.stringify(t)}${aside.threw ? ' threw ' + aside.threw.slice(0, 300) : ''}`);
+  const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]));
+  const opened = (aside.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID);
+  if (warned.length === 1 && warned[0].includes('Show It') && opened && (aside.logs || []).some((l) => l.includes(LEGACY_ID) && l.includes('1.0.21'))
+    && (aside.state || {})['claudeCodePlus.toldEarlierBuild'] === '1.0.21') {
+    ok('it says so in the output and once in a notification, whose button searches the Extensions view for the old id');
+  } else bad(`what it said: ${JSON.stringify({ said: aside.said, executed: aside.executed, logs: (aside.logs || []).slice(0, 4), told: (aside.state || {})['claudeCodePlus.toldEarlierBuild'] })}`);
+  const again = run(real, { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });
+  const newer = run(Object.assign({}, real, { packageJSON: Object.assign({}, real.packageJSON, { version: '1.0.22' }) }), { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });
+  if (!(again.said || []).length && (again.logs || []).some((l) => l.includes(LEGACY_ID)) && (newer.said || []).length === 1) {
+    ok('the notification is not repeated for the same version of the old extension, and is for another one');
+  } else bad(`told again: ${JSON.stringify([again.said, newer.said])}`);
+  const asideCommands = (aside.commands || []).filter((c) => c.startsWith('claudeCodePlus.'));
+  if (asideCommands.length === require('../package.json').contributes.commands.length) ok('its own commands are still there, each saying why nothing happens');
+  else bad(`commands while standing aside: ${JSON.stringify(aside.commands)}`);
+
+  const handed = run(shim);
+  const h = touched(handed);
+  if (!handed.threw && h.patching && h.core && h.hooks && h.oldCommands && h.renamed
+    && !(handed.said || []).some((s) => /Work Plan for Claude Code/.test(s[0]))) {
+    ok('with the old id\'s last version installed, the one that hands over, everything runs as usual');
+  } else bad(`with the old id's last version: ${JSON.stringify(h)}${handed.threw ? ' threw ' + handed.threw.slice(0, 300) : ''}`);
+}
+
+/* Uninstalling this extension puts Claude Code back and unregisters the plugin. With the old extension installed as
+   itself in the same folder, that would take the patch and the plugin out from under it, so the folder is left to it; in
+   another editor's folder an old copy counts the same as a copy of this one. */
+console.log('\nan uninstall while the old extension is still installed');
+{
+  const removal = require('../src/removal');
+  const ID = 'xnervwang.claude-code-plus';
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-uninst-old-'));
+  const realHome = process.env.HOME, realExt = process.env.VSCODE_EXTENSIONS;
+  const put = (dir, folder, pkg) => { fs.mkdirSync(path.join(dir, folder), { recursive: true }); if (pkg) fs.writeFileSync(path.join(dir, folder, 'package.json'), JSON.stringify(pkg)); };
+  const realPkg = { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.21', extensionDependencies: ['anthropic.claude-code'] };
+  const shimPkg = { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.22', extensionDependencies: [ID] };
+  try {
+    process.env.HOME = home;
+    delete process.env.VSCODE_EXTENSIONS;
+    const server = path.join(home, '.vscode-server', 'extensions'), stable = path.join(home, '.vscode', 'extensions');
+    put(server, ID + '-1.0.23', { name: 'claude-code-plus' });
+    fs.writeFileSync(path.join(server, '.obsolete'), JSON.stringify({ [ID + '-1.0.23']: true }));
+    put(server, LEGACY_ID + '-1.0.21', realPkg);
+    fs.mkdirSync(stable, { recursive: true });
+    const withOld = removal.uninstallPlan(server, ID);
+    if (!withOld.restore.includes(server) && withOld.lastCopy === false) ok('the old extension in this folder keeps its patch and the plugin');
+    else bad(`uninstall plan beside the old extension: ${JSON.stringify(withOld)}`);
+    const earlier = (d) => (typeof removal.earlierCopies === 'function' ? removal.earlierCopies(d).length : -1);
+    if (earlier(server) === 1 && earlier(stable) === 0) ok('a folder with the old extension installed as itself is told apart from one without');
+    else bad(`earlier copies: ${JSON.stringify([earlier(server), earlier(stable)])}`);
+    fs.rmSync(path.join(server, LEGACY_ID + '-1.0.21'), { recursive: true });
+    put(server, LEGACY_ID + '-1.0.22', shimPkg);
+    const withShim = removal.uninstallPlan(server, ID);
+    if (withShim.restore[0] === server && withShim.lastCopy === true) ok('the old id\'s last version, which patches nothing, does not count');
+    else bad(`uninstall plan beside the last version: ${JSON.stringify(withShim)}`);
+    put(stable, LEGACY_ID + '-1.0.21', realPkg);
+    const other = removal.uninstallPlan(server, ID);
+    if (other.restore[0] === server && !other.restore.includes(stable) && other.lastCopy === false) ok('another editor with the old extension keeps its folder and the plugin');
+    else bad(`uninstall plan with the old extension in another editor: ${JSON.stringify(other)}`);
+  } finally {
+    if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    if (realExt !== undefined) process.env.VSCODE_EXTENSIONS = realExt;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const deact = (/function deactivate\(\) \{([\s\S]*?)\n\}/.exec(ext) || [])[1] || '';
+  if (/removal\.earlierCopies\(path\.dirname\(selfPath\)\)\.length/.test(deact)) ok('deactivate leaves the folder alone the same way');
+  else bad('deactivate restores Claude Code even beside the old extension');
 }
 
 /* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no
