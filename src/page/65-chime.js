@@ -19,25 +19,63 @@
     permission: [[880, 0, 0.07], [880, 0.13, 0.07], [880, 0.26, 0.11]],
     question: [[1174, 0, 0.09], [880, 0.10, 0.16]],
   };
+  // A context made before anyone has clicked or typed in the panel starts suspended under the browser's autoplay rule
+  // and plays nothing. Each chime resumes it first, and so does the first click or key in the panel. If the browser
+  // refuses, resume() never settles, so the chime is dropped after 300 ms instead of sounding at the next click.
+  var audio = null;
+  var audioCtx = function(){
+    var Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    if (!audio || audio.state === 'closed') { try { audio = new Ctor(); } catch (e) { audio = null; } }
+    return audio;
+  };
+  var unlockAudio = function(){
+    var ac = audioCtx();
+    if (ac && ac.state === 'suspended' && typeof ac.resume === 'function') { try { ac.resume(); } catch (e) {} }
+  };
+  try {
+    document.addEventListener('pointerdown', unlockAudio, true);
+    document.addEventListener('keydown', unlockAudio, true);
+  } catch (e) {}
+  // Claude Code logs the type and request id of every message a panel sends (src/panel-load-watch.js reports the same
+  // way), so a chime leaves a line there with the context's state. Only a page's first chime and those that could not
+  // play are sent.
+  var toldChime = false;
+  var tellChime = function(kind, state){
+    if (toldChime && state === 'running') return;
+    toldChime = true;
+    try { acquireVsCodeApi().postMessage({ type: 'cce_chime', requestId: 'chime ' + kind + ' ' + state }); } catch (e) {}
+  };
   var beep = function(kind){
     try {
-      var Ctor = window.AudioContext || window.webkitAudioContext;
-      if (!Ctor) return;
-      var steps = TONES[kind] || TONES.done;
-      var ac = new Ctor(), t0 = ac.currentTime, until = t0;
-      for (var i = 0; i < steps.length; i++) {
-        var at = t0 + steps[i][1], dur = steps[i][2];
-        var osc = ac.createOscillator(), gain = ac.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(steps[i][0], at);
-        gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.exponentialRampToValueAtTime(0.05, at + 0.012);
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-        osc.connect(gain); gain.connect(ac.destination);
-        osc.start(at); osc.stop(at + dur + 0.02);
-        if (at + dur > until) until = at + dur;
-      }
-      setTimeout(function(){ try { ac.close(); } catch (e) {} }, (until - t0) * 1000 + 400);
+      var ac = audioCtx();
+      if (!ac) { tellChime(kind, 'unavailable'); return; }
+      var play = function(){
+        try {
+          var steps = TONES[kind] || TONES.done, t0 = ac.currentTime + 0.01;
+          for (var i = 0; i < steps.length; i++) {
+            var at = t0 + steps[i][1], dur = steps[i][2];
+            var osc = ac.createOscillator(), gain = ac.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(steps[i][0], at);
+            gain.gain.setValueAtTime(0.0001, at);
+            gain.gain.exponentialRampToValueAtTime(0.05, at + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+            osc.connect(gain); gain.connect(ac.destination);
+            osc.start(at); osc.stop(at + dur + 0.02);
+          }
+        } catch (e) {}
+        tellChime(kind, ac.state);
+      };
+      if (ac.state !== 'suspended' || typeof ac.resume !== 'function') { play(); return; }
+      var settled = false;
+      var go = function(){
+        if (settled) return;
+        settled = true;
+        if (ac.state === 'running') play(); else tellChime(kind, ac.state);
+      };
+      Promise.resolve(ac.resume()).then(go, go);
+      setTimeout(go, 300);
     } catch (e) {}
   };
   // Signals are read defensively: a build that renames or drops one of them should cost a chime, not the sweep.
@@ -99,6 +137,8 @@
       ev.preventDefault(); ev.stopPropagation();
       setChime(!chimeOn());
       paintMute();
+      // Turning the chimes on plays one.
+      if (chimeOn()) beep('done');
     });
     mode.parentElement.insertBefore(MUTE, mode);
     paintMute();

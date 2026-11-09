@@ -3480,6 +3480,56 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
   }
 }
 
+/* Chimes when the browser holds the audio context back. Run in a child, since resuming is asynchronous. */
+console.log('\nthe chimes, against the browser\'s autoplay rule');
+{
+  const script = `
+    const vm = require('vm'), fs = require('fs');
+    const fragment = fs.readFileSync(${JSON.stringify(path.join(__dirname, '..', 'src', 'page', '65-chime.js'))}, 'utf8');
+    const run = async (start, resumes) => {
+      const made = [], posts = [], listeners = {};
+      function Spy() {
+        const me = { state: start, currentTime: 0, destination: {}, started: 0, resumed: 0 };
+        const param = () => ({ setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+        me.createOscillator = () => ({ frequency: param(), connect() {}, start() { me.started++; }, stop() {} });
+        me.createGain = () => ({ gain: param(), connect() {} });
+        me.resume = () => { me.resumed++; if (!resumes) return new Promise(() => {}); me.state = 'running'; return Promise.resolve(); };
+        made.push(me);
+        return me;
+      }
+      const env = { window: { AudioContext: Spy, localStorage: { getItem: () => null, setItem() {} } }, Promise, setTimeout, MUTE: null,
+        document: { addEventListener: (t, f) => { listeners[t] = f; } }, isOff: () => false, sessionRef: { busy: { value: false } },
+        acquireVsCodeApi: () => ({ postMessage: (m) => posts.push(m.type + ' ' + m.requestId) }) };
+      vm.createContext(env);
+      vm.runInContext(fragment, env);
+      const turn = async () => { env.sessionRef.busy.value = true; vm.runInContext('watchIdle()', env);
+        env.sessionRef.busy.value = false; vm.runInContext('watchIdle()', env); await new Promise((r) => setTimeout(r, 400)); };
+      await turn(); await turn();
+      return { contexts: made.length, started: made.reduce((n, c) => n + c.started, 0), resumed: made.reduce((n, c) => n + c.resumed, 0),
+        posts, keyResumes: (() => { if (!made[0] || !listeners.keydown) return -1; made[0].state = 'suspended'; const was = made[0].resumed; listeners.keydown(); return made[0].resumed - was; })() };
+    };
+    (async () => process.stdout.write(JSON.stringify({ running: await run('running', true), unlocked: await run('suspended', true),
+      refused: await run('suspended', false) })))().catch((e) => process.stdout.write(JSON.stringify({ error: String(e && e.stack || e) })));
+  `;
+  let r;
+  try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8' })); } catch (e) { r = { error: e.message }; }
+  if (r.error) bad('the chime run threw: ' + r.error);
+  else {
+    const { running, unlocked, refused } = r;
+    if (running.contexts === 1 && running.started === 4 && JSON.stringify(running.posts) === '["cce_chime chime done running"]') {
+      ok('two finished turns play two chimes through one context, and only the first is told to Claude Code');
+    } else bad(`two turns with a running context: ${JSON.stringify(running)}`);
+    if (unlocked.resumed >= 1 && unlocked.started === 4 && JSON.stringify(unlocked.posts) === '["cce_chime chime done running"]') {
+      ok('a suspended context is resumed before the chime is played');
+    } else bad(`a suspended context the browser lets resume: ${JSON.stringify(unlocked)}`);
+    if (refused.started === 0 && JSON.stringify(refused.posts) === '["cce_chime chime done suspended","cce_chime chime done suspended"]') {
+      ok('a context that stays suspended plays nothing later, and each chime it held back is told to Claude Code');
+    } else bad(`a suspended context the browser does not let resume: ${JSON.stringify(refused)}`);
+    if (running.keyResumes === 1) ok('a key pressed in the panel resumes a suspended context');
+    else bad(`a key pressed with the context suspended resumed it ${running.keyResumes} time(s)`);
+  }
+}
+
 /* ── 16. one list of states, in three places ──
    The view draws a state, the plugin's scripts write and read it, and the skill tells the model what each one means.
    The three cannot import from each other - JavaScript, Python and prose - so this is what holds them together. A state
