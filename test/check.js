@@ -7969,8 +7969,10 @@ console.log('\nClaude Code\'s own source');
       c.tabsChanged(claudeTab); out.afterClaudeTab = c.source.isFocused('Y');
       c.tabsChanged(codexTab); out.afterCodexTab = c.source.isFocused('Y');
       c.pageFocus('Y'); c.tabsChanged(codexTab); out.sameTabAgain = c.source.isFocused('Y');
+      chat = 'Z'; out.overCodex = [c.followChat(), c.source.isFocused('Z'), c.source.isFocused('Y')];
       c.refocus();
       out.heard = heard.slice();
+      c.tabsChanged(claudeTab); chat = 'W'; out.overClaude = [c.followChat(), c.source.isFocused('W'), heard[heard.length - 1]];
       const notice = { title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] };
       c.setNotice(notice); c.setNotice(Object.assign({}, notice)); c.setNotice(null);
       out.notices = notices;
@@ -8024,6 +8026,9 @@ console.log('\nClaude Code\'s own source');
     if (o.afterClaudeTab === true && o.afterCodexTab === false && o.sameTabAgain === true) {
       ok('a focus signal is dropped once another agent\'s tab becomes active');
     } else bad(`focus after a tab change ${JSON.stringify([o.afterClaudeTab, o.afterCodexTab, o.sameTabAgain])}`);
+    if (JSON.stringify(o.overCodex) === '[true,false,true]' && JSON.stringify(o.overClaude) === '[true,true,"W"]') {
+      ok('Claude Code\'s active session is not claimed while another agent\'s tab is in front, and is once a Claude Code tab is');
+    } else bad(`following the active session ${JSON.stringify([o.overCodex, o.overClaude])}`);
     if (JSON.stringify(o.notices) === JSON.stringify([{ title: 'T', description: 'd', detail: 'x', command: 'c', arguments: [] }, null])) {
       ok('the plan notice fires only when it changes');
     } else bad(`plan notices ${JSON.stringify(o.notices)}`);

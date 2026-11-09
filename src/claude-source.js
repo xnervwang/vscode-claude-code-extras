@@ -216,11 +216,14 @@ function createClaudeSource(deps) {
       pending.delete(key);
       done(sent === true, typeof reason === 'string' ? reason : '');
     },
+    /* Returns whether the host's active session moved. The move is reported as focus only while the active tab is a
+       Claude Code panel or there is none: the host keeps that id while another agent's tab is in front, as it is at
+       start-up after a reload, and a sidebar panel getting focus reports itself (pageFocus). */
     followChat() {
       const id = deps.activeChat() || '';
       if (id === lastChat) return false;
       lastChat = id;
-      say(id);
+      if (!frontTab || isPanelTab(frontTab)) say(id);
       return true;
     },
     pageFocus(sessionId) {
