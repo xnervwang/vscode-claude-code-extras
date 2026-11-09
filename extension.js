@@ -242,7 +242,7 @@ async function activate(context) {
     handing = !!old && !earlier;
   } catch (_) { /* not there */ }
   if (earlier) { standAside(context, log, earlier); return; }
-  /* The old id's last version writes what is imported here as it activates, and the editor activates it only after this
+  /* The old id's last version writes export.json when it activates, and the editor activates it only after this
      activation has returned, since it depends on this extension. So the start waits for the file, and activation does
      not wait for the start. */
   const storage = context.globalStorageUri.fsPath;

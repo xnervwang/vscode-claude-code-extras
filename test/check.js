@@ -4567,7 +4567,7 @@ console.log('\nthe sweep of abandoned plans');
 }
 
 /* Settings were named claudeCodeExtras.* and then claudeCodeWorkPlan.*. Moving them is the one part of a rename that can
-   lose what a person set, so it is run against a stand-in for the editor's settings. */
+   lose a user's settings, so it is run against a stand-in for the editor's settings. */
 console.log('\nsettings moved from their old names');
 {
   // A real path: on macOS the temporary folder is reached through a symbolic link, and a module required by two spellings
@@ -4942,8 +4942,8 @@ console.log('\nan uninstall while the old extension is still installed');
 }
 
 /* shim/ is the last version of the old id. Auto-update brings it to everyone who has the old extension, and the editor
-   installs what it depends on, which is how they get this one. It must never touch Claude Code: the patch and the plugin
-   belong to this extension by then, and uninstalling the shim is exactly what it asks people to do. */
+   installs what it depends on. It must never touch Claude Code: the patch and the plugin belong to this extension by
+   then, and uninstalling the shim is exactly what it asks people to do. */
 console.log('\nthe old id\'s last version, shim/');
 {
   const dir = path.join(__dirname, '..', 'shim');
@@ -5160,7 +5160,7 @@ console.log('\nplans an uninstall copied aside come back');
   else bad(`registered again after a removal of the plugin alone: ${JSON.stringify({ listed: listedIn(pluginGone), back: back(pluginGone) })}`);
 }
 
-/* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no
+/* Names the rename keeps, because installed machines already use them: a marker or a backup suffix renamed would no
    longer be recognized in a Claude Code install patched by an earlier build, the marketplace and plugin names are what
    Claude Code registered and named the plan directory after, and the state keys are what the last version of the old
    extension exports for this one to read. */

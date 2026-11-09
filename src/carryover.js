@@ -26,8 +26,8 @@ const { RESCUE_PREFIX } = require('./plugin-install');
 const LEGACY_ID = 'xnervwang.claude-code-extras';
 const PLUS_ID = 'xnervwang.claude-code-plus';
 
-/** Whether a manifest of the old id is its last version, shim/ in this repository: it depends on this extension and
-    patches nothing. */
+/** Whether a manifest of the old id belongs to its last version, shim/ in this repository: it depends on this
+    extension and patches nothing. */
 function handsOver(pkg) {
   const deps = pkg && pkg.extensionDependencies;
   return Array.isArray(deps) && deps.some((d) => typeof d === 'string' && d.toLowerCase() === PLUS_ID);
@@ -41,7 +41,8 @@ function earlierBuild(ext) {
   return handsOver(pkg) ? '' : String(pkg.version || '?');
 }
 
-/* What the old id's last version exports from its state (shim/extension.js), named as they are stored there and here. */
+/* The state keys the old id's last version exports (shim/extension.js); both extensions store them under these
+   names. */
 const EXPORT_FILE = 'export.json';
 const EXPORTED_KEYS = ['claudeCodeExtras.removed', 'claudeCodeExtras.projectDirDays'];
 
