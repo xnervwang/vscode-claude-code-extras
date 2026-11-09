@@ -7436,11 +7436,13 @@ console.log('\nbackground sessions left out of the session list');
     const later = ids(bg.withoutBackground(entries, cwd, root));
     const long = ids(bg.withoutBackground([{ id: E }, { id: B }], '/' + 'x'.repeat(240), root));
     const more = ids(bg.withoutBackground([{ id: F }, { id: G }, { id: B }], cwd, root));
+    const again = ids(bg.withoutBackground([{ id: F }, { id: G }, { id: B }], cwd, root));
     if (JSON.stringify([first, later, long]) === JSON.stringify([[B, C, D, 'remote:x'], [B, D, 'remote:x'], [B]])) {
       ok('a session whose first record says sessionKind "bg" is left out; text quoting it in a message is not that field; one not yet started is read again later; a missing transcript keeps its row; a folder name past 200 characters falls back to a search');
     } else bad(`left in ${JSON.stringify([first, later, long])}`);
-    if (JSON.stringify(more) === JSON.stringify([B])) ok('claude -p sessions and transcripts with no messages are left out');
-    else bad(`with an SDK session and an empty transcript, left in ${JSON.stringify(more)}`);
+    if (JSON.stringify(more) === JSON.stringify([B]) && JSON.stringify(again) === JSON.stringify([B])) {
+      ok('claude -p sessions and transcripts with no messages are left out, the second time they are listed too');
+    } else bad(`with an SDK session and an empty transcript, left in ${JSON.stringify(more)}, then ${JSON.stringify(again)}`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 
   const he = host.EDITS.find((x) => x.name === 'session list leaves out background sessions');

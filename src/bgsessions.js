@@ -59,7 +59,7 @@ function kindOf(file) {
 
 /* A session whose kind cannot be read yet is treated as an ordinary one, and read again next time. */
 function isBackground(id, cwd, projects = projectsDir()) {
-  if (kinds.has(id)) return kinds.get(id) === 'bg';
+  if (kinds.has(id)) return HIDDEN.has(kinds.get(id));
   const dir = folderName(cwd);
   let file = dir ? path.join(projects, dir, id + '.jsonl') : '';
   if (!file || !fs.existsSync(file)) file = transcriptOf(id, projects);
