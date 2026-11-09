@@ -4238,6 +4238,31 @@ console.log('\nan uninstall puts Claude Code back at once');
     fs.rmSync(root, { recursive: true, force: true });
   }
 
+  {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-badbak-'));
+    const copy = path.join(root, 'anthropic.claude-code-9.9.9-linux-x64');
+    const inUse = '/* in use */ var x = 1;\n';
+    const wrong = [];
+    for (const a of ADAPTERS) {
+      const f = a.targetFile(copy);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      for (const backup of ['', 'var cut = function () {']) {
+        fs.writeFileSync(f, inUse);
+        fs.writeFileSync(f + a.BACKUP_SUFFIX, backup);
+        const r = a.restore(copy);
+        if (r.changed || fs.readFileSync(f, 'utf8') !== inUse || !fs.existsSync(f + a.BACKUP_SUFFIX)) {
+          wrong.push(`${a.name} with ${JSON.stringify(backup)}: ${r.message}`);
+        }
+      }
+    }
+    if (!wrong.length) ok('an empty or cut-off backup is left where it is and the file in use is kept');
+    else bad(`a broken backup was put back: ${wrong.join('; ')}`);
+    fs.rmSync(root, { recursive: true, force: true });
+    const direct = ['host.js', 'webview.js'].filter((n) => /fs\.writeFileSync\(backup,/.test(fs.readFileSync(path.join(__dirname, '..', 'src', n), 'utf8')));
+    if (!direct.length) ok('the backup is written through writeAtomic, like the patched file');
+    else bad(`${direct.join(', ')} still write the backup in place`);
+  }
+
   /* The rest goes to a process that outlives the host: the same uninstall.js, run as plain Node, detached. */
   {
     const calls = [];

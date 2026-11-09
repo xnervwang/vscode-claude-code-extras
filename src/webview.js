@@ -759,12 +759,19 @@ function apply(claudeExtensionPath, opts = {}) {
     }
     const r = patchSource(original);
     if (r.error) return no(r.error);
-    if (state === 'clean') fs.writeFileSync(backup, original);
+    if (state === 'clean') writeAtomic(backup, original);
     writeAtomic(file, r.out);
     changed = true; message = 'patched';
   }
   const liveChanged = writeLive(claudeExtensionPath, opts);
   return { changed, liveChanged, current: true, message };
+}
+
+/* A write that fails on a full disk can leave the backup empty or truncated. Moving that over the bundle would break
+   Claude Code, so a backup has to parse before it is put back. */
+function wholeScript(text, filename) {
+  if (!text) return false;
+  try { new vm.Script(text, { filename }); return true; } catch (_) { return false; }
 }
 
 /* The backup is moved over the file in one step, so no window can find a clean file beside its backup. A window patching
@@ -788,6 +795,7 @@ function restore(claudeExtensionPath) {
   if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
   const original = fs.readFileSync(backup, 'utf8');
   if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
+  if (!wholeScript(original, 'index.js')) return { changed: false, message: 'backup is empty or cut off; not restored' };
   return moveBack(backup, file);
 }
 
@@ -802,6 +810,6 @@ module.exports = {
   SWITCHES,
   id: 'anthropic.claude-code', name: 'Claude Code panel',
   VERSION, MARK, ANY_MARK, BACKUP_SUFFIX, EDITS, SCRIPT,
-  safeColor, patchSource, status, apply, restore, moveBack, findInstalls, webviewFile, targetFile: webviewFile, writeLive, liveCss,
+  safeColor, patchSource, status, apply, restore, moveBack, wholeScript, findInstalls, webviewFile, targetFile: webviewFile, writeLive, liveCss,
   writeEffort, pruneEfforts, EFFORT_PREFIX, pinsProperty,
 };

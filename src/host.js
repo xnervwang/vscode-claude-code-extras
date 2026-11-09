@@ -324,7 +324,7 @@ function apply(claudeExtensionPath) {
   }
   const r = patchSource(original);
   if (r.error) return no(r.error);
-  if (state === 'clean') fs.writeFileSync(backup, original);
+  if (state === 'clean') writeAtomic(backup, original);
   writeAtomic(file, r.out);
   return { changed: true, liveChanged: false, current: true, message: 'patched' };
 }
@@ -336,7 +336,9 @@ function restore(claudeExtensionPath) {
   if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
   const original = fs.readFileSync(backup, 'utf8');
   if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
-  return require('./webview').moveBack(backup, file);
+  const { wholeScript, moveBack } = require('./webview');
+  if (!wholeScript(original, 'extension.js')) return { changed: false, message: 'backup is empty or cut off; not restored' };
+  return moveBack(backup, file);
 }
 
 module.exports = {
