@@ -61,11 +61,16 @@
       try {
         box.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
       } catch (e) { /* checked below */ }
-      setTimeout(function(){
+      /* Sent once the input is first seen empty; anything typed after that is left alone. When the wait runs out, the
+         input is cleared only if it still holds just the answer. */
+      var waited = 0;
+      var look = function(){
         if (!inputText(box)) { answerResult(m.id, true, ''); return; }
-        emptyInput(box);
+        if ((waited += 50) < 800) { setTimeout(look, 50); return; }
+        if (squash(box.textContent) === squash(m.text)) emptyInput(box);
         answerResult(m.id, false, 'left-in-input');
-      }, 800);
+      };
+      setTimeout(look, 50);
     }, 60);
   };
   var listenForAnswers = function(){

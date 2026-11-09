@@ -7798,18 +7798,21 @@ console.log('\nanswering from the Conversations tab');
       const mark = ['CCE', 'ANSWER:'].join('-');
       const html = '<!doctype html><html><body><pre id="out"></pre>'
         + '<div id="box" role="textbox" aria-label="Message input" contenteditable="plaintext-only"></div><script>'
-        + 'var posted = [], sent = [], ctrlOnly = false, deaf = false, leftover = null;'
+        + 'var posted = [], sent = [], ctrlOnly = false, deaf = false, slow = false, leftover = null;'
         + 'window.acquireVsCodeApi = function(){ return { postMessage: function(m){ posted.push(m); } }; };'
         + 'document.getElementById("box").addEventListener("keydown", function(e){'
         + '  if (deaf || e.key !== "Enter" || e.shiftKey) return;'
         + '  if (ctrlOnly && !(e.ctrlKey || e.metaKey)) return;'
-        + '  e.preventDefault(); sent.push(this.innerText); this.textContent = ""; });'
+        + '  e.preventDefault(); var b = this, send = function(){ sent.push(b.innerText); b.textContent = ""; };'
+        + '  if (slow) setTimeout(send, 300); else send(); });'
         + '</script><script>' + require('../src/webview').SCRIPT + '</script><script>'
         + 'var host = function(text, id){ window.postMessage({ type: "from-extension", message: { type: "cce_answer", sessionId: "S", text: text, id: id } }, "*"); };'
         + 'setTimeout(function(){ host("Row 1, my answer:\\nline two", "a1"); }, 2500);'
         + 'setTimeout(function(){ document.getElementById("box").textContent = "mine"; host("not now", "a2"); }, 4500);'
         + 'setTimeout(function(){ document.getElementById("box").textContent = ""; ctrlOnly = true; host("with ctrl", "a3"); }, 6500);'
         + 'setTimeout(function(){ deaf = true; host("ignored", "a4"); }, 8500);'
+        + 'setTimeout(function(){ deaf = false; slow = true; host("slow one", "a6");'
+        + '  setTimeout(function(){ document.getElementById("box").textContent = "next"; }, 420); }, 9600);'
         + 'setTimeout(function(){ var b = document.getElementById("box"); leftover = b.textContent; b.remove(); host("nowhere", "a5");'
         + '  setTimeout(function(){ document.getElementById("out").textContent = "' + mark + '" + JSON.stringify({ posted: posted, sent: sent, leftover: leftover }); }, 1500); }, 10500);'
         + '</script></body></html>';
@@ -7827,9 +7830,10 @@ console.log('\nanswering from the Conversations tab');
       } catch (_) { got = null; }
       const results = got ? got.posted.filter((m) => m.type === 'cce_answer_result').map((m) => [m.id, m.sent, m.reason]) : [];
       if (got && JSON.stringify(results) === JSON.stringify([['a1', true, ''], ['a2', false, 'draft'], ['a3', true, ''],
-        ['a4', false, 'left-in-input'], ['a5', false, 'no-input']]) && got.leftover === ''
-        && got.sent.length === 2 && got.sent[0].replace(/\s+/g, ' ').trim() === 'Row 1, my answer: line two' && got.sent[1].trim() === 'with ctrl') {
-        ok('in a browser the panel types an answer into an empty input and sends it, Ctrl+Enter mode included, leaves text of yours alone, and takes back one it could not send');
+        ['a4', false, 'left-in-input'], ['a6', true, ''], ['a5', false, 'no-input']]) && got.leftover === 'next'
+        && got.sent.length === 3 && got.sent[0].replace(/\s+/g, ' ').trim() === 'Row 1, my answer: line two' && got.sent[1].trim() === 'with ctrl'
+        && got.sent[2].trim() === 'slow one') {
+        ok('in a browser the panel types an answer into an empty input and sends it, Ctrl+Enter mode included, leaves text of yours alone, takes back one it could not send, and keeps what you type once a slow send has gone');
       } else bad(`answer in the page: ${at === -1 ? 'no result (exit ' + r.status + ')' : JSON.stringify(got)}`);
     }
   }
