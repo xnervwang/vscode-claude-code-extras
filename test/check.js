@@ -4692,7 +4692,7 @@ console.log('\nthe name a person sees');
   else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
 }
 
-/* ── the rename to Claude Code Plus ──
+/* -- the rename to Claude Code Plus --
    The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
    runs extension.js against a stand-in editor in a child process with its own home folder, so what is checked is what
    activation does: which commands it registers, what it carries over from the old extension's storage, and what it leaves
