@@ -22,6 +22,21 @@
      as the fallback. The two are the same hue; this is the lighter of them, which is what a dark background needs. */
   var RAIL_INK = 'var(--vscode-textLink-activeForeground, var(--vscode-focusBorder))';
   var PANEL_W = 280, PANEL_GAP = RAIL_W + 2;
+  /* While the rail shows, the message list gets extra right padding: the rail's width plus a small gap. The panel's own
+     padding there is 20px, narrower than the rail with its border, so without this the rail sat over the right end of
+     each user message and, in a narrow panel, over the last words of a reply's lines. */
+  var RAIL_ROOM = RAIL_W + 1 + 8;
+  var roomStyle = null;
+  var keepRoom = function(on){
+    if (on && !roomStyle) {
+      roomStyle = document.createElement('style');
+      roomStyle.setAttribute('data-cce-rail-room', '1');
+      roomStyle.textContent = ':root[data-cce-rail] [class*="messagesContainer_"]{padding-right:' + RAIL_ROOM + 'px !important;}';
+      head.appendChild(roomStyle);
+    }
+    if (on) document.documentElement.setAttribute('data-cce-rail', '1');
+    else document.documentElement.removeAttribute('data-cce-rail');
+  };
 
   var ensureTip = function(){
     if (TIP && TIP.isConnected) return;
@@ -219,7 +234,9 @@
     s.border = '1px solid var(--vscode-widget-border, rgba(255,255,255,0.14))';
     s.borderRight = 'none';
     s.color = RAIL_INK;
-    var plain = s.background, lit = 'var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.12))';
+    /* The theme's hover colour is translucent, so it is drawn over the button's own background. */
+    var plain = s.background, tint = 'var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.12))';
+    var lit = 'linear-gradient(' + tint + ',' + tint + '),' + plain;
     b.addEventListener('mouseenter', function(){ s.background = lit; });
     b.addEventListener('mouseleave', function(){ s.background = plain; });
     b.addEventListener('click', function(ev){ ev.stopPropagation(); onClick(); });
@@ -401,7 +418,7 @@
   var syncMap = function(items, compEls){
     // Switched off, the rail and the list go and nothing is built; the keys stop with them.
     if (isOff('toc')) {
-      RAILBOX = dropControl(RAILBOX); PANEL = dropControl(PANEL); hideTip();
+      RAILBOX = dropControl(RAILBOX); PANEL = dropControl(PANEL); hideTip(); keepRoom(false);
       PROMPT_EL = []; SIG = '';
       return;
     }
@@ -419,6 +436,7 @@
     if (!texts.length) {
       if (RAILBOX) RAILBOX.style.display = 'none';
       if (PANEL) PANEL.style.display = 'none';
+      keepRoom(false);
       return;
     }
     // Compaction rules belong to the conversation timeline, not to a single agent's tool trace.
@@ -426,6 +444,7 @@
     var sig = VIEW + '|' + comps.length;
     ensureUI();
     RAILBOX.style.display = 'flex';
+    keepRoom(true);
     if (panelOpen()) fitPanel();
     PROMPT_EL = nodes;
     if (sig === SIG && sameEntries(nodes, texts, whens)) return;

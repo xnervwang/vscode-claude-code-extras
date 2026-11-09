@@ -142,6 +142,19 @@ else bad(`the injected script calls ${undeclared.length} name(s) it never declar
 if (webview.SCRIPT.includes('!out.message; f = f.return')) ok('hot loop keeps its early exit');
 else bad('hot loop lost its early exit — the fiber walk will run to full depth on every element');
 
+/* The rail on the right edge sits over the panel, so without room kept for it, it covers the last 7px of each user
+   message and, at 400px, the last word of a reply's line. */
+{
+  const toc = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '45-toc.js'), 'utf8');
+  const shown = /RAILBOX\.style\.display = 'flex';\n\s*keepRoom\(true\);/.test(toc);
+  const hidden = /RAILBOX\.style\.display = 'none';\n[^\n]*\n\s*keepRoom\(false\);/.test(toc) && /dropControl\(PANEL\); hideTip\(\); keepRoom\(false\);/.test(toc);
+  const rule = /\[class\*="messagesContainer_"\]\{padding-right:' \+ RAIL_ROOM \+ 'px !important;\}/.test(toc) && /var RAIL_ROOM = RAIL_W \+ 1 \+ \d+;/.test(toc);
+  if (shown && hidden && rule) ok('while the rail shows, the messages keep its width free, and get it back when it is hidden or switched off');
+  else bad(`room for the rail: shown ${shown}, hidden ${hidden}, rule ${rule}`);
+  if (/var lit = 'linear-gradient\(' \+ tint \+ ',' \+ tint \+ '\),' \+ plain;/.test(toc)) ok('a rail button\'s hover colour is laid over its own background, so nothing shows through it');
+  else bad('a rail button\'s hover colour replaces its background, and the theme\'s is translucent');
+}
+
 /* Diagnostics for one investigation are marked TEMPORARY; the injected script runs in every panel, so none may be
    left. */
 if (!/TEMPORARY/.test(webview.SCRIPT)) ok('the injected script carries nothing marked temporary');
