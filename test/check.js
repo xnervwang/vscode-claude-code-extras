@@ -5700,6 +5700,21 @@ console.log('\nwhat a tick and a change of setting cost');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
+/* On Windows a command started without windowsHide flashes a console window. */
+console.log('\nno console window for the commands this extension starts');
+{
+  const files = ['extension.js', 'uninstall.js', ...fs.readdirSync(path.join(__dirname, '..', 'src')).filter((f) => f.endsWith('.js')).map((f) => 'src/' + f)];
+  const bare = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    for (const m of src.matchAll(/(?:\b(?:cp|child_process)\.)?\b(?:execFile|execFileSync|spawn|spawnSync|execSync)\(([^;]*)/g)) {
+      if (!/windowsHide: true/.test(m[1])) bare.push(f + ': ' + m[0].slice(0, 80));
+    }
+  }
+  if (!bare.length) ok('every command this extension starts is started with windowsHide');
+  else bad('started without windowsHide: ' + bare.join('; '));
+}
+
 /* Finding Python can take seconds; if Remove is run meanwhile, the plugin is not registered. */
 console.log('\nRemove pressed while the plugin is being registered');
 {

@@ -170,7 +170,7 @@ function lastLine(stdout, stderr, err) {
 
 function run(bin, args) {
   return new Promise((resolve) => {
-    cp.execFile(bin, args, { timeout: TIMEOUT_MS }, (err, stdout, stderr) => {
+    cp.execFile(bin, args, { timeout: TIMEOUT_MS, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, said: lastLine(stdout, stderr, err) });
     });
   });
@@ -300,7 +300,7 @@ function removeSync(claudeBin, stamp) {
   const saved = rescuePlans(stamp);
   if (saved.failed) return '';
   for (const args of [['plugin', 'uninstall', REF], ['plugin', 'marketplace', 'remove', MARKETPLACE]]) {
-    try { cp.execFileSync(claudeBin, args, { timeout: TIMEOUT_MS, stdio: 'ignore' }); }
+    try { cp.execFileSync(claudeBin, args, { timeout: TIMEOUT_MS, stdio: 'ignore', windowsHide: true }); }
     catch (_) { /* already gone, or the binary went with the extension it lived in; either way nothing is left to do */ }
   }
   return saved.to;

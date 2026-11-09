@@ -140,6 +140,7 @@ function finishLater(extensionPath, spawn = cp.spawn) {
   const child = spawn(process.execPath, [path.join(extensionPath, 'uninstall.js')], {
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
     // On a desktop install the host's binary is Electron, which runs a script as plain Node only when told to.
     env: Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' }),
   });
