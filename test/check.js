@@ -4583,7 +4583,7 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
       pi.stage(from, to);
       pi.stage(from, to);
       // Another window puts the same plugin in place between this one's copy and its rename.
-      fs.renameSync = (a, b) => { realCp.call(fs, from, b, { recursive: true }); return realRename.call(fs, a, b); };
+      fs.renameSync = (a, b) => { if (String(a).endsWith('.new')) realCp.call(fs, from, b, { recursive: true }); return realRename.call(fs, a, b); };
       try { pi.stage(from, to); } catch (e) { threw = e.message; }
     } finally { fs.cpSync = realCp; fs.renameSync = realRename; }
     const left = fs.readdirSync(path.dirname(to));
@@ -4591,6 +4591,18 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
       && !threw && left.join() === 'claude-plugin' && pi.digest(to) === pi.digest(from)) {
       ok('the plugin is staged through a folder of this process\'s own, and finding the same plugin already in place is not a failure');
     } else bad(`staging: copies ${JSON.stringify(copies.map((c) => path.basename(c)))}, threw ${JSON.stringify(threw)}, left ${JSON.stringify(left)}`);
+    /* A newer plugin whose folder cannot be renamed into place, as on Windows while a scanner holds it open. */
+    fs.writeFileSync(path.join(from, 'agent-work-plan', 'a.txt'), 'newer plugin');
+    let refused = '';
+    try {
+      fs.renameSync = (a, b) => { if (String(a).endsWith('.new')) { const e = new Error('operation not permitted'); e.code = 'EPERM'; throw e; } return realRename.call(fs, a, b); };
+      try { pi.stage(from, to); } catch (e) { refused = e.code || e.message; }
+    } finally { fs.renameSync = realRename; }
+    const kept = fs.existsSync(path.join(to, 'agent-work-plan', 'a.txt')) ? fs.readFileSync(path.join(to, 'agent-work-plan', 'a.txt'), 'utf8') : '';
+    const after = fs.readdirSync(path.dirname(to));
+    if (refused === 'EPERM' && kept === 'plugin' && after.join() === 'claude-plugin') {
+      ok('a new copy that cannot be renamed into place leaves the old one where it was, and says why');
+    } else bad(`a refused rename: threw ${JSON.stringify(refused)}, kept ${JSON.stringify(kept)}, left ${JSON.stringify(after)}`);
     fs.rmSync(root, { recursive: true, force: true });
   }
 

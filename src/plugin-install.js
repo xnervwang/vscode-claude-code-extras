@@ -205,20 +205,27 @@ function digest(dir) {
  *
  * The copy is built in a per-process folder because every window stages into the same place. A rename that fails
  * because another window just installed the same plugin is not an error.
+ *
+ * The old copy is renamed aside, and renamed back if the new one cannot be moved in: on Windows a folder that a virus
+ * scanner or the indexer has open cannot be renamed for a moment, and deleting the old copy first would leave none.
  */
 function stage(from, to, fit = () => {}) {
-  const next = `${to}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.new`;
+  const tag = `${to}.${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
+  const next = tag + '.new', old = tag + '.old';
   fs.mkdirSync(path.dirname(to), { recursive: true });
-  let want = '';
+  let want = '', aside = false;
   try {
     fs.cpSync(from, next, { recursive: true });
     fit(next);
     want = digest(next);
-    fs.rmSync(to, { recursive: true, force: true });
+    try { fs.renameSync(to, old); aside = true; } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     fs.renameSync(next, to);
   } catch (e) {
     fs.rmSync(next, { recursive: true, force: true });
+    if (aside && !fs.existsSync(to)) { try { fs.renameSync(old, to); aside = false; } catch (_) { /* left beside it */ } }
     if (!want || digest(to) !== want) throw e;
+  } finally {
+    if (aside && fs.existsSync(to)) fs.rmSync(old, { recursive: true, force: true });
   }
 }
 
