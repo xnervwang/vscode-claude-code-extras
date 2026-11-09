@@ -70,7 +70,9 @@ const REOPEN_SETTING = PREFIX + 'reopenDroppedTabs';
 const RECENT_SETTING = PREFIX + 'recentClosedSessions';
 const HIDE_BG_SETTING = PREFIX + 'hideBackgroundSessions';
 const WORK_PLAN_SETTING = PREFIX + 'workPlan';
-/* Read by the plugin's hooks, which are separate processes and cannot see editor settings. Keys match plan_path.py. */
+/* Read by the plugin's hooks, which are separate processes and cannot see editor settings. Keys match plan_path.py.
+   package.json makes them application settings, since they go into one file that every conversation on the machine
+   reads. */
 const HOOK_SETTINGS = {
   enabled: WORK_PLAN_SETTING,
   offerMinTurns: PREFIX + 'workPlanOfferMinTurns',
@@ -154,6 +156,10 @@ async function renameSettings(context) {
   const contrib = (context.extension.packageJSON.contributes || {}).configuration || {};
   const names = [].concat(contrib).flatMap((c) => Object.keys((c && c.properties) || {}))
     .filter((k) => k.startsWith(PREFIX)).map((k) => k.slice(PREFIX.length));
+  /* An application setting cannot be written to a workspace or folder, so those scopes skip it. An old name's value
+     there is left alone and does nothing. */
+  const userOnly = new Set([].concat(contrib).flatMap((c) => Object.entries((c && c.properties) || {}))
+    .filter(([, v]) => v && v.scope === 'application').map(([k]) => k.slice(PREFIX.length)));
   const T = vscode.ConfigurationTarget;
   const groups = [];
   const all = () => vscode.workspace.getConfiguration();
@@ -175,6 +181,7 @@ async function renameSettings(context) {
       const conf = sc.conf();
       let moved = 0, left = 0;
       for (const name of names) {
+        if (sc.target !== T.Global && userOnly.has(name)) continue;
         const found = LEGACY_PREFIXES.map((p) => {
           const old = conf.inspect(p + name);
           return { key: p + name, value: old ? old[sc.field] : undefined };

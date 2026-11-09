@@ -3468,6 +3468,16 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
       ok('the hooks and the source read the same work plan switch, on by default');
     } else bad(`setting ${JSON.stringify(setting && setting.default)}, or extension.js reads another switch`);
   }
+  {
+    const props = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).contributes.configuration.properties;
+    const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+    const map = (/const HOOK_SETTINGS = \{([\s\S]*?)\};/.exec(ext) || [])[1] || '';
+    const names = [...map.matchAll(/PREFIX \+ '(\w+)'/g)].map((m) => 'claudeCodePlus.' + m[1]);
+    if (/WORK_PLAN_SETTING/.test(map)) names.push('claudeCodePlus.workPlan');
+    const scoped = names.filter((n) => props[n] && props[n].scope === 'application');
+    if (names.length === 5 && scoped.length === names.length) ok('every setting the hooks read is an application setting');
+    else bad(`hook settings ${JSON.stringify(names)}, application-scoped ${JSON.stringify(scoped)}`);
+  }
 }
 
 /* ── 16. one list of states, in three places ──
@@ -4620,6 +4630,7 @@ console.log('\nsettings moved from their old names');
       inspect: (k) => ({ key: k, globalValue: (store.values.globalValue || {})[k], workspaceValue: (store.values.workspaceValue || {})[k],
         workspaceFolderValue: (store.values.workspaceFolderValue || {})[k] }),
       update: async (k, v, target) => {
+        if (target !== 1 && store.userOnly && store.userOnly.has(k)) throw new Error('can be written only into User settings');
         if (store.refuseWrite && !legacy(k)) throw new Error('refused');
         if (store.refuseLegacyClear && legacy(k)) throw new Error('not a registered configuration');
         const f = FIELD[target], bag = store.values[f] || (store.values[f] = {});
@@ -4650,10 +4661,11 @@ console.log('\nsettings moved from their old names');
   const run = async () => {
     const results = [];
     const reset = (values) => { vs.store.values = JSON.parse(JSON.stringify(values)); vs.store.refuseLegacyClear = false; vs.store.refuseWrite = false; };
+    vs.store.userOnly = new Set(Object.entries(manifest.contributes.configuration.properties).filter(([, v]) => v.scope === 'application').map(([k]) => k));
 
     reset({ globalValue: { 'claudeCodeExtras.enabled': false, 'claudeCodeExtras.userMessageColor': 'blue', 'claudeCodePlus.userMessageColor': 'red',
       'claudeCodeWorkPlan.show.chime': false, 'claudeCodeWorkPlan.sessionPins': false, 'claudeCodeExtras.sessionPins': true },
-      workspaceValue: { 'claudeCodeWorkPlan.workPlan': false } });
+      workspaceValue: { 'claudeCodeWorkPlan.hideBackgroundSessions': false, 'claudeCodeWorkPlan.workPlan': false } });
     const c1 = context();
     const said = await ext.renameSettings(c1);
     results.push([at('globalValue', 'claudeCodePlus.enabled') === false && at('globalValue', 'claudeCodeExtras.enabled') === undefined,
@@ -4665,8 +4677,11 @@ console.log('\nsettings moved from their old names');
       'with a value under both old names, the later one is copied and both are cleared']);
     results.push([at('globalValue', 'claudeCodePlus.userMessageColor') === 'red' && at('globalValue', 'claudeCodeExtras.userMessageColor') === undefined,
       'a value already set under the new name is not overwritten']);
-    results.push([at('workspaceValue', 'claudeCodePlus.workPlan') === false && at('globalValue', 'claudeCodePlus.workPlan') === undefined,
+    results.push([at('workspaceValue', 'claudeCodePlus.hideBackgroundSessions') === false && at('globalValue', 'claudeCodePlus.hideBackgroundSessions') === undefined,
       'a workspace value stays a workspace value']);
+    results.push([at('workspaceValue', 'claudeCodePlus.workPlan') === undefined && at('workspaceValue', 'claudeCodeWorkPlan.workPlan') === false
+      && c1.workspaceState.get('claudeCodePlus.settingsRenamed') === true,
+      'a workspace value of a setting only User settings can hold stays under its old name and the workspace is still done']);
     results.push([/4 in user/.test(said) && /1 in workspace/.test(said) && c1.globalState.get('claudeCodePlus.settingsRenamed') === true,
       \`what was moved is said, per scope, and the scope is recorded under the new prefix ("\${said}")\`]);
 

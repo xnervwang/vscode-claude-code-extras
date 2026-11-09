@@ -134,17 +134,20 @@
           "markdownDescription": "Record how long a panel takes before it starts loading, read out of Claude Code's own log. Each panel also writes into that same log one line as it starts, and more when its own files take over 3 s to arrive or never do - including a panel that stays blank, which nothing else can see from inside. Turned off, nothing is read and nothing is written - not even the check for whether the log grew - and panels opened afterwards carry no report."
         },
         "claudeCodePlus.workPlanOfferMinTurns": {
+          "scope": "application",
           "type": "number",
           "default": 3,
           "minimum": 1,
           "markdownDescription": "How many times you have to have spoken before a conversation with no work plan is told it could keep one. A plan is for a conversation that branches, and a session handed one task and left to do it cannot branch: of 61 conversations offered a plan, the 53 that were single-task workers all declined, while every one that wanted a plan had spoken at least three times."
         },
         "claudeCodePlus.workPlanQuietWhenReplyMatches": {
+          "scope": "application",
           "type": "string",
           "default": "",
           "markdownDescription": "A regular expression (Python syntax) tested against the conversation's latest reply. When it matches, the hooks that ask for the plan to be brought up to date before a compaction, and point at it after one, say nothing. Meant for a conversation that relays another model's replies word for word. Empty matches nothing."
         },
         "claudeCodePlus.workPlanOfferMinToolCalls": {
+          "scope": "application",
           "type": "number",
           "default": 25,
           "minimum": 1,
@@ -284,11 +287,13 @@
           "markdownDescription": "OPEN SESSIONS at the top of the session list: the conversations this window has open in an editor tab or in the sidebar, most recently active first, each with its status dot. Clicking one switches to it. Turning it off stops the work, not only the drawing, and takes effect without a reload."
         },
         "claudeCodePlus.workPlan": {
+          "scope": "application",
           "type": "boolean",
           "default": true,
           "markdownDescription": "Hooks put the plan's open rows in front of Claude every turn and remind it to reconcile them at the end of a turn. With the setting off, Claude is told nothing about the plan and plan files cannot be written.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Claude Code Plus: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
         },
         "claudeCodePlus.tellClaudeYourTimeZone": {
+          "scope": "application",
           "type": "boolean",
           "default": true,
           "markdownDescription": "Tell Claude the time zone you read the panel in, and the time there, so it gives you times in your zone rather than in the zone of the machine it runs on. It is said, in about 90 tokens, when a conversation starts, and again after a compaction, when either side's date turns over, when the offset changes, and after every 100k tokens of context. Nothing is said while the two zones agree, as they usually do when VS Code and Claude Code run on the same machine. Takes effect from your next message, without a reload."
