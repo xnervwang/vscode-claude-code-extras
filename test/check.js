@@ -2304,6 +2304,16 @@ console.log('\nabandoned work plans');
         return t;
       },
       (t, r) => r.deleted === 0 && left(t.dir).join() === [id(1) + '.json', id(2) + '.json', id(2) + '.json.lock'].join()],
+    /* A hook killed between writing a plan's temporary copy and renaming it leaves the copy behind for good. */
+    ['a plan\'s temporary copy a day old is removed, and a younger one is left to the hook writing it',
+      () => {
+        const t = build([id(1), id(2)], [[id(1), NEW], [id(2), NEW]]);
+        fs.writeFileSync(path.join(t.dir, id(1) + '.json.4242.tmp'), '{');
+        fs.utimesSync(path.join(t.dir, id(1) + '.json.4242.tmp'), OLD / 1000, OLD / 1000);
+        fs.writeFileSync(path.join(t.dir, id(2) + '.json.4343.tmp'), '{');
+        return t;
+      },
+      (t, r) => r.deleted === 0 && left(t.dir).join() === [id(1) + '.json', id(2) + '.json', id(2) + '.json.4343.tmp'].join()],
     ['what the sweep read of the transcripts comes back with it, for the efforts beside the panel',
       () => build([id(1), id(2)], []),
       (t, r) => r.live instanceof Set && r.live.size === 2 && r.live.has(id(1))],
