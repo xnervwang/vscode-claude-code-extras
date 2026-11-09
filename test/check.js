@@ -4687,8 +4687,8 @@ console.log('\nthe name a person sees');
   } else bad('old names in the manifest: ' + JSON.stringify([manifest.name, manifest.displayName, manifest.repository, stray, oldTitle, titled]));
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').split('\n');
   const old = readme.filter((l) => /Extras for Claude Code|Work Plan for Claude Code|claudeCodeWorkPlan\.|claudeCodeExtras\.|xnervwang\.claude-code-extras/.test(l)
-    && !/used to be/.test(l));
-  if (!old.length && readme[0] === '# Claude Code Plus') ok('the README is titled Claude Code Plus and names nothing by an old name, apart from the line saying what it used to be');
+    && !/used to be|are copied to the same names under/.test(l));
+  if (!old.length && readme[0] === '# Claude Code Plus') ok('the README is titled Claude Code Plus and names nothing by an old name, apart from saying what it used to be and where old settings went');
   else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
 }
 
