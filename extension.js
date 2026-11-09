@@ -41,6 +41,7 @@ const deleteSession = require('./src/deletesession');
 const recentClosed = require('./src/recentclosed');
 const ADAPTERS = require('./src/adapters');
 const removal = require('./src/removal');
+const carryover = require('./src/carryover');
 const PACKAGE = require('./package.json');
 
 /* <publisher>.<name>, which is also how the editor names this extension's folders. Read from the manifest rather than
@@ -193,6 +194,15 @@ async function renameSettings(context) {
   return done.join(', ');
 }
 
+/* The pins and colors chosen under the old id (src/carryover.js), copied before anything here reads its own. */
+function carryOver(context, log) {
+  try {
+    const r = carryover.copyFiles(context.globalStorageUri.fsPath, [sessionPins.FILE, sessionColors.FILE]);
+    if (r.copied.length) log.appendLine(`copied from ${carryover.LEGACY_ID}: ${r.copied.join(', ')}`);
+    if (r.failed.length) log.appendLine(`could not copy from ${carryover.LEGACY_ID}: ${r.failed.join(', ')}`);
+  } catch (e) { log.appendLine('copying from ' + carryover.LEGACY_ID + ': ' + e.message); }
+}
+
 /*
  * In Restricted Mode nothing starts until the workspace is trusted: everything this extension does writes files or runs
  * Claude Code's command line. deactivate() still restores Claude Code's files on an uninstall, in Restricted Mode too.
@@ -202,6 +212,7 @@ async function activate(context) {
   const log = vscode.window.createOutputChannel('Claude Code Plus');
   context.subscriptions.push(log);
   const go = async () => {
+    carryOver(context, log);
     let renamed = '';
     try { renamed = await renameSettings(context); } catch (e) { renamed = 'failed: ' + (e && e.message); }
     await start(context, log, renamed);

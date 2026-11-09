@@ -4806,6 +4806,33 @@ console.log('\ncommands under both old names');
   } else bad(`with claudeCodeExtras.status taken: threw ${JSON.stringify((r.threw || '').slice(0, 300))}`);
 }
 
+/* The editor gives each extension id its own global storage folder, so the pins and colors chosen under the old id are in
+   a sibling folder this extension would never read. Those two are the reader's own choices and are copied - copied, since
+   the old extension can still be installed - when this extension has none of its own; everything else in that folder is
+   rebuilt or asked for again, and stays where it is. */
+console.log('\npins and colors from the old extension\'s storage');
+{
+  const OLD = 'User/globalStorage/' + LEGACY_ID + '/', NEW = 'User/globalStorage/xnervwang.claude-code-plus/';
+  const sid = 'abababab-1111-4222-8333-444444444444';
+  const pins = { pinned: [sid], times: {} }, colors = { colors: { [sid]: 'green' } }, mine = { colors: { [sid]: 'red' } };
+  const files = { [OLD + 'session-pins.json']: JSON.stringify(pins), [OLD + 'session-colors.json']: JSON.stringify(colors),
+    [OLD + 'open-latency-1.jsonl']: '{}\n', [OLD + 'tab-icons/idle.svg']: '<svg/>', [OLD + 'claude-plugin/x.txt']: 'x' };
+  const r = activateStub({ files });
+  const f = r.files || {};
+  if (!r.threw && JSON.stringify(f[NEW + 'session-pins.json']) === JSON.stringify(pins) && JSON.stringify(f[NEW + 'session-colors.json']) === JSON.stringify(colors)
+    && JSON.stringify(f[OLD + 'session-pins.json']) === JSON.stringify(pins) && JSON.stringify(f[OLD + 'session-colors.json']) === JSON.stringify(colors)) {
+    ok('the pins and colors are copied into this extension\'s storage, and the old copies stay');
+  } else bad(`pins and colors after the first start: ${JSON.stringify({ threw: (r.threw || '').slice(0, 300), pins: f[NEW + 'session-pins.json'], colors: f[NEW + 'session-colors.json'] })}`);
+  const carried = Object.keys(f).filter((k) => k.startsWith(NEW) && /open-latency-1|tab-icons\/idle|claude-plugin\/x\.txt/.test(k));
+  if (!carried.length) ok('nothing else in the old storage is copied');
+  else bad(`copied from the old storage as well: ${JSON.stringify(carried)}`);
+  const r2 = activateStub({ files: Object.assign({}, files, { [NEW + 'session-colors.json']: JSON.stringify(mine) }) });
+  const f2 = r2.files || {};
+  if (!r2.threw && JSON.stringify(f2[NEW + 'session-colors.json']) === JSON.stringify(mine) && JSON.stringify(f2[NEW + 'session-pins.json']) === JSON.stringify(pins)) {
+    ok('a file this extension already has is not overwritten, while the one it lacks is still copied');
+  } else bad(`with colors of its own: ${JSON.stringify({ threw: (r2.threw || '').slice(0, 300), colors: f2[NEW + 'session-colors.json'], pins: f2[NEW + 'session-pins.json'] })}`);
+}
+
 /* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no
    longer be recognized in a Claude Code install patched by an earlier build, the marketplace and plugin names are what
    Claude Code registered and named the plan directory after, and the state keys are what the last version of the old
