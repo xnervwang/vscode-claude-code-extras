@@ -90,10 +90,11 @@ function copyFiles(storage, names) {
 const COPIED_BACK = 'COPIED-BACK.txt';
 /*
  * How long a rescue folder has to have been left alone before it is read. The uninstall that writes it unregisters the
- * plugin straight after, running Claude Code's binary twice with a minute's timeout each, and Claude Code deletes the
- * plan directory then, with anything copied back into it in the meantime.
+ * plugin straight after, and Claude Code deletes the plan directory then, with anything copied back into it in the
+ * meantime. The editor stops an uninstall hook five seconds after starting it; each of the two commands that unregister
+ * takes well under a second, and one already started can finish after the hook is stopped.
  */
-const RESCUE_SETTLE_MS = 3 * 60000;
+const RESCUE_SETTLE_MS = 30000;
 
 const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return 0; } };
 
@@ -115,7 +116,9 @@ function restoreRescued({ home = os.homedir(), planDir, now = Date.now(), settle
     let entries;
     try { if (!fs.statSync(dir).isDirectory()) continue; entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
     if (entries.some((e) => e.name === COPIED_BACK)) continue;
-    const age = now - Math.max(mtimeOf(dir), ...entries.map((e) => mtimeOf(path.join(dir, e.name))));
+    let newest = mtimeOf(dir);
+    for (const e of entries) newest = Math.max(newest, mtimeOf(path.join(dir, e.name)));
+    const age = now - newest;
     if (age < settleMs) {
       out.waitMs = out.waitMs ? Math.min(out.waitMs, settleMs - age) : settleMs - age;
       continue;

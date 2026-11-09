@@ -1213,6 +1213,7 @@ function start(context, log, renamed) {
         log.appendLine('work plan plugin: ' + NO_PYTHON.said);
         offerPython().catch((e) => log.appendLine('python offer: ' + e.message));
       }
+      return undone;
     } else {
       await context.globalState.update(PLUGIN_KEY,
         { registered, stamp: state.stamp, error: result.step + ': ' + result.said });
@@ -1222,18 +1223,37 @@ function start(context, log, renamed) {
   /*
    * Plans an uninstall copied aside (src/carryover.js, restoreRescued) come back once the plugin is registered again:
    * unregistering it is what emptied the plan directory, and while it is not registered nothing reads them there. A
-   * rescue folder still too new to read is tried again when it can be.
+   * rescue folder still too new to read is tried again when it can be. `unregistered` is what syncPlugin returns, true
+   * when it registered the plugin again because the plugin and its marketplace were both gone: the unregister that
+   * empties the plan directory is then over, so no folder is too new.
    */
   let rescueTimer = 0;
-  const restorePlans = () => {
+  const restorePlans = (unregistered) => {
     if (removed() || closing || context.globalState.get(PLUGIN_KEY, {}).registered !== true || !pluginInstall.listed()) return;
     let r;
-    try { r = carryover.restoreRescued({ planDir: planDir() }); } catch (e) { log.appendLine('copying rescued work plans back: ' + e.message); return; }
+    try { r = carryover.restoreRescued({ planDir: planDir(), settleMs: unregistered === true ? 0 : undefined }); }
+    catch (e) { log.appendLine('copying rescued work plans back: ' + e.message); return; }
     if (r.copied.length) log.appendLine(`work plans copied back from a rescue folder: ${r.copied.length}`);
     if (r.waitMs && !rescueTimer) rescueTimer = setTimeout(() => { rescueTimer = 0; restorePlans(); }, r.waitMs + 1000);
   };
   context.subscriptions.push({ dispose: () => { if (rescueTimer) clearTimeout(rescueTimer); } });
   syncPlugin(false).then(restorePlans, (e) => log.appendLine('work plan plugin: ' + ((e && e.message) || e)));
+  /*
+   * The old extension's uninstall hook takes the patch out of Claude Code and unregisters the plugin, and the editor runs
+   * it when it deletes that extension's folder, at a start of its own, which can be after this extension has started.
+   * The plugin and its marketplace both gone while this extension had registered them is that (see registrationGone),
+   * and then the patch and the plugin are put back and the plans copied back, without waiting for the next start.
+   */
+  let recovering = false;
+  const recover = () => {
+    if (recovering || removed() || closing || uninstalling() || replaced()) return;
+    if (context.globalState.get(PLUGIN_KEY, {}).registered !== true || !pluginInstall.registrationGone()) return;
+    recovering = true;
+    log.appendLine('work plan plugin: unregistered while this window was running; checking the patch and registering it again');
+    Promise.resolve().then(() => sync()).then(() => syncPlugin(false)).then(restorePlans)
+      .catch((e) => log.appendLine('putting the patch and the plugin back: ' + ((e && e.message) || e)))
+      .finally(() => { recovering = false; });
+  };
 
   /*
    * A single 30-second timer has the next list of conversations run `claude agents` again and sweeps abandoned plans,
@@ -1244,6 +1264,7 @@ function start(context, log, renamed) {
   const tick = setInterval(() => {
     claude.invalidate();
     sweepPlans().catch((e) => log.appendLine('orphan work plans: ' + e.message));
+    recover();
     if (removed() || !enabled() || uninstalling() || replaced()) { unwatchEffort(); return; }
     scanBackground();
     scanEffort();

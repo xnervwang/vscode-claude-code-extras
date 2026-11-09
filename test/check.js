@@ -4704,7 +4704,9 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
  * opts.taken        command ids another extension has registered already, which registerCommand refuses
  * opts.state        what this extension's globalState holds before it starts
  * opts.files        relative path under the home folder -> content, written before activation
- * opts.later        like opts.files, written once activate has resolved
+ * opts.later        like opts.files, written once activate has resolved and opts.laterMs have passed
+ * opts.gone         relative paths under the home folder deleted at the same moment
+ * opts.tickMs       run the 30-second timer this often instead of never
  * opts.aged         opts.files are given a modification time an hour back
  * opts.executable   relative paths of opts.files to make executable
  * opts.after(ms)    how long to let it run after activate resolves
@@ -4755,7 +4757,7 @@ const activateStub = (opts = {}) => {
       const storage = path.join(home, 'User', 'globalStorage', 'xnervwang.claude-code-plus');
       const memo = (init) => { const m = new Map(Object.entries(init || {})); return { m, get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { if (v === undefined) m.delete(k); else m.set(k, v); } }; };
       const subs = [], keep = setInterval;
-      global.setInterval = (fn, ms) => keep(() => {}, 1 << 30);
+      global.setInterval = (fn, ms) => (${Number(opts.tickMs) || 0} && ms === 30000 ? keep(fn, ${Number(opts.tickMs) || 0}) : keep(() => {}, 1 << 30));
       const globalState = memo(${JSON.stringify(opts.state || {})});
       (async () => {
         const out = { threw: '' };
@@ -4765,6 +4767,8 @@ const activateStub = (opts = {}) => {
             extension: { id: 'xnervwang.claude-code-plus', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
             globalStorageUri: { fsPath: storage }, logUri: { fsPath: path.join(home, 'logs', 'exthost1', 'xnervwang.claude-code-plus') } });
           out.activateMs = Date.now() - t0;
+          await new Promise((r) => setTimeout(r, ${Number(opts.laterMs) || 0}));
+          for (const rel of ${JSON.stringify(opts.gone || [])}) fs.rmSync(path.join(home, rel), { recursive: true, force: true });
           for (const [rel, body] of Object.entries(${JSON.stringify(opts.later || {})})) {
             fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
             fs.writeFileSync(path.join(home, rel), body);
@@ -5136,6 +5140,29 @@ console.log('\nplans an uninstall copied aside come back');
   } else bad(`usual start: ${JSON.stringify({ threw: (usual.threw || '').slice(0, 300), back: back(usual), plugin: (usual.state || {})['claudeCodeExtras.workPlanPlugin'], logs: (usual.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 5) })}`);
   if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while the old extension is installed as itself, nothing is copied back');
   else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
+
+  /* The old extension's uninstall hook runs when the editor deletes its folder, at a start of the editor's own, and can
+     come after this extension has started: it copies the plans aside and unregisters the plugin, which deletes the plan
+     directory, leaving Claude Code's two records without the plugin and its marketplace. The 30-second timer registers
+     the plugin again and copies the plans back, without the wait a folder that new otherwise gets. The plugin alone gone,
+     its marketplace still known, is someone's own removal and is left so. */
+  const DATA = '.claude/plugins/data/agent-work-plan-claude-code-extras/';
+  const startFiles = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '',
+    'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '', [DATA + A + '.json']: '{"nodes":[]}' };
+  const hook = (records) => activateStub({ extensions: { 'anthropic.claude-code': cc }, files: startFiles, aged: true, executable: [bin],
+    tickMs: 200, laterMs: 3000, after: 3000, gone: [DATA],
+    later: Object.assign({ ['.claude/agent-work-plan-plans-20261108-000000/' + A + '.json']: '{"nodes":[]}' }, records) });
+  const listedIn = (r) => {
+    const rec = (r.files || {})['.claude/plugins/installed_plugins.json'];
+    return !!(rec && rec.plugins && rec.plugins['agent-work-plan@claude-code-extras']);
+  };
+  const bothGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}', '.claude/plugins/known_marketplaces.json': '{}' });
+  if (!bothGone.threw && listedIn(bothGone) && back(bothGone) && (bothGone.logs || []).some((l) => /unregistered while this window was running/.test(l))) {
+    ok('an uninstall of the old extension that runs after this one started is undone within a turn of the timer, plans included');
+  } else bad(`after the old uninstall hook ran: ${JSON.stringify({ threw: (bothGone.threw || '').slice(0, 300), listed: listedIn(bothGone), back: back(bothGone), logs: (bothGone.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 6) })}`);
+  const pluginGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}' });
+  if (!pluginGone.threw && !listedIn(pluginGone) && !back(pluginGone)) ok('the plugin removed on its own while its marketplace stays is not registered again by the timer');
+  else bad(`registered again after a removal of the plugin alone: ${JSON.stringify({ listed: listedIn(pluginGone), back: back(pluginGone) })}`);
 }
 
 /* What the rename leaves alone, because installed machines already have it: a marker or a backup suffix renamed would no
