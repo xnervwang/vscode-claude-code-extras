@@ -336,14 +336,12 @@ function restore(claudeExtensionPath) {
   if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
   const original = fs.readFileSync(backup, 'utf8');
   if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
-  writeAtomic(file, original);
-  fs.unlinkSync(backup);
-  return { changed: true, message: 'restored' };
+  return require('./webview').moveBack(backup, file);
 }
 
 module.exports = {
   id: 'anthropic.claude-code', name: 'Claude Code host',
   VERSION, MARK, ANY_MARK, BACKUP_SUFFIX, EDITS, LOAD_WATCH, LOAD_WATCH_OFF, PANEL_TZ,
-  patchSource, status, apply, restore, hostFile, targetFile: hostFile,
+  patchSource, status, apply, restore, writeAtomic, hostFile, targetFile: hostFile,
   findInstalls: require('./webview').findInstalls,
 };

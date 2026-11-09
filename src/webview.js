@@ -767,6 +767,17 @@ function apply(claudeExtensionPath, opts = {}) {
   return { changed, liveChanged, current: true, message };
 }
 
+/* The backup is moved over the file in one step, so no window can find a clean file beside its backup. One patching in
+   that moment would write a fresh backup for a separate delete to take, and leave a patched file with nothing to restore
+   from. Of two restores at once, the one whose move finds no backup has nothing left to do. */
+function moveBack(backup, file) {
+  try { fs.renameSync(backup, file); } catch (e) {
+    if (e && e.code === 'ENOENT') return { changed: false, message: 'nothing to restore' };
+    throw e;
+  }
+  return { changed: true, message: 'restored' };
+}
+
 /** Put the original back and remove the backup and the live files. Returns { changed, message }. */
 function restore(claudeExtensionPath) {
   const file = webviewFile(claudeExtensionPath);
@@ -777,9 +788,7 @@ function restore(claudeExtensionPath) {
   if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
   const original = fs.readFileSync(backup, 'utf8');
   if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
-  writeAtomic(file, original);
-  fs.unlinkSync(backup);
-  return { changed: true, message: 'restored' };
+  return moveBack(backup, file);
 }
 
 /** Every Claude Code install under an extensions directory: the active version plus any siblings left behind. */
@@ -793,6 +802,6 @@ module.exports = {
   SWITCHES,
   id: 'anthropic.claude-code', name: 'Claude Code panel',
   VERSION, MARK, ANY_MARK, BACKUP_SUFFIX, EDITS, SCRIPT,
-  safeColor, patchSource, status, apply, restore, findInstalls, webviewFile, targetFile: webviewFile, writeLive, liveCss,
+  safeColor, patchSource, status, apply, restore, moveBack, findInstalls, webviewFile, targetFile: webviewFile, writeLive, liveCss,
   writeEffort, pruneEfforts, EFFORT_PREFIX, pinsProperty,
 };

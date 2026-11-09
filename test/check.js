@@ -4247,19 +4247,58 @@ console.log('\nan uninstall puts Claude Code back at once');
       ['deactivate restores and hands the rest on, and only for an uninstall',
         /beingUninstalled\(selfPath, ID\)/.test(deact) && /restoreAll/.test(deact) && /finishLater/.test(deact)],
       /* Another editor on this machine can be running this extension, and sweeping its folder from here would pull its
-         patch out from under it; the uninstall hook, run when this folder is deleted, covers every editor. */
+         patch out from under it. */
       ['deactivate restores only this editor\'s extensions folder', /removal\.restoreAll\(\[path\.dirname\(selfPath\)\]\)/.test(deact) && !/roots\(/.test(deact)],
       ['a window that has not restarted yet restores rather than patching again',
         /const restoring = removed\(\) \|\| leaving;/.test(ext) && /if \(restoring\) \{\s*const r = adapter\.restore\(dir\);/.test(ext)],
       ['and writes no stylesheet back',
         /const writeLiveNow = \(\) => \{\s*if \(removed\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) return;/.test(ext)
         && /if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) \{ unwatchEffort\(\); return; \}/.test(ext)],
-      ['the uninstall hook restores through the same code', /removal\.restoreAll\(removal\.roots\(/.test(un) && !/adapter\.restore\(/.test(un)],
+      ['the uninstall hook restores through the same code, in the folders uninstallPlan gives',
+        /removal\.uninstallPlan\(path\.dirname\(__dirname\), id\)/.test(un) && /removal\.restoreAll\(plan\.restore\)/.test(un)
+        && !/adapter\.restore\(/.test(un) && !/roots\(/.test(un)],
+      ['and leaves the plugin to another editor\'s copy', /const claudeBin = plan\.lastCopy \? pluginInstall\.findClaude\(found\) : '';/.test(un)],
     ];
     for (const [what, pass] of checks) {
       if (pass) ok(what);
       else bad(what);
     }
+  }
+}
+
+/* The uninstall hook on a machine with two editors: the folder of an editor that still runs a copy is left to it, and
+   so are the plugin and its plans; a folder with no copy left is cleaned up. */
+console.log('\nthe uninstall hook with another editor on the machine');
+{
+  const removal = require('../src/removal');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-two-editors-'));
+  const realHome = process.env.HOME, realExt = process.env.VSCODE_EXTENSIONS;
+  const ID = 'xnervwang.claude-code-extras';
+  const dirOf = (p) => { const d = path.join(home, p, 'extensions'); fs.mkdirSync(d, { recursive: true }); return d; };
+  try {
+    process.env.HOME = home;
+    delete process.env.VSCODE_EXTENSIONS;
+    const server = dirOf('.vscode-server'), stable = dirOf('.vscode'), insiders = dirOf('.vscode-insiders');
+    fs.mkdirSync(path.join(server, ID + '-1.0.22'));
+    fs.writeFileSync(path.join(server, '.obsolete'), JSON.stringify({ [ID + '-1.0.22']: true }));
+    fs.mkdirSync(path.join(stable, ID + '-1.0.21'));
+    fs.mkdirSync(path.join(insiders, ID + '-1.0.20'));
+    fs.writeFileSync(path.join(insiders, '.obsolete'), JSON.stringify({ [ID + '-1.0.20']: true }));
+    fs.mkdirSync(path.join(insiders, ID + 'x-1.0.0'));
+    const plan = removal.uninstallPlan(server, ID);
+    if (JSON.stringify(plan.restore) === JSON.stringify([server, insiders]) && plan.lastCopy === false
+      && JSON.stringify(plan.owned) === JSON.stringify([stable])) {
+      ok('another editor\'s folder with a copy still installed is left to it, and the plugin with it');
+    } else bad(`uninstall plan ${JSON.stringify(plan)}`);
+    fs.writeFileSync(path.join(stable, '.obsolete'), JSON.stringify({ [ID + '-1.0.21']: true }));
+    const last = removal.uninstallPlan(server, ID);
+    if (JSON.stringify(last.restore) === JSON.stringify([server, stable, insiders]) && last.lastCopy === true) {
+      ok('with no copy left in any editor, every folder is cleaned up and the plugin is unregistered');
+    } else bad(`uninstall plan with no copy left ${JSON.stringify(last)}`);
+  } finally {
+    if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    if (realExt !== undefined) process.env.VSCODE_EXTENSIONS = realExt;
+    fs.rmSync(home, { recursive: true, force: true });
   }
 }
 
@@ -6504,24 +6543,23 @@ console.log('\nrecently closed sessions');
 }
 
 /* Every window writes the same patched file, so each needs its own temporary name; with a shared one they truncate each
-   other's copy and a rename fails. Checked via a restore, which uses the same writer as a patch. */
+   other's copy and a rename fails. */
 console.log('\na patched file written by several windows at once');
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-atomic-'));
   const file = host.hostFile(dir);
   const renames = [];
   const realRename = fs.renameSync;
-  const stage = () => { fs.writeFileSync(file, 'patched'); fs.writeFileSync(file + host.BACKUP_SUFFIX, 'original'); };
   try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.renameSync = (from, to) => { renames.push(from); return realRename.call(fs, from, to); };
-    stage(); host.restore(dir);
-    stage(); host.restore(dir);
+    host.writeAtomic(file, 'patched');
+    host.writeAtomic(file, 'patched again');
     fs.renameSync = () => { throw Object.assign(new Error('rename failed'), { code: 'ENOENT' }); };
-    stage();
     let threw = '';
-    try { host.restore(dir); } catch (e) { threw = e.message; }
+    try { host.writeAtomic(file, 'third'); } catch (e) { threw = e.message; }
     fs.renameSync = realRename;
-    const left = fs.readdirSync(dir).filter((n) => n !== 'extension.js' && n !== 'extension.js' + host.BACKUP_SUFFIX);
+    const left = fs.readdirSync(path.dirname(file)).filter((n) => n !== path.basename(file));
     if (renames.length === 2 && renames[0] !== renames[1] && renames.every((t) => t.includes('.' + process.pid + '.'))) {
       ok('each write goes through a temporary copy named for this process, never the same name twice');
     } else bad(`the temporary copies were ${JSON.stringify(renames.map((t) => path.basename(t)))}`);
@@ -6530,6 +6568,44 @@ console.log('\na patched file written by several windows at once');
   } finally {
     fs.renameSync = realRename;
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/* A restore in one window and a patch in another at the same moment: whatever order their steps fall in, a patched file
+   keeps a backup. The other window's patch is run from inside the restore's rename, right after it lands. */
+console.log('\na restore and a patch in two windows at once');
+{
+  for (const [name, adapter] of [['the panel', webview], ['the host', host]]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-race-'));
+    const file = adapter.targetFile(dir);
+    const backup = file + adapter.BACKUP_SUFFIX;
+    const realRename = fs.renameSync;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'patched ' + adapter.MARK);
+      fs.writeFileSync(backup, 'original');
+      let other = null;
+      fs.renameSync = (from, to) => {
+        realRename.call(fs, from, to);
+        if (to === file && !other) {
+          other = 'clean';
+          if (fs.readFileSync(file, 'utf8') === 'original') {
+            fs.writeFileSync(backup, 'original');
+            fs.writeFileSync(file, 'patched ' + adapter.MARK);
+            other = 'patched';
+          }
+        }
+      };
+      adapter.restore(dir);
+      fs.renameSync = realRename;
+      const now = fs.readFileSync(file, 'utf8');
+      const consistent = now === 'original' ? !fs.existsSync(backup) : fs.existsSync(backup) && fs.readFileSync(backup, 'utf8') === 'original';
+      if (other === 'patched' && consistent) ok(`${name}: a patch landing just after a restore still has its backup`);
+      else bad(`${name}: the other window ${other}; file ${JSON.stringify(now.slice(0, 20))}, backup ${fs.existsSync(backup)}`);
+    } finally {
+      fs.renameSync = realRename;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
 }
 

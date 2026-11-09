@@ -55,22 +55,45 @@ function obsolete(extensionsDir) {
   }
 }
 
+/* A folder is named <id>-<version>, with the platform after the version for a platform build; requiring a digit after
+   the dash keeps another extension whose name merely starts with this one's from being taken for a version of it. */
+const folderOf = (id) => new RegExp('^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-\\d', 'i');
+
 /**
  * Whether the editor is taking this copy of the extension away with no other version of it staying behind.
  *
- * `id` is <publisher>.<name>. A folder is named <id>-<version>, with the platform after the version for a platform
- * build, so the pattern requires a digit after the dash - another extension whose name merely starts with this one's is
- * not mistaken for a version of it.
+ * `id` is <publisher>.<name>.
  */
 function beingUninstalled(extensionPath, id, marked = obsolete(path.dirname(extensionPath || '.'))) {
   if (!extensionPath || !id) return false;
   const dir = path.dirname(extensionPath);
   const mine = path.basename(extensionPath);
   if (marked[mine] !== true) return false;
-  const own = new RegExp('^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-\\d', 'i');
+  const own = folderOf(id);
   let names;
   try { names = fs.readdirSync(dir); } catch (_) { return false; }
   return !names.some((n) => n !== mine && own.test(n) && marked[n] !== true);
+}
+
+/** The folders of extension `id` in one extensions folder that its editor has not marked for deletion. */
+function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
+  if (!id) return [];
+  const own = folderOf(id);
+  let names;
+  try { names = fs.readdirSync(extensionsDir); } catch (_) { return []; }
+  return names.filter((n) => own.test(n) && marked[n] !== true).map((n) => path.join(extensionsDir, n));
+}
+
+/*
+ * What the uninstall hook may put back. This editor's own folder, and any other editor's folder on this machine that no
+ * longer holds a copy of this extension: a patch left there has nobody else to take it out. A folder whose editor still
+ * runs a copy belongs to that copy, which would patch it again at its next start. While one is left, the companion plugin
+ * and the plans in its data directory are still in use, so `lastCopy` is false and they stay.
+ */
+function uninstallPlan(extensionsDir, id) {
+  const others = roots(extensionsDir).filter((r) => r !== extensionsDir);
+  const owned = others.filter((r) => liveCopies(r, id).length);
+  return { restore: [extensionsDir, ...others.filter((r) => !owned.includes(r))], lastCopy: !owned.length, owned };
 }
 
 /** Put back every Claude Code install that carries a patch of ours. Synchronous, since the host exits right after. */
@@ -163,4 +186,7 @@ function unmarked(dirs, keep, marked) {
   return dirs.filter((d) => d === keep || (marked || {})[path.basename(d)] !== true);
 }
 
-module.exports = { roots, obsolete, beingUninstalled, restoreAll, finishLater, replacedSince, installStamp, standing, unmarked };
+module.exports = {
+  roots, obsolete, beingUninstalled, liveCopies, uninstallPlan, restoreAll, finishLater, replacedSince, installStamp, standing,
+  unmarked,
+};
