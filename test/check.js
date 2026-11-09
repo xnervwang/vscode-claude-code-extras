@@ -4238,6 +4238,7 @@ console.log('\nan uninstall puts Claude Code back at once');
     ['this copy not marked: an ordinary reload or a window closing', [me], [], false],
     ['every version marked: an uninstall', [me, ID + '-1.0.4'], [me, ID + '-1.0.4'], true],
     ['an extension whose name merely starts with ours is not a version of it', [me, ID + '-helper-1.0.0'], [me], true],
+    ['a folder the editor failed to delete, renamed to .vsctmp, is not a copy left behind', [me, ID + '-1.0.4.1a2b3c4d.vsctmp'], [me], true],
   ];
   for (const [what, folders, marked, want] of cases) {
     const dir = stage(folders, marked);

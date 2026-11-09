@@ -59,6 +59,9 @@ function obsolete(extensionsDir) {
 /* A folder is named <id>-<version>, with the platform after the version for a platform build; requiring a digit after
    the dash keeps another extension whose name merely starts with this one's from being taken for a version of it. */
 const folderOf = (id) => new RegExp('^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-\\d', 'i');
+/* The editor renames a folder it is deleting to <folder>.<random>.vsctmp first, and one it failed to delete stays until
+   its next start under that name, which still starts like a copy. */
+const isCopy = (name, own) => own.test(name) && !/\.vsctmp$/i.test(name);
 
 /**
  * Whether the editor is taking this copy of the extension away with no other version of it staying behind.
@@ -73,7 +76,7 @@ function beingUninstalled(extensionPath, id, marked = obsolete(path.dirname(exte
   const own = folderOf(id);
   let names;
   try { names = fs.readdirSync(dir); } catch (_) { return false; }
-  return !names.some((n) => n !== mine && own.test(n) && marked[n] !== true);
+  return !names.some((n) => n !== mine && isCopy(n, own) && marked[n] !== true);
 }
 
 /** The folders of extension `id` in one extensions folder that its editor has not marked for deletion. */
@@ -82,7 +85,7 @@ function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
   const own = folderOf(id);
   let names;
   try { names = fs.readdirSync(extensionsDir); } catch (_) { return []; }
-  return names.filter((n) => own.test(n) && marked[n] !== true).map((n) => path.join(extensionsDir, n));
+  return names.filter((n) => isCopy(n, own) && marked[n] !== true).map((n) => path.join(extensionsDir, n));
 }
 
 /**
