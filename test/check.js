@@ -4882,6 +4882,7 @@ const activateStub = (opts = {}) => {
       const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
       Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
       const vs = require(${JSON.stringify(stub)});
+      ${opts.preamble || ''}
       const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
       const home = ${JSON.stringify(home)};
       const storage = path.join(home, 'User', 'globalStorage', 'xnervwang.claude-code-plus');
@@ -4905,6 +4906,7 @@ const activateStub = (opts = {}) => {
           }
           await new Promise((r) => setTimeout(r, ${Number(opts.after) || 300}));
           out.hooks = typeof globalThis.__cceChatHook === 'function';
+          out.extra = ${opts.report || 'null'};
         } catch (e) { out.threw = String(e && e.stack); }
         out.state = Object.fromEntries(globalState.m);
         for (const s of subs) { try { s.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
@@ -4984,6 +4986,22 @@ console.log('\npins and colors from the old extension\'s storage');
    turns rewriting the same files. So while it is installed, this extension writes nothing the old one reads, and says
    why once per version of the old one. The last version of the old id depends on this extension and patches nothing, so
    with that one installed everything runs as usual. */
+/* The editor puts panels back before this extension starts, and each reports its icon and its state as it comes up:
+   the host is asked for both again once this extension's hooks for them are installed. */
+console.log('\npanels the editor restored before this extension started');
+{
+  const cc = '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64';
+  const r = activateStub({ files: { 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '' },
+    extensions: { 'anthropic.claude-code': { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: cc } },
+    preamble: 'globalThis.__asked = []; globalThis.__cceRefreshTabIcons = () => globalThis.__asked.push(["icons", typeof globalThis.__cceTabIcon]);'
+      + ' globalThis.__cceSendSessionStates = () => globalThis.__asked.push(["states", typeof globalThis.__cceStatesHook]);',
+    report: 'globalThis.__asked' });
+  const asked = (r.extra || []).filter((a, i, all) => all.findIndex((b) => b[0] === a[0]) === i);
+  if (!r.threw && JSON.stringify(asked) === JSON.stringify([['icons', 'function'], ['states', 'function']])) {
+    ok('after activation the host is asked for every tab icon and every session state, with the hooks for both in place');
+  } else bad(`asked at activation: ${JSON.stringify(r.extra)}${r.threw ? ', threw ' + r.threw.slice(0, 200) : ''}`);
+}
+
 console.log('\nwhile the old extension is still installed');
 {
   const cc = '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64';

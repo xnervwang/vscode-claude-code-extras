@@ -885,6 +885,9 @@ function start(context, log, renamed, handing = false) {
     } catch (e) { return undefined; /* the host sets its own icon */ }
   };
   context.subscriptions.push({ dispose: () => { if (globalThis.__cceTabIcon) delete globalThis.__cceTabIcon; } });
+  /* Panels the editor restored before this extension started reported their icons and states before anything listened. */
+  try { if (typeof globalThis.__cceRefreshTabIcons === 'function') globalThis.__cceRefreshTabIcons(); } catch (_) { /* next change */ }
+  try { if (typeof globalThis.__cceSendSessionStates === 'function') globalThis.__cceSendSessionStates(); } catch (_) { /* next change */ }
   /*
    * Conversations pinned in the session list, kept from Claude Code's transcript cleanup (src/sessionpins.js). The
    * margin it keeps is days, so once every half hour is far more often than it needs; a pin gets a pass of its own a
