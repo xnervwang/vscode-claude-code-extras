@@ -5689,6 +5689,17 @@ console.log('\nwhat a tick and a change of setting cost');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
+/* Finding Python can take seconds; if Remove is run meanwhile, the plugin is not registered. */
+console.log('\nRemove pressed while the plugin is being registered');
+{
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const body = (/const syncPlugin = async \(retry\) => \{([\s\S]*?)\n  \};/.exec(ext) || [])[1] || '';
+  const asked = body.indexOf('await pluginInstall.findPython('), again = body.indexOf('if (removed() || uninstalling() || replaced()) return;', asked);
+  const installed = body.indexOf('pluginInstall.install(');
+  if (asked > 0 && again > asked && installed > again) ok('the plugin is registered only if Remove was not pressed while Python was being looked for');
+  else bad(`syncPlugin checks again at ${again}, after asking for Python at ${asked}, before installing at ${installed}`);
+}
+
 /* Deleting after the confirmation, when the conversation was opened meanwhile. */
 console.log('\na conversation opened while its deletion is being confirmed');
 {

@@ -1225,6 +1225,8 @@ function start(context, log, renamed, handing = false) {
     /* The staged copy is fitted to the Python found here (pluginInstall.fitHooks), so which one it was is part of what
        is compared: installing Python, or a different one, stages the copy again. */
     const python = await pluginInstall.findPython(undefined, pythons());
+    /* Trying each Python candidate can take seconds, and Remove may have been pressed meanwhile. */
+    if (removed() || uninstalling() || replaced()) return;
     const stamp = pluginInstall.digest(from) + '|' + (python ? python.launcher.join(' ') + '|' + python.executable : 'none');
     const to = path.join(context.globalStorageUri.fsPath, 'claude-plugin');
     /* The memory of having registered is kept by the editor and outlives an uninstall of this extension, while the
