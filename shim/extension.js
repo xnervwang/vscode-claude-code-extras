@@ -9,10 +9,10 @@
  * plugin belong to Claude Code Plus now, and uninstalling this one, as its notice suggests, must not take them out. So
  * it has no uninstall hook and deactivate does nothing.
  *
- * Claude Code Plus cannot read another extension's state, and two entries of this id's are of use to it: whether the
- * extension was removed from Claude Code, and the folders remembered for scheduled prompts. They are written to
- * export.json in this id's global storage, beside Claude Code Plus's own, on every activation. The editor activates
- * this only after Claude Code Plus, which waits for the file.
+ * Claude Code Plus cannot read another extension's state, and it needs two of this id's entries: whether the extension
+ * was removed from Claude Code, and the folders remembered for scheduled prompts. They are written to export.json in
+ * this id's global storage, beside Claude Code Plus's own, on every activation. The editor activates this only after
+ * Claude Code Plus, which waits for the file.
  */
 const vscode = require('vscode');
 const fs = require('fs');

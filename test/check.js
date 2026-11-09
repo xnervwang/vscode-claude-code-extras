@@ -4799,9 +4799,9 @@ const activateStub = (opts = {}) => {
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 };
 
-/* A keybinding someone made under either old prefix names the command that way, so both old names stay registered,
-   unlisted. When another extension in the same host holds one of them, as the old extension itself does in a window that
-   has not restarted its extensions since an update, the editor refuses it, and that must not stop the rest. */
+/* Keybindings made before a rename use the old command names, so both old prefixes stay registered, unlisted. When
+   another extension in the same host holds one of them, as the old extension itself does in a window that has not
+   restarted its extensions since an update, the editor refuses it, and that must not stop the rest. */
 console.log('\ncommands under both old names');
 {
   const declared = require('../package.json').contributes.commands.map((x) => x.command.replace(/^[^.]+\./, ''));
@@ -4895,9 +4895,9 @@ console.log('\nwhile the old extension is still installed');
   } else bad(`with the old id's last version: ${JSON.stringify(h)}${handed.threw ? ' threw ' + handed.threw.slice(0, 300) : ''}`);
 }
 
-/* Uninstalling this extension puts Claude Code back and unregisters the plugin. With the old extension installed as
-   itself in the same folder, that would take the patch and the plugin out from under it, so the folder is left to it; in
-   another editor's folder an old copy counts the same as a copy of this one. */
+/* Uninstalling this extension puts Claude Code back and unregisters the plugin. With an earlier version of the old
+   extension in the same folder, that would take the patch and the plugin out from under it, so the folder is left to
+   it; in another editor's folder, an earlier version counts the same as a copy of this extension. */
 console.log('\nan uninstall while the old extension is still installed');
 {
   const removal = require('../src/removal');
@@ -4943,7 +4943,7 @@ console.log('\nan uninstall while the old extension is still installed');
 
 /* shim/ is the last version of the old id. Auto-update brings it to everyone who has the old extension, and the editor
    installs what it depends on. It must never touch Claude Code: the patch and the plugin belong to this extension by
-   then, and uninstalling the shim is exactly what it asks people to do. */
+   then, and the shim's notice asks people to uninstall it. */
 console.log('\nthe old id\'s last version, shim/');
 {
   const dir = path.join(__dirname, '..', 'shim');
@@ -5160,7 +5160,7 @@ console.log('\nplans an uninstall copied aside come back');
   else bad(`registered again after a removal of the plugin alone: ${JSON.stringify({ listed: listedIn(pluginGone), back: back(pluginGone) })}`);
 }
 
-/* Names the rename keeps, because installed machines already use them: a marker or a backup suffix renamed would no
+/* Names the rename keeps, because installed machines already use them: a renamed marker or backup suffix would no
    longer be recognized in a Claude Code install patched by an earlier build, the marketplace and plugin names are what
    Claude Code registered and named the plan directory after, and the state keys are what the last version of the old
    extension exports for this one to read. */
