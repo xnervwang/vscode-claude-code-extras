@@ -4665,8 +4665,8 @@ console.log('\nsettings moved from their old names');
   fs.rmSync(stub, { force: true });
 }
 
-/* The extension is xnervwang.claude-code-plus, and everything a person reads or types says Claude Code Plus; its state
-   and files keep their older names. A name left behind in one of these places is an old one coming back. */
+/* The extension is xnervwang.claude-code-plus, and every command title, setting and README name says Claude Code Plus;
+   its state and files keep their older names. */
 console.log('\nthe name a person sees');
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -4691,8 +4691,7 @@ console.log('\nthe name a person sees');
 
 /* The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
    runs extension.js against a stand-in editor in a child process with its own home folder, so the checks see what
-   activation does: which commands it registers, what it carries over from the old extension's storage, and what it leaves
-   alone while the old extension still patches Claude Code itself. */
+   activation does. */
 const LEGACY_ID = 'xnervwang.claude-code-extras';
 /*
  * opts.extensions   id -> { packageJSON, extensionPath } the stand-in's getExtension answers for, $HOME in it standing for the
@@ -5035,7 +5034,7 @@ console.log('\nthe old id\'s last version, shim/');
   /* This extension's side: export.json is read, each entry imported only where this extension has no value of its own,
      and a removed mark means what running Remove would: nothing is patched and no plugin is registered. The shim
      depends on this extension and so activates after it, and the file can appear after this activation has
-     returned; activation returns at once and the start waits for the file. */
+     returned. */
   const OLD = 'User/globalStorage/' + LEGACY_ID + '/';
   const shimDesc = { packageJSON: pkg, extensionPath: '/x/' + LEGACY_ID + '-' + pkg.version };
   const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
@@ -5058,9 +5057,8 @@ console.log('\nthe old id\'s last version, shim/');
 
 /* Uninstalling the old extension unregisters the plugin, and its uninstall hook first copies the plans to
    ~/.claude/agent-work-plan-plans-<stamp>/, since Claude Code deletes the plan directory along with the plugin. Once
-   this extension has registered the plugin again, the plans come back: copied, never over a plan already there, and
-   each rescue folder only once. A folder still being written is left for later, because the same uninstall goes on to
-   delete the plan directory and anything copied into it. */
+   this extension has registered the plugin again, the plans come back. A folder still being written is left for later,
+   because the same uninstall goes on to delete the plan directory and anything copied into it. */
 console.log('\nplans an uninstall copied aside come back');
 {
   let carry = {};
@@ -5117,7 +5115,7 @@ console.log('\nplans an uninstall copied aside come back');
     } else bad(`young folder: ${JSON.stringify(wait)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 
-  /* The wiring: only on a start that runs as usual and has the plugin registered. The stand-in claude records a
+  /* The copy runs only on a normal start with the plugin registered. The stand-in claude records a
      registration the way Claude Code does. */
   const bin = 'ext/anthropic.claude-code-2.1.999-linux-x64/resources/native-binary/claude';
   const claudeSh = '#!/bin/sh\nif [ "$1" = plugin ]; then\n  mkdir -p "$HOME/.claude/plugins"\n'
@@ -5138,11 +5136,11 @@ console.log('\nplans an uninstall copied aside come back');
   if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while an earlier version of the old extension is installed, nothing is copied back');
   else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
 
-  /* The old extension's uninstall hook runs when the editor deletes its folder, at a start of the editor's own, and can
+  /* The old extension's uninstall hook runs at the editor's next start, when the editor deletes its folder, and can
      come after this extension has started: it copies the plans aside and unregisters the plugin, which deletes the plan
      directory, leaving Claude Code's two records without the plugin and its marketplace. The 30-second timer registers
-     the plugin again and copies the plans back, without waiting for the folder to settle. The plugin alone gone,
-     its marketplace still known, is someone's own removal and is left so. */
+     the plugin again and copies the plans back, without waiting for the folder to settle. The plugin alone gone, its
+     marketplace still known, is someone's own removal and is left so. */
   const DATA = '.claude/plugins/data/agent-work-plan-claude-code-extras/';
   const startFiles = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '',
     'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '', [DATA + A + '.json']: '{"nodes":[]}' };

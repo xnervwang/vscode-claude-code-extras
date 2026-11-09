@@ -53,7 +53,7 @@ let selfPath = '';
 /* Settings and commands are named under this prefix. The keys this extension keeps in its own state are not settings,
    are not seen by anyone, and keep the names they were first stored under. */
 const PREFIX = 'claudeCodePlus.';
-/* The prefixes settings and commands had before, the more recent first. */
+/* Earlier prefixes of settings and commands, newest first. */
 const LEGACY_PREFIXES = ['claudeCodeWorkPlan.', 'claudeCodeExtras.'];
 const SETTING = PREFIX + 'enabled';
 const COLOR_SETTING = PREFIX + 'userMessageColor';
@@ -210,7 +210,7 @@ function carryOver(context, log) {
  * first start after it is gone runs as usual.
  */
 const TOLD_KEY = PREFIX + 'toldEarlierBuild';
-/* How long the first start beside the old id's last version waits for its export.json. */
+/* How long the first start waits for export.json from the old id's last version. */
 const EXPORT_WAIT_MS = 20000;
 function standAside(context, log, version) {
   log.appendLine(`Work Plan for Claude Code ${version} (${carryover.LEGACY_ID}) is still installed and patches Claude Code itself; `
@@ -1220,9 +1220,9 @@ function start(context, log, renamed) {
   };
   /*
    * The plans an uninstall copied aside (restoreRescued in src/carryover.js) are copied back once the plugin is
-   * registered again. A rescue folder still too new to read is tried again when it can be. `unregistered` is what
-   * syncPlugin returns, true when it registered the plugin again because the plugin and its marketplace were both gone:
-   * the unregister that empties the plan directory is then over, so no folder is too new.
+   * registered again. A rescue folder written too recently is read again later. `unregistered` is what syncPlugin
+   * returns: true when it registered the plugin again because the plugin and its marketplace were both gone. By then
+   * the plan directory has already been emptied, so no folder needs to wait.
    */
   let rescueTimer = 0;
   const restorePlans = (unregistered) => {
@@ -1236,11 +1236,11 @@ function start(context, log, renamed) {
   context.subscriptions.push({ dispose: () => { if (rescueTimer) clearTimeout(rescueTimer); } });
   syncPlugin(false).then(restorePlans, (e) => log.appendLine('work plan plugin: ' + ((e && e.message) || e)));
   /*
-   * The old extension's uninstall hook takes the patch out of Claude Code and unregisters the plugin, and the editor runs
-   * it when it deletes that extension's folder, at a start of its own, which can be after this extension has started.
-   * When Claude Code lists neither the plugin nor its marketplace although this extension registered them, that is what
-   * happened (see registrationGone): the patch and the plugin are put back and the plans copied back, without waiting
-   * for the next start.
+   * The old extension's uninstall hook takes the patch out of Claude Code and unregisters the plugin, and the editor
+   * runs it at its next start, when it deletes that extension's folder, which can happen after this extension is
+   * running. When Claude Code lists neither the plugin nor its marketplace although this extension registered them,
+   * that is what happened (see registrationGone): the patch and the plugin are put back and the plans copied back,
+   * without waiting for the next start.
    */
   let recovering = false;
   const recover = () => {

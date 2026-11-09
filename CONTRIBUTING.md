@@ -14,7 +14,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `src/claude-files.js` locates Claude Code's directory, its transcripts and the plan directory, and reads a transcript as it grows. Code that reads Claude Code's files goes through it.
 - `src/workplan.js` reads plan files. Its header defines the contract between the two halves.
 - `src/plugin-install.js` registers the companion Claude Code plugin and unregisters it on uninstall.
-- `src/carryover.js` copies what the earlier id, `xnervwang.claude-code-extras`, kept and this extension still uses: the session pins and colors, two saved values, and the work plans an uninstall moved aside. It also tells whether an earlier version of that id is installed, and then nothing here starts.
+- `src/carryover.js` copies what the earlier id, `xnervwang.claude-code-extras`, kept and this extension still uses: the session pins and colors, two saved values, and the work plans an uninstall moved aside. It also tells whether an earlier version of that id is installed.
 - `src/removal.js` notices an uninstall when VS Code restarts its extensions, and restores Claude Code then rather than when VS Code deletes the folder.
 - `src/openlatency.js` pairs panel-opening times from the official extension's log.
 - `src/background.js` finds the `claude --bg` sessions a conversation started, in its transcript, and reads their state for the agent map.

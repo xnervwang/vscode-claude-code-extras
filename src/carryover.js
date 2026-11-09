@@ -9,7 +9,7 @@
  *
  * The editor keeps each extension's global storage in a folder named after its id, so the old id's folder sits beside
  * this one's. Only what the user chose is carried over: the pins and the colors of the session list. The rest of that
- * folder is rebuilt here on its own or asked for again: the panel-opening records, the tab icons, the staged plugin and
+ * folder is recreated here or asked for again: the panel-opening records, the tab icons, the staged plugin and
  * a downloaded Python. The editor deletes the old folder after running the old extension's uninstall hook, at its next
  * start, so the pins and colors come over only if this extension starts before that.
  *
@@ -49,9 +49,10 @@ const EXPORTED_KEYS = ['claudeCodeExtras.removed', 'claudeCodeExtras.projectDirD
 const legacyStorage = (storage) => path.join(path.dirname(storage), LEGACY_ID);
 
 /*
- * Copy one file to `to` unless a file is there: 'copied', 'there' or 'failed'. The copy is written under a temporary name
- * and linked into place, so another window never reads half a file, and one that wrote its own meanwhile keeps it. It
- * keeps the original's modification time, which for a plan decides whether its conversation counts as recent.
+ * Copy one file to `to` unless a file is there: 'copied', 'there' or 'failed'. The copy is written under a temporary
+ * name and linked into place. That way another window never reads half a file, and a file another window wrote in the
+ * meantime is kept. It keeps the original's modification time, which for a plan decides whether its conversation counts
+ * as recent.
  */
 function copyNew(from, to) {
   if (fs.existsSync(to)) return 'there';
@@ -90,7 +91,7 @@ function copyFiles(storage, names) {
 /* Left in a rescue folder once its plans have been copied back, so it is not read again. */
 const COPIED_BACK = 'COPIED-BACK.txt';
 /*
- * How long a rescue folder has to have been left alone before it is read. The uninstall that writes it unregisters the
+ * How long after its last change a rescue folder is read. The uninstall that writes it unregisters the
  * plugin straight after, and Claude Code deletes the plan directory then, with anything copied back into it in the
  * meantime. The editor stops an uninstall hook five seconds after starting it; each of the two commands that unregister
  * takes well under a second, and one already started can finish after the hook is stopped.
@@ -145,7 +146,7 @@ function restoreRescued({ home = os.homedir(), planDir, now = Date.now(), settle
 }
 
 /**
- * Take the entries of the old id's export.json into `state` (a Memento) where it has no value of its own: this
+ * Take the entries of the old id's export.json into `state` (a Memento) where `state` has no value for them: this
  * extension's own value is newer than anything the old one kept. Returns the keys taken.
  */
 async function importState(state, storage) {
