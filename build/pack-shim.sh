@@ -17,7 +17,8 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/extension/images"
 
-cp "$root/shim/package.json" "$root/shim/extension.js" "$root/shim/README.md" "$root/shim/LICENSE" "$stage/extension/"
+cp "$root/shim/package.json" "$root/shim/extension.js" "$root/shim/README.md" "$stage/extension/"
+cp "$root/shim/LICENSE" "$stage/extension/LICENSE.txt"
 cp "$root/images/icon.png" "$stage/extension/images/"
 node "$root/build/make-manifest.js" "$stage" "$root/shim/package.json"
 

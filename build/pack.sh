@@ -19,7 +19,9 @@ mkdir -p "$stage/extension"
 
 cd "$root"
 # claude-plugin/ is the companion Claude Code plugin. It ships inside the extension so the two always match.
-cp -r package.json extension.js uninstall.js src images claude-plugin README.md LICENSE "$stage/extension/"
+cp -r package.json extension.js uninstall.js src images claude-plugin README.md "$stage/extension/"
+# The package format needs a file extension on every file, which is how vsce ships the license too.
+cp LICENSE "$stage/extension/LICENSE.txt"
 # Python leaves compiled bytecode beside a module it imports, so running the plugin's hooks locally seeds __pycache__
 # inside the tree that is copied above. It is a build artifact of whoever last ran them, and it has no business in a
 # file other people install.

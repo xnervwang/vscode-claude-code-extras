@@ -4689,6 +4689,36 @@ console.log('\nthe name a person sees');
   else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
 }
 
+/* A .vsix is an Open Packaging Conventions zip, and the Marketplace reads it as one: a file whose extension has no entry
+   in [Content_Types].xml is not in the package, and a declared one it cannot find fails the upload. */
+console.log('\nwhat the package format can carry');
+{
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-manifest-'));
+  const put = (rel) => { fs.mkdirSync(path.dirname(path.join(stage, rel)), { recursive: true }); fs.writeFileSync(path.join(stage, rel), ''); };
+  try {
+    ['extension/package.json', 'extension/extension.js', 'extension/README.md', 'extension/LICENSE.txt', 'extension/images/icon.png',
+      'extension/images/workplan.svg', 'extension/claude-plugin/agent-work-plan/hooks/plan-row.py'].forEach(put);
+    const script = path.join(__dirname, '..', 'build', 'make-manifest.js');
+    let ran = true;
+    try { cp.execFileSync(process.execPath, [script, stage], { encoding: 'utf8' }); } catch (_) { ran = false; }
+    const types = ran ? fs.readFileSync(path.join(stage, '[Content_Types].xml'), 'utf8') : '';
+    const listed = Array.from(types.matchAll(/Extension="([^"]+)"/g)).map((m) => m[1]).sort();
+    if (ran && JSON.stringify(listed) === JSON.stringify(['.js', '.json', '.md', '.png', '.py', '.svg', '.txt', '.vsixmanifest'])) {
+      ok('[Content_Types].xml lists every extension of the files staged, .py and .svg included');
+    } else bad(`content types for the staged files: ${JSON.stringify(listed)}`);
+    put('extension/LICENSE');
+    let refused = false;
+    try { cp.execFileSync(process.execPath, [script, stage], { encoding: 'utf8', stdio: 'pipe' }); } catch (e) { refused = /LICENSE/.test(String(e.stderr)); }
+    if (refused) ok('a staged file with no extension stops the build, naming the file');
+    else bad('a file with no extension was packed');
+  } finally { fs.rmSync(stage, { recursive: true, force: true }); }
+  const sh = (f) => fs.readFileSync(path.join(__dirname, '..', 'build', f), 'utf8');
+  if (/cp LICENSE "\$stage\/extension\/LICENSE\.txt"/.test(sh('pack.sh')) && /shim\/LICENSE" "\$stage\/extension\/LICENSE\.txt"/.test(sh('pack-shim.sh'))
+    && !/\bLICENSE "\$stage\/extension\/"/.test(sh('pack.sh'))) {
+    ok('both packages carry the license as LICENSE.txt, as vsce does');
+  } else bad('a package still carries LICENSE without an extension');
+}
+
 /* The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
    runs extension.js against a stand-in editor in a child process with its own home folder, so the checks see what
    activation does. */
