@@ -4872,11 +4872,11 @@ console.log('\nwhile the old extension is still installed');
   if (!aside.threw && !t.patching && !t.core && !t.hooks && !t.oldCommands && !t.shared.length && !t.renamed) {
     ok('with the old extension installed as itself: no patch, no stylesheet, no plugin, no source, no hooks, no old command names, no settings moved, nothing copied');
   } else bad(`with the old extension installed: ${JSON.stringify(t)}${aside.threw ? ' threw ' + aside.threw.slice(0, 300) : ''}`);
-  const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]));
+  const warned = (aside.said || []).filter((s) => /Work Plan for Claude Code/.test(s[0]) && /update|uninstall/i.test(s[0]) && /copied back/.test(s[0]));
   const opened = (aside.executed || []).some((a) => a[0] === 'workbench.extensions.search' && a[1] === '@id:' + LEGACY_ID);
   if (warned.length === 1 && warned[0].includes('Show It') && opened && (aside.logs || []).some((l) => l.includes(LEGACY_ID) && l.includes('1.0.21'))
     && (aside.state || {})['claudeCodePlus.toldEarlierBuild'] === '1.0.21') {
-    ok('it says so in the output and once in a notification, whose button searches the Extensions view for the old id');
+    ok('it says so in the output and once in a notification, which says the plans come back after an uninstall and whose button searches the Extensions view for the old id');
   } else bad(`what it said: ${JSON.stringify({ said: aside.said, executed: aside.executed, logs: (aside.logs || []).slice(0, 4), told: (aside.state || {})['claudeCodePlus.toldEarlierBuild'] })}`);
   const again = run(real, { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });
   const newer = run(Object.assign({}, real, { packageJSON: Object.assign({}, real.packageJSON, { version: '1.0.22' }) }), { state: { 'claudeCodePlus.toldEarlierBuild': '1.0.21' } });

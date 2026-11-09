@@ -217,7 +217,8 @@ function standAside(context, log, version) {
   log.appendLine(`Work Plan for Claude Code ${version} (${carryover.LEGACY_ID}) is still installed and patches Claude Code itself; `
     + 'this extension does nothing until it is updated or uninstalled');
   const tell = () => vscode.window.showWarningMessage(
-    'Work Plan for Claude Code, the earlier name of this extension, is still installed. Claude Code Plus does nothing until you update or uninstall it.',
+    'Work Plan for Claude Code, the earlier name of this extension, is still installed. Claude Code Plus does nothing until you update or uninstall it; '
+      + 'after an uninstall your work plans are copied back.',
     'Show It',
   ).then((pick) => { if (pick === 'Show It') vscode.commands.executeCommand('workbench.extensions.search', '@id:' + carryover.LEGACY_ID); }, () => {});
   for (const c of (context.extension.packageJSON.contributes || {}).commands || []) {

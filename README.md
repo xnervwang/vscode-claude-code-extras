@@ -69,7 +69,7 @@ Search for **Claude Code Plus** in the Extensions view, or run
 `code --install-extension xnervwang.claude-code-plus`. Anthropic's Claude Code extension and
 Agent Plus install as dependencies.
 
-This extension used to be Work Plan for Claude Code (`xnervwang.claude-code-extras`). If that one is installed, update it rather than uninstall it: its last version hands over to Claude Code Plus, while uninstalling it unregisters the work plan plugin and moves your plans to `~/.claude/agent-work-plan-plans-<time>/`. Claude Code Plus does nothing until then. Its settings, pins and session colors are carried over the first time Claude Code Plus starts.
+This extension used to be Work Plan for Claude Code (`xnervwang.claude-code-extras`). If that one is installed, Claude Code Plus does nothing until you update or uninstall it. Either is fine: uninstalling it moves your work plans to `~/.claude/agent-work-plan-plans-<time>/`, and Claude Code Plus copies them back a few minutes later. The old extension's settings, pins and session colors are carried over the first time Claude Code Plus starts.
 
 Reload the VS Code window twice after installing. Run
 `Claude Code Plus: Show Status` for the patch status. In a Remote SSH window, install on the
