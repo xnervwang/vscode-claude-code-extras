@@ -131,8 +131,8 @@ async function offerReload(text) {
 }
 
 /* Commands were once named under the old prefixes, and a keybinding someone made then still names them that way. The old
-   names stay registered, unlisted, so those keep working. The editor refuses a name another extension in this host holds
-   already - the old extension itself, until the host restarts after it was updated - and that name is left to it. */
+   names stay registered, unlisted, so those keep working. The editor refuses a name that another extension in this host
+   holds already, as the old extension does until the host restarts after it was updated, and that name is left to it. */
 function registerCommand(name, fn) {
   const all = [vscode.commands.registerCommand(PREFIX + name, fn)];
   for (const p of LEGACY_PREFIXES) {
@@ -143,8 +143,8 @@ function registerCommand(name, fn) {
 
 /*
  * Settings were once named under the old prefixes. A value set under an old name is copied to its new name, in the same
- * scope - from the more recent prefix when both have one - and the old ones are then cleared where the editor allows
- * that: it may refuse to write a name no extension declares any more, and then the old line stays behind, read by nothing.
+ * scope, from the more recent prefix when both have one. The old ones are then cleared where the editor allows that;
+ * it may refuse to write a name no extension declares any more, and then the old line stays behind, read by nothing.
  *
  * A copy is made only where the new name has no value of its own, so nothing set under the new name is overwritten; and
  * each scope is done once, so putting a new name back to its default later does not bring the old value back.
@@ -206,7 +206,7 @@ function carryOver(context, log) {
 /*
  * The old extension installed as itself rather than as its last version (src/carryover.js) patches Claude Code with its
  * own build, and two extensions doing that take turns rewriting the same files. Until it is updated or uninstalled
- * nothing here starts - no patch, no stylesheet beside the panel, no plugin, no source for Agent Plus, no hooks for the
+ * nothing here starts: no patch, no stylesheet beside the panel, no plugin, no source for Agent Plus, no hooks for the
  * patched bundles, no settings moved and nothing copied, since the old one still reads all of that. Its commands share
  * names with ours, and are left to it. The first start after it is gone runs as usual.
  */

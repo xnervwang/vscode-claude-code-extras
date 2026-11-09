@@ -4692,8 +4692,7 @@ console.log('\nthe name a person sees');
   else bad('the README still uses an old name: ' + [readme[0]].concat(old).map((l) => l.trim().slice(0, 80)).join(' | '));
 }
 
-/* -- the rename to Claude Code Plus --
-   The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
+/* The extension was published as xnervwang.claude-code-extras and is now xnervwang.claude-code-plus. Everything below
    runs extension.js against a stand-in editor in a child process with its own home folder, so what is checked is what
    activation does: which commands it registers, what it carries over from the old extension's storage, and what it leaves
    alone while the old extension still patches Claude Code itself. */
@@ -4710,7 +4709,7 @@ const LEGACY_ID = 'xnervwang.claude-code-extras';
  * opts.aged         opts.files are given a modification time an hour back
  * opts.executable   relative paths of opts.files to make executable
  * opts.after(ms)    how long to let it run after activate resolves
- * Returns { threw, commands, looked, hooks, said, executed, logs, state, files, activateMs } - files being every file
+ * Returns { threw, commands, looked, hooks, said, executed, logs, state, files, activateMs }; files is every file
  * under the home folder afterwards, relative, with its content when it is JSON.
  */
 const activateStub = (opts = {}) => {
@@ -4805,8 +4804,8 @@ const activateStub = (opts = {}) => {
 };
 
 /* A keybinding someone made under either old prefix names the command that way, so both old names stay registered,
-   unlisted. When another extension in the same host holds one of them - the old extension itself, in a window that has
-   not restarted its extensions since an update - the editor refuses it, and that must not stop the rest. */
+   unlisted. When another extension in the same host holds one of them, as the old extension itself does in a window that
+   has not restarted its extensions since an update, the editor refuses it, and that must not stop the rest. */
 console.log('\ncommands under both old names');
 {
   const declared = require('../package.json').contributes.commands.map((x) => x.command.replace(/^[^.]+\./, ''));
@@ -4824,9 +4823,9 @@ console.log('\ncommands under both old names');
 }
 
 /* The editor gives each extension id its own global storage folder, so the pins and colors chosen under the old id are in
-   a sibling folder this extension would never read. Those two are the reader's own choices and are copied - copied, since
-   the old extension can still be installed - when this extension has none of its own; everything else in that folder is
-   rebuilt or asked for again, and stays where it is. */
+   a sibling folder this extension would never read. Those two are the reader's own choices. They are copied, not moved,
+   since the old extension can still be installed, and only when this extension has none of its own. Everything else in
+   that folder is rebuilt or asked for again, and stays where it is. */
 console.log('\npins and colors from the old extension\'s storage');
 {
   const OLD = 'User/globalStorage/' + LEGACY_ID + '/', NEW = 'User/globalStorage/xnervwang.claude-code-plus/';
@@ -4852,7 +4851,7 @@ console.log('\npins and colors from the old extension\'s storage');
 
 /* The old extension installed as itself patches Claude Code with its own build, and two extensions doing that take turns
    rewriting the same files. So while it is, this one writes nothing anyone else reads, and says why once per version of
-   the old one. The last version of the old id hands over instead - it depends on this extension and patches nothing - and
+   the old one. The last version of the old id depends on this extension and patches nothing, so
    with that one installed everything runs as usual. */
 console.log('\nwhile the old extension is still installed');
 {
@@ -5037,9 +5036,9 @@ console.log('\nthe old id\'s last version, shim/');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 
   /* This extension's side: export.json is read, each entry imported only where this extension has no value of its own,
-     and a removed mark means what running Remove would - nothing is patched and no plugin is registered. The shim
-     activates only after this extension, which depends on it the other way, so the file can appear after this
-     activation has returned; activation must not wait for it, and the start waits instead. */
+     and a removed mark means what running Remove would: nothing is patched and no plugin is registered. The shim
+     depends on this extension and so activates after it, and the file can appear after this activation has
+     returned; activation must not wait for it, and the start waits instead. */
   const OLD = 'User/globalStorage/' + LEGACY_ID + '/';
   const shimDesc = { packageJSON: pkg, extensionPath: '/x/' + LEGACY_ID + '-' + pkg.version };
   const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
