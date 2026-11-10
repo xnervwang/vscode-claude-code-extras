@@ -12,7 +12,7 @@ Requires Anthropic's Claude Code extension, Agent Plus and VS Code 1.96 or later
 
 The work plan on the left of the Claude Code panel:
 
-![The work plan view beside the Claude Code panel](images/tools-expanded.png)
+![The work plan view beside the Claude Code panel](images/work-plan.png)
 
 ## Work plan
 
