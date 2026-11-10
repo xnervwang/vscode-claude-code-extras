@@ -4241,6 +4241,14 @@ console.log('\none copy of what the hooks share');
 console.log('\nan uninstall puts Claude Code back at once');
 {
   const removal = require('../src/removal');
+  {
+    const found = removal.roots('/x/extensions');
+    const want = ['.vscode', '.vscode-insiders', '.vscode-server', '.vscode-server-insiders', '.cursor']
+      .map((d) => path.join(os.homedir(), d, 'extensions'));
+    if (found[0] === '/x/extensions' && want.every((d) => found.includes(d))) {
+      ok('other copies are looked for in the extension folders of VS Code, Insiders, their servers and Cursor');
+    } else bad(`extension folders searched: ${found.join(', ')}`);
+  }
   const ID = 'xnervwang.claude-code-plus';
   const me = ID + '-1.0.5';
   const stage = (folders, marked, body) => {
@@ -4425,13 +4433,14 @@ console.log('\nthe uninstall hook with another editor on the machine');
     fs.writeFileSync(path.join(insiders, '.obsolete'), JSON.stringify({ [ID + '-1.0.20']: true }));
     fs.mkdirSync(path.join(insiders, ID + 'x-1.0.0'));
     const plan = removal.uninstallPlan(server, ID);
-    if (JSON.stringify(plan.restore) === JSON.stringify([server, insiders]) && plan.lastCopy === false
+    const absent = ['.vscode-server-insiders', '.cursor'].map((d) => path.join(home, d, 'extensions'));
+    if (JSON.stringify(plan.restore) === JSON.stringify([server, insiders, ...absent]) && plan.lastCopy === false
       && JSON.stringify(plan.owned) === JSON.stringify([stable])) {
       ok('another editor\'s folder with a copy still installed is left to it, and the plugin with it');
     } else bad(`uninstall plan ${JSON.stringify(plan)}`);
     fs.writeFileSync(path.join(stable, '.obsolete'), JSON.stringify({ [ID + '-1.0.21']: true }));
     const last = removal.uninstallPlan(server, ID);
-    if (JSON.stringify(last.restore) === JSON.stringify([server, stable, insiders]) && last.lastCopy === true) {
+    if (JSON.stringify(last.restore) === JSON.stringify([server, stable, insiders, ...absent]) && last.lastCopy === true) {
       ok('with no copy left in any editor, every folder is cleaned up and the plugin is unregistered');
     } else bad(`uninstall plan with no copy left ${JSON.stringify(last)}`);
   } finally {

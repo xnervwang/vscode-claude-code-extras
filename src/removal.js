@@ -43,6 +43,8 @@ function roots(extensionsDir) {
     path.join(home, '.vscode', 'extensions'),
     path.join(home, '.vscode-insiders', 'extensions'),
     path.join(home, '.vscode-server', 'extensions'),
+    path.join(home, '.vscode-server-insiders', 'extensions'),
+    path.join(home, '.cursor', 'extensions'),
   ].filter(Boolean)));
 }
 
