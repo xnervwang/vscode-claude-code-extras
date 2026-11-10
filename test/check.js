@@ -4419,11 +4419,12 @@ console.log('\nthe uninstall hook with another editor on the machine');
 {
   const removal = require('../src/removal');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-two-editors-'));
-  const realHome = process.env.HOME, realExt = process.env.VSCODE_EXTENSIONS;
+  const realHome = process.env.HOME, realProfile = process.env.USERPROFILE, realExt = process.env.VSCODE_EXTENSIONS;
   const ID = 'xnervwang.claude-code-plus';
   const dirOf = (p) => { const d = path.join(home, p, 'extensions'); fs.mkdirSync(d, { recursive: true }); return d; };
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     delete process.env.VSCODE_EXTENSIONS;
     const server = dirOf('.vscode-server'), stable = dirOf('.vscode'), insiders = dirOf('.vscode-insiders');
     fs.mkdirSync(path.join(server, ID + '-1.0.22'));
@@ -4445,6 +4446,7 @@ console.log('\nthe uninstall hook with another editor on the machine');
     } else bad(`uninstall plan with no copy left ${JSON.stringify(last)}`);
   } finally {
     if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    if (realProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = realProfile;
     if (realExt !== undefined) process.env.VSCODE_EXTENSIONS = realExt;
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -4951,7 +4953,7 @@ const activateStub = (opts = {}) => {
       const rec = { commands: [], looked: [], said: [], executed: [], logs: [] };
       const taken = new Set(${JSON.stringify(opts.taken || [])});
       const refuse = new Set(${JSON.stringify(opts.refuse || [])});
-      const exts = JSON.parse(${JSON.stringify(JSON.stringify(opts.extensions || {}))}.split('$HOME').join(${JSON.stringify(home)}));
+      const exts = JSON.parse(${JSON.stringify(JSON.stringify(opts.extensions || {}))}.split('$HOME').join(${JSON.stringify(JSON.stringify(home).slice(1, -1))}));
       const say = async (text, ...items) => { rec.said.push([text].concat(items.filter((i) => typeof i === 'string'))); return ${JSON.stringify(opts.answer || null)} || undefined; };
       class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
       module.exports = { rec, TreeItem, TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
@@ -5020,7 +5022,8 @@ const activateStub = (opts = {}) => {
         if (n.isDirectory()) walk(p);
         else if (n.name !== 'vscode-stub.js') {
           const body = fs.readFileSync(p, 'utf8');
-          try { r.files[path.relative(home, p)] = JSON.parse(body); } catch (_) { r.files[path.relative(home, p)] = body; }
+          const rel = path.relative(home, p).split(path.sep).join('/');
+          try { r.files[rel] = JSON.parse(body); } catch (_) { r.files[rel] = body; }
         }
       }
     };
@@ -5149,12 +5152,13 @@ console.log('\nan uninstall while the old extension is still installed');
   const removal = require('../src/removal');
   const ID = 'xnervwang.claude-code-plus';
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-uninst-old-'));
-  const realHome = process.env.HOME, realExt = process.env.VSCODE_EXTENSIONS;
+  const realHome = process.env.HOME, realProfile = process.env.USERPROFILE, realExt = process.env.VSCODE_EXTENSIONS;
   const put = (dir, folder, pkg) => { fs.mkdirSync(path.join(dir, folder), { recursive: true }); if (pkg) fs.writeFileSync(path.join(dir, folder, 'package.json'), JSON.stringify(pkg)); };
   const realPkg = { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.21', extensionDependencies: ['anthropic.claude-code'] };
   const shimPkg = { name: 'claude-code-extras', publisher: 'xnervwang', version: '1.0.22', extensionDependencies: [ID] };
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     delete process.env.VSCODE_EXTENSIONS;
     const server = path.join(home, '.vscode-server', 'extensions'), stable = path.join(home, '.vscode', 'extensions');
     put(server, ID + '-1.0.23', { name: 'claude-code-plus' });
@@ -5178,6 +5182,7 @@ console.log('\nan uninstall while the old extension is still installed');
     else bad(`uninstall plan with the old extension in another editor: ${JSON.stringify(other)}`);
   } finally {
     if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    if (realProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = realProfile;
     if (realExt !== undefined) process.env.VSCODE_EXTENSIONS = realExt;
     fs.rmSync(home, { recursive: true, force: true });
   }
