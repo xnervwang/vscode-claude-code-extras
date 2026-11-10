@@ -93,9 +93,27 @@ function pidsOf(records, sessionId) {
   return [...out].sort((a, b) => a - b);
 }
 
-/* So that /home/x and /local/home/x match when one is a symbolic link to the other. */
-const realPath = (p) => { try { return fs.realpathSync.native(p); } catch (_) { return path.resolve(p); } };
-const caseOf = process.platform === 'win32' ? (s) => s.toLowerCase() : (s) => s;
+/* How far up a deleted folder's path to look for a parent that still exists; bounded so a path that never resolves
+   cannot spin. */
+const MAX_WALK_UP = 64;
+
+/* Resolves links, so /home/x and /local/home/x match when one links to the other. For a deleted path, only the part
+   that still exists is resolved. */
+function realPath(p) {
+  const abs = path.resolve(p);
+  try { return fs.realpathSync.native(abs); } catch (_) { /* gone, or not readable */ }
+  let head = abs;
+  const tail = [];
+  for (let i = 0; i < MAX_WALK_UP; i++) {
+    const parent = path.dirname(head);
+    if (parent === head) break;
+    tail.unshift(path.basename(head));
+    head = parent;
+    try { return path.join(fs.realpathSync.native(head), ...tail); } catch (_) { /* keep going up */ }
+  }
+  return abs;
+}
+const caseOf = process.platform === 'win32' || process.platform === 'darwin' ? (s) => s.toLowerCase() : (s) => s;
 
 /* Compares real paths, so a folder reached through a symbolic link still matches. */
 function folderTest(folders) {

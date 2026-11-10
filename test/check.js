@@ -7803,6 +7803,22 @@ console.log('\nconversations');
   }
 
   {
+    const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-ws-gone-')));
+    const holder = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-ws-link-')));
+    const link = path.join(holder, 'ws');
+    fs.symlinkSync(real, link);
+    const gone = w.folderTest([real])(path.join(link, 'deleted', 'deeper'));
+    const goneUnderLink = w.folderTest([link])(path.join(real, 'deleted'));
+    const mac = cp.spawnSync(process.execPath, ['-e', `Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const w = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'waiting.js'))});
+      process.stdout.write(String(w.folderTest([${JSON.stringify(real)}])(${JSON.stringify(real.toUpperCase())})));`], { encoding: 'utf8' });
+    if (gone && goneUnderLink && mac.stdout === 'true') {
+      ok('a deleted folder still counts as in the workspace, resolved through its nearest existing parent, and macOS compares names without case');
+    } else bad(`deleted folder through a link ${gone}, deleted folder under a linked workspace ${goneUnderLink}, macOS case ${mac.stdout || mac.stderr}`);
+    for (const d of [real, holder]) fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-wait-'));
     const file = path.join(dir, 't.jsonl');
     fs.writeFileSync(file, [
