@@ -1,30 +1,30 @@
 {
-  "core": "241702240ab190ec08901a249a87025b3fb2d84e",
+  "core": "68dc1f6c5503d55aaa7ce9e096eb8077711d7c5f",
   "files": [
     {
       "path": "build/sync-shared.js",
       "from": "shared/build/sync-shared.js",
-      "sha256": "3d110f0161f63564221885ea28c2816f9f9d5349058c66a8f5a9b8e51f132f05"
+      "sha256": "7558bffcdfdd6353794127c5da1c5797118b3467346f2ea5bc5f798016bd14d3"
     },
     {
       "path": "build/pack-vsix.js",
       "from": "shared/build/pack-vsix.js",
-      "sha256": "7ed479fc55474da7a847ba5841c147b74769c1096753665ca07764b9fbf71538"
+      "sha256": "b70752bb0ca5919435276f839ef15992b17f99d9c641552fbddaaf19b53415ec"
     },
     {
       "path": "build/make-manifest.js",
       "from": "shared/build/make-manifest.js",
-      "sha256": "83de82a407957be6542962b3c0a44e2896f93ca49c309e78742ed7d8314343e3"
+      "sha256": "f9790d13a5b674b2c85672b88696921f5fabe6fe3eb00fbe4b3448b9566da1fe"
     },
     {
       "path": "test/shared-copies.js",
       "from": "shared/test/shared-copies.js",
-      "sha256": "593676decba75697dcc9b3781f52b7dd3560da309d3792874baf931e753cd9f6"
+      "sha256": "c1e6d4ef34defee5f79a698adffb4bce53b421a7bc4859fb2a935b2cd9a969b7"
     },
     {
       "path": "test/pack-check.js",
       "from": "shared/test/pack-check.js",
-      "sha256": "30734381c5b65ae77309a546b380e227821a5fe5fb665ef8ce9668fa6345a9dd"
+      "sha256": "515724e105b64b70ecac2c33bb8530c2bae5c40e765cd7ec184700c0909a5641"
     }
   ]
 }

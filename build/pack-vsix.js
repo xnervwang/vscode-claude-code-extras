@@ -1,7 +1,7 @@
 // BSD 3-Clause License
 // Copyright (c) 2026, Xnerv Wang
 // All rights reserved.
-// Source: vscode-agent-plus shared/build/pack-vsix.js, copied by sync-shared.js; edit it there, not in a copy.
+// Source: vscode-agent-plus shared/build/pack-vsix.js; sync-shared.js copies it, so edit it there.
 
 'use strict';
 /*
