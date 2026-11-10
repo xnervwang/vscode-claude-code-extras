@@ -108,10 +108,6 @@ Verified against Claude Code 2.1.319.
 | **Status dots:** a Claude Code tab's logo shows a green dot while Claude works and a red one when it finished while you were away, where Claude Code shows nothing and orange. The session list uses the same green and red. | Editor tabs, session list |
 | **Session information:** See the session ID, Claude's process ID, starting directory, transcript location and size; click a value to copy it. | Footer button |
 
-With Claude Code's Focus view on, the tool calls are folded:
-
-![The same conversation with the tool calls folded](images/tools-folded.png)
-
 ## Settings
 
 Open `Claude Code Plus: Settings` for all 36 settings. Most apply without a reload; installing or upgrading the patch needs a reload.
