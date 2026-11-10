@@ -29,6 +29,8 @@ const host = require('../src/host');
 const ADAPTERS = require('../src/adapters');
 const supported = require('../build/supported');
 const { pickShape } = require('../src/edits');
+/* Agent Plus's page helpers, which the fragments that use them need ahead of them when one is run on its own. */
+const KIT = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '03-kit.js'), 'utf8');
 
 let failures = 0;
 /* Checks that could not run, as against ones that ran and passed. Two whole sections need a real Claude Code install and
@@ -1060,7 +1062,7 @@ console.log('\nthe context breakdown on the usage meter');
   const env = { out: {}, sessionRef: null, WeakSet, Date, window: { innerHeight: 800, innerWidth: 400 },
     setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout: () => {},
     document: { querySelector: () => btn, createElement: el, body: { appendChild() {} } } };
-  new vm.Script(`(function(){${fragment}\n;out.wire = wireCtxButton;`
+  new vm.Script(`(function(){${KIT}\n${fragment}\n;out.wire = wireCtxButton;`
     + 'out.keep = function(u, k){ ctxCache = u; ctxKey = k; ctxAt = Date.now(); };})()', { filename: '55-context-detail.js' })
     .runInNewContext(env);
   env.out.wire();
@@ -3502,7 +3504,8 @@ console.log('\nthe chimes, against the browser\'s autoplay rule');
 {
   const script = `
     const vm = require('vm'), fs = require('fs');
-    const fragment = fs.readFileSync(${JSON.stringify(path.join(__dirname, '..', 'src', 'page', '65-chime.js'))}, 'utf8');
+    const fragment = fs.readFileSync(${JSON.stringify(path.join(__dirname, '..', 'src', 'page', '03-kit.js'))}, 'utf8') + '\\n'
+      + fs.readFileSync(${JSON.stringify(path.join(__dirname, '..', 'src', 'page', '65-chime.js'))}, 'utf8');
     const run = async (start, resumes) => {
       const made = [], posts = [], listeners = {};
       function Spy() {
@@ -3514,7 +3517,8 @@ console.log('\nthe chimes, against the browser\'s autoplay rule');
         made.push(me);
         return me;
       }
-      const env = { window: { AudioContext: Spy, localStorage: { getItem: () => null, setItem() {} } }, Promise, setTimeout, MUTE: null,
+      // The page's window is its global object, where agentPlusKit looks for AudioContext.
+      const env = { AudioContext: Spy, window: { AudioContext: Spy, localStorage: { getItem: () => null, setItem() {} } }, Promise, setTimeout, MUTE: null,
         document: { addEventListener: (t, f) => { listeners[t] = f; } }, isOff: () => false, sessionRef: { busy: { value: false } },
         acquireVsCodeApi: () => ({ postMessage: (m) => posts.push(m.type + ' ' + m.requestId) }) };
       vm.createContext(env);
@@ -6272,7 +6276,7 @@ console.log('\nconversations pinned in the session list');
     env.hideLabel = () => { env.hidden++; };
     env.isOff = (k) => (k === 'sessionDates' ? !env.sessionDates : false);
     vm.createContext(env);
-    vm.runInContext('var pinsCache = null;' + frag('15-format.js') + frag('82-scheduled-tasks.js') + frag('83-session-pins.js')
+    vm.runInContext('var pinsCache = null;' + KIT + '\n' + frag('15-format.js') + frag('82-scheduled-tasks.js') + frag('83-session-pins.js')
       + ';this.reset = function(){ pinsCache = null; propCache = {}; };', env);
     const h = (type, props, key) => ({ type, props, key });
     const rowOf = (id, onDisk = true) => ({ sessionId: { value: id }, transcriptOnDisk: onDisk });
@@ -6504,7 +6508,7 @@ console.log('\nthe date on a message or reply from before today');
   class FixedDate extends Date { constructor(...a) { if (a.length) super(...a); else super(FIXED); } }
   const env = { Date: FixedDate, window: {}, isOff: () => false };
   vm.createContext(env);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '15-format.js'), 'utf8') + ';this.fmt = fmt;', env);
+  vm.runInContext(KIT + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '15-format.js'), 'utf8') + ';this.fmt = fmt;', env);
   const at = (...a) => new Date(...a).getTime();
   const want = [
     [at(2026, 9, 16, 9, 5, 7), '09:05:07', 'today: the clock alone'],

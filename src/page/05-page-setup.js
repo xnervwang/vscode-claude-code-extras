@@ -45,48 +45,16 @@
    * The box is styled from the same theme variables the panel's own hint uses, rather than by borrowing its class: the
    * build hashes the suffix of every class name, and matching `popup_` by pattern would just as happily find some other
    * component's popup. `aria-label` carries the text, which is what the panel's own buttons use for it, and is what the
-   * handler below reads - so changing the label needs no rewiring.
+   * handler reads - so changing the label needs no rewiring. The box itself comes from agentPlusKit.labels.
    */
-  var labelBox = null;
-  var hideLabel = function(){
-    if (labelBox && labelBox.parentNode) labelBox.parentNode.removeChild(labelBox);
-    labelBox = null;
-  };
-  var showLabel = function(el, given){
-    var text = typeof given === 'string' ? given : el && el.getAttribute('aria-label');
-    if (!text) return;
-    hideLabel();
-    var box = document.createElement('div');
-    box.setAttribute('data-cce-label', '1');
-    var s = box.style;
-    s.position = 'fixed'; s.zIndex = '1000'; s.pointerEvents = 'none';
-    s.maxWidth = '260px'; s.padding = '8px';
-    s.background = 'var(--app-menu-background, var(--vscode-editorWidget-background, #252526))';
-    s.border = '1px solid var(--app-input-border, var(--vscode-widget-border, #454545))';
-    s.borderRadius = 'var(--corner-radius-large, 6px)';
-    s.color = 'var(--app-primary-foreground, var(--vscode-foreground, #ccc))';
-    s.fontSize = '.9em'; s.lineHeight = '1.35'; s.whiteSpace = 'pre-line'; s.overflowWrap = 'anywhere';
-    box.textContent = text;
-    document.body.appendChild(box);
-    /* Measured after it is in the document, because its height depends on how many lines the text wrapped to. Above the
-       button when there is room, and kept inside the panel on both sides - the footer's rightmost controls would
-       otherwise put the box off the edge. */
-    var r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
-    s.left = Math.max(8, Math.min(window.innerWidth - b.width - 8, r.left + r.width / 2 - b.width / 2)) + 'px';
-    s.top = (r.top - b.height - 8 >= 8 ? r.top - b.height - 8 : r.bottom + 8) + 'px';
-    labelBox = box;
-  };
-  var setLabel = function(el, text){
-    if (!el) return;
-    if (el.getAttribute('aria-label') !== text) el.setAttribute('aria-label', text);
-    if (el.hasAttribute('data-cce-labelled')) return;
-    el.setAttribute('data-cce-labelled', '1');
-    el.addEventListener('mouseenter', function(){ showLabel(el); });
-    el.addEventListener('mouseleave', hideLabel);
-    // A box left hanging over a control the reader has just acted on reads as stuck rather than as informative.
-    el.addEventListener('click', hideLabel);
-  };
-  /* Same reason, for the properties those repaints write: an unchanged value is not worth a mutation. */
+  var tips = agentPlusKit.labels({ mark: ['data-cce-label', '1'], css: 'z-index:1000;padding:8px;'
+    + 'background:var(--app-menu-background, var(--vscode-editorWidget-background, #252526));'
+    + 'border:1px solid var(--app-input-border, var(--vscode-widget-border, #454545));border-radius:var(--corner-radius-large, 6px);'
+    + 'color:var(--app-primary-foreground, var(--vscode-foreground, #ccc));font-size:.9em;' });
+  var hideLabel = tips.hide, showLabel = tips.show;
+  var setLabel = function(el, text){ tips.wire(el, text, 'data-cce-labelled'); };
+  /* The repaints call this often and most calls change nothing, so a style property is written only when its value
+     differs. */
   var setStyle = function(el, prop, value){
     if (el && el.style[prop] !== value) el.style[prop] = value;
   };

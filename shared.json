@@ -60,6 +60,11 @@
       "path": "src/core-link.js",
       "from": "shared/host/core-link.js",
       "sha256": "e5f4cce74af83b7d096678e503fabc8482514b5f407db679372cd2b7428fbcd7"
+    },
+    {
+      "path": "src/page/03-kit.js",
+      "from": "shared/page/kit.js",
+      "sha256": "681e3d319bbeb69f5e3bf12a33cc2ef60121adb14532f15bc509c2db74a82068"
     }
   ]
 }

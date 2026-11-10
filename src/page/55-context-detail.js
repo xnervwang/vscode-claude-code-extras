@@ -14,12 +14,7 @@
   var CTX_TTL = 20000;  // even with an unchanged token count, the breakdown can shift when CLAUDE.md, skills or memory files change between turns
   var ctxWired = (typeof WeakSet === 'function') ? new WeakSet() : null;
 
-  var kfmt = function(n){
-    if (typeof n !== 'number' || !isFinite(n)) return '-';
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return String(n);
-  };
+  var kfmt = agentPlusKit.kfmt;
   // Laid out like the /context view, and coloured from the same eight chart variables the panel uses there, so the
   // two read as one thing. The class names in that view carry a per-build hash, so the look is rebuilt here from
   // plain styles rather than borrowed by name.
@@ -28,11 +23,7 @@
     var k = i % CHART_FALLBACK.length;
     return 'var(--app-chart-' + (k + 1) + ', ' + CHART_FALLBACK[k] + ')';
   };
-  var pctText = function(tokens, max){
-    if (!(max > 0)) return '';
-    var v = tokens / max * 100;
-    return v < 0.1 ? '<0.1%' : v.toFixed(1) + '%';
-  };
+  var pctText = agentPlusKit.pct;
   // Home directories are shown as ~ the way the panel does it, so a long path leaves room for the figure. Written
   // with plain string work on purpose: this whole script is a template literal, and a regex containing a slash needs
   // an escape level that is easy to get wrong and fails only at runtime.

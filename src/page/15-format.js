@@ -5,25 +5,13 @@
 // Clock and date formatting, including the session-list date range.
 // Fragment of the in-page script - see README.md in this folder.
 
-  var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
-  // Month before day, and the year only when it is not the current one: the session list and the work plan tree write
-  // dates this way, and a second order for the same kind of value makes 01/10 readable as two different days.
-  var fmt = function(ms){
-    if (typeof ms !== 'number' || !isFinite(ms)) return '';
-    var d = new Date(ms), now = new Date(), t = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
-    if (d.toDateString() === now.toDateString()) return t;
-    var md = p2(d.getMonth() + 1) + '/' + p2(d.getDate());
-    return (d.getFullYear() === now.getFullYear() ? md : d.getFullYear() + '/' + md) + ' ' + t;
-  };
+  // Month before day, and the year only when it is not the current one (agentPlusKit.stamp): the session list and the
+  // work plan tree write dates this way, and a different order here would let 01/10 mean two different days.
+  var fmt = function(ms){ return agentPlusKit.stamp(ms); };
   // Session list: absolute dates next to the compact relative time. On window because the call site
   // lives in the official component code, outside this closure. Pure ASCII source, no encoding risk.
   try {
-    var MID = String.fromCharCode(183), ARROW = String.fromCharCode(8594);
-    var ymd = function(ms){
-      if (typeof ms !== 'number' || !isFinite(ms)) return null;
-      var d = new Date(ms);
-      return { y: d.getFullYear(), md: p2(d.getMonth() + 1) + '/' + p2(d.getDate()) };
-    };
+    var MID = String.fromCharCode(183);
     window.__cceSpan = function(rel, last, created, id, relOf){
       /* A pinned conversation whose files were given a later time shows when it was really last active, in the panel's
          own relative form, whether or not the dates are on: the time the list was given is not one anybody chose. */
@@ -34,17 +22,8 @@
       }
       /* Called from the official component, so returning what it passed in leaves its own text untouched. */
       if (isOff('sessionDates')) return rel;
-      var now = new Date().getFullYear();
-      var e = ymd(last), s = ymd(created);
-      // the year is written only when it is not the current one, and only once per range
-      var one = function(v){ return v.y === now ? v.md : v.y + '/' + v.md; };
-      if (!e) return rel;
-      var body;
-      if (s && (s.y !== e.y || s.md !== e.md)) {
-        body = (s.y === e.y && s.y !== now) ? s.y + '/' + s.md + ARROW + e.md : one(s) + ARROW + one(e);
-      } else {
-        body = one(e);
-      }
-      return rel + ' ' + MID + ' ' + body;
+      // the year is written only when it is not the current one, and only once per range (agentPlusKit.span)
+      var body = agentPlusKit.span(created, last);
+      return body ? rel + ' ' + MID + ' ' + body : rel;
     };
   } catch (e) {}

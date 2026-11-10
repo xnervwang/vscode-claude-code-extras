@@ -2,7 +2,8 @@
 
 These files are concatenated, in file-name order, into one closure and appended to the panel's bundle by
 `src/webview.js`. They are **fragments, not modules**: no `require`, no `module.exports`, and every binding a fragment
-declares is visible to all the others.
+declares is visible to all the others. The one exception is `03-kit.js`, Agent Plus's page helpers (`agentPlusKit`),
+copied in through `shared.json`: its last line exports the object when it is loaded under Node, and does nothing here.
 
 ## Why files and not one string
 
