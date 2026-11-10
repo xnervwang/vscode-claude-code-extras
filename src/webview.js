@@ -57,6 +57,8 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 const { applyEdits, shapesOf } = require('./edits');
+const files = require('./files');
+const { patchTarget } = require('./patch-target');
 const tabdot = require('./tabdot');
 
 const VERSION = 32;
@@ -590,7 +592,7 @@ const SCRIPT = ['', MARK, SCRIPT_BODY, ''].join('\n');
 /** Pure transform. Returns { out, chosen } or { error }. Never partially applies. */
 function patchSource(src) {
   if (src.includes(ANY_MARK)) return { error: 'the source to patch already carries a panel patch' };
-  const r = applyEdits(src, EDITS);
+  const r = applyEdits(src, EDITS, 'Claude Code');
   if (r.error) return { error: r.error };
   const out = r.out + '\n' + SCRIPT;
   try { new vm.Script(out, { filename: 'index.js' }); }
@@ -602,16 +604,6 @@ function webviewFile(claudeExtensionPath) { return path.join(claudeExtensionPath
 function liveFiles(claudeExtensionPath) {
   const dir = path.join(claudeExtensionPath, 'webview');
   return { css: path.join(dir, LIVE_CSS), rev: path.join(dir, LIVE_REV) };
-}
-
-/** State of one Claude Code install: 'patched' (this version), 'outdated' (another version of this patch), 'clean', 'missing'. */
-function status(claudeExtensionPath) {
-  const file = webviewFile(claudeExtensionPath);
-  if (!fs.existsSync(file)) return 'missing';
-  const src = fs.readFileSync(file, 'utf8');
-  if (src.includes(MARK)) return 'patched';
-  if (src.includes(ANY_MARK)) return 'outdated';
-  return 'clean';
 }
 
 /*
@@ -635,23 +627,11 @@ function status(claudeExtensionPath) {
  * What remains: that same 03:05 log has VS Code auto-updating extensions, Claude Code among them, at the time - which
  * replaces a whole extension directory the panel serves from - and neither test restart did. That is the open lead.
  */
-/*
- * The temporary file is named for this process and this write, because every window writes these files: with one shared
- * name, a second window's write would replace the first one's temporary file and its rename would move it, so the first
- * window's rename would fail with ENOENT. A rename that fails for any other reason is tried once more from scratch.
- */
+/* Every window writes these files, so each write has a temporary name of its own (src/files.js), carrying this tag. A
+   rename that fails is tried once more from scratch. */
+const TMP_TAG = '.claude-code-extras-webview';
 function writeAtomic(file, text) {
-  for (let attempt = 0; ; attempt++) {
-    const tmp = `${file}.claude-code-extras-webview.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    try {
-      fs.writeFileSync(tmp, text);
-      fs.renameSync(tmp, file);
-      return;
-    } catch (err) {
-      try { fs.unlinkSync(tmp); } catch (_) { /* never written, or already moved */ }
-      if (attempt >= 1) throw err;
-    }
-  }
+  files.writeAtomic(file, text, undefined, { tag: TMP_TAG, tries: 2 });
 }
 
 /*
@@ -740,36 +720,6 @@ function pruneEfforts(claudeExtensionPath, keep) {
   return gone;
 }
 
-/** Apply (or upgrade) the patch and write the live settings. Returns { changed, liveChanged, message }. */
-function apply(claudeExtensionPath, opts = {}) {
-  const file = webviewFile(claudeExtensionPath);
-  const backup = file + BACKUP_SUFFIX;
-  const state = status(claudeExtensionPath);
-  const no = (message) => ({ changed: false, liveChanged: false, current: false, message });
-  if (state === 'missing') return no(`Claude Code webview not found at ${file}`);
-  let changed = false, message = 'already patched';
-  if (state !== 'patched') {
-    let original;
-    if (state === 'outdated') {
-      if (!fs.existsSync(backup)) return no('an older patch is present but its backup is missing; reinstall Claude Code');
-      original = fs.readFileSync(backup, 'utf8');
-      if (original.includes(ANY_MARK)) return no('an older patch is present and its backup carries one too; reinstall Claude Code');
-    } else {
-      original = fs.readFileSync(file, 'utf8');
-    }
-    const r = patchSource(original);
-    if (r.error) return no(r.error);
-    if (state === 'clean') writeAtomic(backup, original);
-    writeAtomic(file, r.out);
-    /* A restore in another window can have moved the backup over the file after it was read here. The file is patched
-       now, so the backup is rewritten from `original`. */
-    if (!fs.existsSync(backup)) writeAtomic(backup, original);
-    changed = true; message = 'patched';
-  }
-  const liveChanged = writeLive(claudeExtensionPath, opts);
-  return { changed, liveChanged, current: true, message };
-}
-
 /* A write that fails on a full disk can leave the backup empty or truncated. Moving that over the bundle would break
    Claude Code, so a backup has to parse before it is put back. */
 function wholeScript(text, filename) {
@@ -777,29 +727,28 @@ function wholeScript(text, filename) {
   try { new vm.Script(text, { filename }); return true; } catch (_) { return false; }
 }
 
-/* The backup is moved over the file in one step, so no window can find a clean file beside its backup. A window patching
-   in that moment would write a fresh backup that the delete then removes, and leave a patched file with nothing to
-   restore from. */
-function moveBack(backup, file) {
-  try { fs.renameSync(backup, file); } catch (e) {
-    if (e && e.code === 'ENOENT') return { changed: false, message: 'nothing to restore' };
-    throw e;
-  }
-  return { changed: true, message: 'restored' };
-}
+const target = patchTarget({
+  file: webviewFile, mark: MARK, anyMark: ANY_MARK, backupSuffix: BACKUP_SUFFIX, tmpTag: TMP_TAG, tries: 2,
+  transform: patchSource,
+  usableBackup: (text) => wholeScript(text, 'index.js'),
+  /* The live files go whether or not there is a backup to put back. */
+  beforeRestore: (claudeExtensionPath) => {
+    const { css, rev } = liveFiles(claudeExtensionPath);
+    for (const f of [css, rev]) { try { fs.unlinkSync(f); } catch (_) {} }
+    pruneEfforts(claudeExtensionPath, null);
+  },
+  say: {
+    missing: (file) => `Claude Code webview not found at ${file}`,
+    noBackup: 'an older patch is present but its backup is missing; reinstall Claude Code',
+    markedBackup: 'an older patch is present and its backup carries one too; reinstall Claude Code',
+    badBackup: 'backup is empty or cut off; not restored',
+  },
+});
 
-/** Put the original back and remove the backup and the live files. Returns { changed, message }. */
-function restore(claudeExtensionPath) {
-  const file = webviewFile(claudeExtensionPath);
-  const backup = file + BACKUP_SUFFIX;
-  const { css, rev } = liveFiles(claudeExtensionPath);
-  for (const f of [css, rev]) { try { fs.unlinkSync(f); } catch (_) {} }
-  pruneEfforts(claudeExtensionPath, null);
-  if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
-  const original = fs.readFileSync(backup, 'utf8');
-  if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
-  if (!wholeScript(original, 'index.js')) return { changed: false, message: 'backup is empty or cut off; not restored' };
-  return moveBack(backup, file);
+/** Apply (or upgrade) the patch and, once it is in, write the live settings. Returns { changed, liveChanged, current, message }. */
+function apply(claudeExtensionPath, opts = {}) {
+  const r = target.apply(claudeExtensionPath);
+  return { ...r, liveChanged: r.current ? writeLive(claudeExtensionPath, opts) : false };
 }
 
 /** Every Claude Code install under an extensions directory: the active version plus any siblings left behind. */
@@ -813,6 +762,7 @@ module.exports = {
   SWITCHES,
   id: 'anthropic.claude-code', name: 'Claude Code panel',
   VERSION, MARK, ANY_MARK, BACKUP_SUFFIX, EDITS, SCRIPT,
-  safeColor, patchSource, status, apply, restore, moveBack, wholeScript, findInstalls, webviewFile, targetFile: webviewFile, writeLive, liveCss,
+  safeColor, patchSource, status: target.status, apply, restore: target.restore, wholeScript, findInstalls, webviewFile, targetFile: webviewFile,
+  writeLive, liveCss,
   writeEffort, pruneEfforts, EFFORT_PREFIX, pinsProperty,
 };

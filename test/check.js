@@ -4110,15 +4110,27 @@ console.log('\nwhere the hook settings are written');
 {
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   const body = (/function writeHookSettings\(\) \{[\s\S]*?\n  \}\n/.exec(ext) || [''])[0];
-  if (/const dir = planDir\(\);/.test(body) && /path\.join\(dir, 'config\.json'\)/.test(body)
-      && !/(path\.join|mkdirSync)\(PLAN_DIR\b/.test(body)) {
+  if (/hookSettings\.writeHookSettings\(planDir\(\), values\)/.test(body) && !/(path\.join|mkdirSync)\(PLAN_DIR\b/.test(body)) {
     ok('config.json is written into the data directory the hooks read, by its full path');
   } else bad('writeHookSettings does not write config.json under planDir(), so the hooks would never see it');
-  /* A hook can read either file at any moment, and one written in place is caught half-written. */
+  /* A hook can read either file at any moment, and a file written in place can be read half-written. src/hook-settings.js
+     does the writing, so the test runs it and checks that neither file is ever written directly. */
   const zone = (/const writeClientZone = \(\) => \{[\s\S]*?\n  \};\n/.exec(ext) || [''])[0];
-  if (/writeAtomic\(file, next\)/.test(body) && /writeAtomic\(file, next\)/.test(zone) && !/writeFileSync\(file/.test(body + zone)) {
+  const hs = require('../src/hook-settings');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-hook-settings-'));
+  const targets = [];
+  const realWrite = fs.writeFileSync;
+  try {
+    fs.writeFileSync = function (file, ...rest) { targets.push(String(file)); return realWrite.call(fs, file, ...rest); };
+    hs.writeHookSettings(dir, { remindMinCalls: 3 });
+    hs.writeClientZone(dir, 'Asia/Tokyo');
+  } finally { fs.writeFileSync = realWrite; }
+  const wrote = ['config.json', 'client-time-zone.json'].map((n) => path.join(dir, n));
+  if (/hookSettings\.writeClientZone\(planDir\(\), clientZone\(\)\)/.test(zone) && wrote.every((f) => fs.existsSync(f))
+      && targets.length === 2 && !targets.some((f) => wrote.includes(f)) && fs.readdirSync(dir).length === 2) {
     ok('config.json and the reader\'s time zone are replaced whole, never written in place where a hook could read half');
-  } else bad('config.json or client-time-zone.json is still written in place');
+  } else bad(`config.json or client-time-zone.json is still written in place: wrote ${JSON.stringify(targets.map((f) => path.basename(f)))}`);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 /* ── 19b. the hooks around a compaction ──
@@ -4199,7 +4211,16 @@ console.log("\nthe reader's time zone, told to the model");
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   const writer = (/const writeClientZone = \(\) => \{[\s\S]*?\n  \};\n/.exec(ext) || [''])[0];
   const defaults = fs.readFileSync(path.join(hooks, 'plan_path.py'), 'utf8');
-  if (/path\.join\(planDir\(\), 'client-time-zone\.json'\)/.test(writer) && /if \(!zone\) return;/.test(writer)
+  const zoneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-zone-'));
+  const hs = require('../src/hook-settings');
+  const wroteEmpty = hs.writeClientZone(zoneDir, '');
+  const leftEmpty = fs.readdirSync(zoneDir).length;
+  hs.writeClientZone(zoneDir, 'Asia/Tokyo');
+  let zoneRead = null;
+  try { zoneRead = JSON.parse(fs.readFileSync(path.join(zoneDir, 'client-time-zone.json'), 'utf8')).timeZone; } catch (_) { /* not written */ }
+  fs.rmSync(zoneDir, { recursive: true, force: true });
+  if (/hookSettings\.writeClientZone\(planDir\(\), clientZone\(\)\)/.test(writer) && wroteEmpty === false && leftEmpty === 0
+      && zoneRead === 'Asia/Tokyo'
       && /globalThis\.__cceTzHook = \(\) => \{[\s\S]*?writeClientZone\(\);[\s\S]*?\};\n[\s\S]*?\n  writeClientZone\(\);/.test(ext)
       && /tellTimeZone: PREFIX \+ 'tellClaudeYourTimeZone'/.test(ext) && /"tellTimeZone": True/.test(defaults)) {
     ok('a reported zone is written where the hook reads it, never as empty, and the setting reaches the hook');
@@ -4244,7 +4265,7 @@ console.log('\nan uninstall puts Claude Code back at once');
     const found = removal.roots('/x/extensions');
     const want = ['.vscode', '.vscode-insiders', '.vscode-server', '.vscode-server-insiders', '.cursor']
       .map((d) => path.join(os.homedir(), d, 'extensions'));
-    if (found[0] === '/x/extensions' && want.every((d) => found.includes(d))) {
+    if (found[0] === path.resolve('/x/extensions') && want.every((d) => found.includes(d))) {
       ok('other copies are looked for in the extension folders of VS Code, Insiders, their servers and Cursor');
     } else bad(`extension folders searched: ${found.join(', ')}`);
   }
@@ -5471,7 +5492,7 @@ console.log('\nnames the rename leaves alone');
     ['the patch markers', webview.ANY_MARK === '/* CLAUDE-CODE-EXTRAS-WEBVIEW ' && host.ANY_MARK === '/* CLAUDE-CODE-EXTRAS-HOST v'
       && webview.MARK.startsWith(webview.ANY_MARK) && host.MARK.startsWith(host.ANY_MARK)],
     ['the backup and temporary-file suffixes', webview.BACKUP_SUFFIX === '.claude-code-extras-webview.bak' && host.BACKUP_SUFFIX === '.claude-code-extras-host.bak'
-      && /const TMP_SUFFIX = '\.claude-code-extras-host\.tmp';/.test(hs) && /\$\{file\}\.claude-code-extras-webview\./.test(wv)],
+      && /const TMP_SUFFIX = '\.claude-code-extras-host\.tmp';/.test(hs) && /const TMP_TAG = '\.claude-code-extras-webview';/.test(wv)],
     ['the files written beside the panel', /const LIVE_CSS = 'claude-code-extras\.css';/.test(wv) && /const LIVE_REV = 'claude-code-extras\.rev\.svg';/.test(wv)
       && webview.EFFORT_PREFIX === 'claude-code-extras.effort.' && /var OURS = '\/webview\/claude-code-extras\.';/.test(src('src/page/05-page-setup.js'))],
     ['the page\'s console tag', /\[claude-code-extras\] /.test(src('src/page/99-sweep.js'))],
@@ -8190,16 +8211,20 @@ console.log('\nClaude Code\'s own source');
         const last = () => handed[handed.length - 1][2];
         out.notShown = await c.source.deliverAnswer('B', 'hi', { deliveryId: 'd0' });
         const p = c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
+        // The panel is handed the answer a microtask after the call (oncePerDelivery in src/core-link.js).
+        await null;
         c.answered('no-such-key', true, '');
         c.answered(last(), false, 'draft');
         out.draft = await p;
         const retry = c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
+        await null;
         out.retried = handed.length;
         c.answered(last(), true, '');
         out.sent = await retry;
         out.again = await c.source.deliverAnswer('A', 'yes', { deliveryId: 'd1' });
         out.handedForD1 = handed.filter((h) => h[1] === 'yes').length;
         const odd = c.source.deliverAnswer('A', 'odd', { deliveryId: 'd2' });
+        await null;
         c.answered(last(), false, 'error');
         out.error = await odd;
         out.silent = await c.source.deliverAnswer('A', 'nobody answers', { deliveryId: 'd3' });

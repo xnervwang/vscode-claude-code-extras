@@ -1,10 +1,10 @@
 {
-  "core": "68dc1f6c5503d55aaa7ce9e096eb8077711d7c5f",
+  "core": "73e42f63a9a6453e29aff9027ee77a6f6b0cf52b",
   "files": [
     {
       "path": "build/sync-shared.js",
       "from": "shared/build/sync-shared.js",
-      "sha256": "7558bffcdfdd6353794127c5da1c5797118b3467346f2ea5bc5f798016bd14d3"
+      "sha256": "ded36df83c770ecfcea6dafa8cdb07dcfe32d5318453da2b4dca2846b0db93c7"
     },
     {
       "path": "build/pack-vsix.js",
@@ -25,6 +25,41 @@
       "path": "test/pack-check.js",
       "from": "shared/test/pack-check.js",
       "sha256": "515724e105b64b70ecac2c33bb8530c2bae5c40e765cd7ec184700c0909a5641"
+    },
+    {
+      "path": "src/files.js",
+      "from": "src/files.js",
+      "sha256": "30c89cbf83b01b55957920fb006725c54cc2ff81edc7e25fbbe93665810ebc3c"
+    },
+    {
+      "path": "src/folders.js",
+      "from": "src/folders.js",
+      "sha256": "8f98f10c6ced4271c3b506f1f352d9de86cad392cd0c99e25e009b62b7e24e77"
+    },
+    {
+      "path": "src/edits.js",
+      "from": "shared/host/edits.js",
+      "sha256": "fd5718560b9c98eaf3559a2e63c5a4636ce8d39be91de81266542a5c3b74b724"
+    },
+    {
+      "path": "src/patch-target.js",
+      "from": "shared/host/patch-target.js",
+      "sha256": "ccf91692961e6660c185447d8971917363be230dbe0559fe9284e4bde662786a"
+    },
+    {
+      "path": "src/installed-copies.js",
+      "from": "shared/host/installed-copies.js",
+      "sha256": "84ea47438db4021c97899f83090edfa7149e0e24aa00a6712be881b0426135e0"
+    },
+    {
+      "path": "src/hook-settings.js",
+      "from": "shared/host/hook-settings.js",
+      "sha256": "71aaf6dbcacb7fcdd6b5872251784d519a799ef54ade343c366da8ddc759d77b"
+    },
+    {
+      "path": "src/core-link.js",
+      "from": "shared/host/core-link.js",
+      "sha256": "e5f4cce74af83b7d096678e503fabc8482514b5f407db679372cd2b7428fbcd7"
     }
   ]
 }

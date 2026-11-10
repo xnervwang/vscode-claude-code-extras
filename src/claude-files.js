@@ -15,10 +15,11 @@
  * lines (the last line may be mid-write). Readers of the same file that ask at the same moment share one pass, so a
  * transcript of several hundred megabytes is read only once.
  */
-const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+/* Re-exported for the modules that write files beside the plans; the one implementation is src/files.js. */
+const { writeAtomic } = require('./files');
 
 /** Claude Code's own directory: CLAUDE_CONFIG_DIR when set, as Claude Code reads it, and ~/.claude otherwise. */
 const claudeDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -191,22 +192,6 @@ function oneAtATime(run, merge = (a, b) => Object.assign({}, a, b)) {
     slot.next = next;
     return next.promise;
   };
-}
-
-/*
- * Write to a temporary file beside the target and rename it over, so readers in other windows or processes see either
- * the old or the new contents. The temporary name includes the pid and a random part because several windows write the
- * same files.
- */
-function writeAtomic(file, text) {
-  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-  try {
-    fs.writeFileSync(tmp, text);
-    fs.renameSync(tmp, file);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (_) { /* never written */ }
-    throw e;
-  }
 }
 
 module.exports = {

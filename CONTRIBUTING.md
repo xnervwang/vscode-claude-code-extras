@@ -38,6 +38,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `test/with-core.js` runs this extension with Agent Plus from its checkout beside this one, in Agent Plus's
   fake VS Code (`test/fake-vscode.js`). Without that checkout its checks are skipped.
 - `build/pack.sh` produces the `.vsix` without npm.
+- `shared.json` lists the files copied from Agent Plus, each with the Agent Plus file it comes from. Besides the packing scripts and two checks, they are, in `src/`: the steps every patch target shares (`patch-target.js`, `edits.js`, `files.js`), finding the installed copies for the uninstall (`installed-copies.js`), writing the hooks' settings (`hook-settings.js`), registering with Agent Plus (`core-link.js`), and the workspace folder test (`folders.js`). Change them in Agent Plus and run `node build/sync-shared.js`; `test/shared-copies.js` fails on a copy changed here.
 - `shim/` is the last version of the earlier id. It depends on Claude Code Plus, so updating the old extension installs Claude Code Plus. It writes `export.json`, which Claude Code Plus imports, and does nothing else. `bash build/pack-shim.sh` builds its `.vsix`.
 - `build/supported.js`, `build/update-versions.js`, and `supported-versions.json` maintain the record of verified Claude Code builds.
 

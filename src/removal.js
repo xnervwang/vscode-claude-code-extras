@@ -27,68 +27,21 @@
  * until that window restarts its own extensions, and an uninstall is exactly the kind of change that makes it bring
  * Claude Code back in line - which, left alone, means patching again what the first window has just restored.
  */
-const cp = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const adapters = require('./adapters');
+const copies = require('./installed-copies');
 const { LEGACY_ID, handsOver } = require('./carryover');
 
-/** Every extensions folder Claude Code could be installed in, starting with the one this extension sits in. */
-function roots(extensionsDir) {
-  const home = os.homedir();
-  return Array.from(new Set([
-    extensionsDir,
-    process.env.VSCODE_EXTENSIONS,
-    path.join(home, '.vscode', 'extensions'),
-    path.join(home, '.vscode-insiders', 'extensions'),
-    path.join(home, '.vscode-server', 'extensions'),
-    path.join(home, '.vscode-server-insiders', 'extensions'),
-    path.join(home, '.cursor', 'extensions'),
-  ].filter(Boolean)));
-}
-
-/** The folders the editor has marked for deletion, as it records them: a map from folder name to true. */
-function obsolete(extensionsDir) {
-  try {
-    const v = JSON.parse(fs.readFileSync(path.join(extensionsDir, '.obsolete'), 'utf8'));
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch (_) {
-    return {};
-  }
-}
-
-/* A folder is named <id>-<version>, with the platform after the version for a platform build; requiring a digit after
-   the dash keeps another extension whose name merely starts with this one's from being taken for a version of it. */
-const folderOf = (id) => new RegExp('^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-\\d', 'i');
-/* The editor renames a folder it is deleting to <folder>.<random>.vsctmp first, and one it failed to delete stays until
-   its next start under that name, which still starts like a copy. */
-const isCopy = (name, own) => own.test(name) && !/\.vsctmp$/i.test(name);
-
-/**
- * Whether the editor is taking this copy of the extension away with no other version of it staying behind.
- *
- * `id` is <publisher>.<name>.
+/*
+ * These wrap src/installed-copies.js, which Codex Plus uses too: it knows which editors' extensions folders to look in,
+ * reads their .obsolete record and tells which folder is a copy of an extension. `id` is <publisher>.<name>.
  */
-function beingUninstalled(extensionPath, id, marked = obsolete(path.dirname(extensionPath || '.'))) {
-  if (!extensionPath || !id) return false;
-  const dir = path.dirname(extensionPath);
-  const mine = path.basename(extensionPath);
-  if (marked[mine] !== true) return false;
-  const own = folderOf(id);
-  let names;
-  try { names = fs.readdirSync(dir); } catch (_) { return false; }
-  return !names.some((n) => n !== mine && isCopy(n, own) && marked[n] !== true);
-}
-
-/** The folders of extension `id` in one extensions folder that its editor has not marked for deletion. */
-function liveCopies(extensionsDir, id, marked = obsolete(extensionsDir)) {
-  if (!id) return [];
-  const own = folderOf(id);
-  let names;
-  try { names = fs.readdirSync(extensionsDir); } catch (_) { return []; }
-  return names.filter((n) => isCopy(n, own) && marked[n] !== true).map((n) => path.join(extensionsDir, n));
-}
+const roots = (extensionsDir) => copies.roots(extensionsDir);
+const obsolete = (extensionsDir) => copies.obsolete(extensionsDir);
+const liveCopies = (extensionsDir, id, marked) => copies.liveCopies(extensionsDir, id, marked);
+/** Whether the editor is taking this copy of the extension away with no other version of it staying behind. */
+const beingUninstalled = (extensionPath, id, marked) => !!id && copies.beingUninstalled(extensionPath, id, marked);
 
 /**
  * The folders in one extensions folder that hold an earlier version of the old extension: not marked for deletion, and
@@ -110,11 +63,7 @@ function earlierCopies(extensionsDir) {
  * and they stay.
  */
 function uninstallPlan(extensionsDir, id) {
-  const others = roots(extensionsDir).filter((r) => r !== extensionsDir);
-  const owned = others.filter((r) => liveCopies(r, id).length || earlierCopies(r).length);
-  const here = earlierCopies(extensionsDir).length ? [extensionsDir] : [];
-  return { restore: (here.length ? [] : [extensionsDir]).concat(others.filter((r) => !owned.includes(r))),
-    lastCopy: !owned.length && !here.length, owned: here.concat(owned) };
+  return copies.plan(extensionsDir, id, { alsoOwned: (d) => earlierCopies(d).length > 0 });
 }
 
 /** Put back every Claude Code install that carries a patch of ours. Synchronous, since the host exits right after. */
@@ -138,48 +87,15 @@ function restoreAll(dirs) {
  * cold start of that can take longer than the five seconds deactivate is given. A detached child outlives this host. It
  * runs the same uninstall.js the editor runs again when it deletes the folder, and every step in it is safe to repeat.
  */
-function finishLater(extensionPath, spawn = cp.spawn) {
-  const child = spawn(process.execPath, [path.join(extensionPath, 'uninstall.js')], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    // On a desktop install the host's binary is Electron, which runs a script as plain Node only when told to.
-    env: Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' }),
-  });
-  child.unref();
-  return child;
-}
+const finishLater = (extensionPath, spawn) => copies.detachHook(extensionPath, spawn);
 
 /**
  * Whether this copy was replaced on disk after it was loaded: the same version installed again, which leaves a window that
- * has not reloaded running the earlier build.
- *
- * Version numbers cannot order two builds of one version, and between releases the version is left alone, so the rule
- * that keeps an older build from writing over a newer one's files does not separate them. VS Code stamps every install
- * into the manifest it writes, `__metadata.installedTimestamp`, so a stamp on disk that differs from the one read when this
- * copy started means newer code is installed. Until this window reloads it must not patch or write what that build owns.
- *
- * False when either stamp is missing: nothing to compare is no reason to stand down.
+ * has not reloaded running the earlier build. Until this window reloads it must not patch or write what that build owns.
  */
-function replacedSince(extensionPath, loadedStamp) {
-  if (!extensionPath || !loadedStamp) return false;
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(extensionPath, 'package.json'), 'utf8')).__metadata;
-    return !!(meta && meta.installedTimestamp && meta.installedTimestamp !== loadedStamp);
-  } catch (_) {
-    return false;
-  }
-}
-
+const replacedSince = (extensionPath, loadedStamp) => copies.replacedSince(extensionPath, loadedStamp);
 /** The install stamp of the copy at extensionPath as it is on disk now, or 0 when it cannot be read. */
-function installStamp(extensionPath) {
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(extensionPath, 'package.json'), 'utf8')).__metadata;
-    return (meta && meta.installedTimestamp) || 0;
-  } catch (_) {
-    return 0;
-  }
-}
+const installStamp = (extensionPath) => copies.installStamp(extensionPath);
 
 /**
  * Where the copy this window loaded stands: 'uninstalling', 'replaced', or '' for neither.
@@ -193,11 +109,7 @@ function installStamp(extensionPath) {
  *
  * `marked` is the extensions folder's record of folders marked for deletion, when the caller has it already.
  */
-function standing(extensionPath, id, loadedStamp, marked = obsolete(path.dirname(extensionPath || '.'))) {
-  if (!extensionPath) return '';
-  if (marked[path.basename(extensionPath)] === true) return beingUninstalled(extensionPath, id, marked) ? 'uninstalling' : 'replaced';
-  return replacedSince(extensionPath, loadedStamp) ? 'replaced' : '';
-}
+const standing = (extensionPath, id, loadedStamp, marked) => copies.standing(extensionPath, id, loadedStamp, marked);
 
 /*
  * Of the installs of another extension found in one extensions folder, the ones its editor has not marked for deletion,

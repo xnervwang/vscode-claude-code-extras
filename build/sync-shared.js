@@ -7,7 +7,9 @@
 /*
  * Code shared by Claude Code Plus and Codex Plus lives in Agent Plus's shared/ folder, and each extension ships a copy
  * at the path it requires it from. shared.json at the repository root lists each copy (path, source path, sha256) and
- * the Agent Plus commit of the last sync.
+ * the Agent Plus commit of the last sync. An entry with a `fill` is generated instead of copied: the file at `from` is a
+ * template, and every line that is exactly {{name}} is replaced by the block of that name in the fill, another file in
+ * Agent Plus. A block runs from its "=== name" line to the blank line before the next one.
  *
  *   node build/sync-shared.js           copy every listed file from Agent Plus and rewrite shared.json
  *   node build/sync-shared.js --check   compare only; exit 1 if a copy is not what shared.json records
@@ -43,6 +45,35 @@ function writeAtomic(file, data, mode) {
   }
 }
 
+/** The text of a made file: `template` with each {{name}} line replaced by the lines of that block of `fill`. */
+function render(template, fill) {
+  const blocks = new Map();
+  let name = null, lines = [];
+  const close = () => { if (name !== null) { if (lines[lines.length - 1] === '') lines.pop(); blocks.set(name, lines); } };
+  for (const line of fill.split('\n')) {
+    const m = /^=== ([\w-]+)$/.exec(line);
+    if (m) { close(); name = m[1]; lines = []; } else if (name !== null) lines.push(line);
+  }
+  close();
+  const used = new Set();
+  const out = template.split('\n').flatMap((line) => {
+    const m = /^\{\{([\w-]+)\}\}$/.exec(line);
+    if (!m) return [line];
+    if (!blocks.has(m[1])) throw new Error(`the fill has no block named ${m[1]}`);
+    used.add(m[1]);
+    return blocks.get(m[1]);
+  });
+  const unused = [...blocks.keys()].filter((k) => !used.has(k));
+  if (unused.length) throw new Error(`the template has no line for ${unused.join(', ')}`);
+  return out.join('\n');
+}
+
+/** The content an entry's copy should have, from the Agent Plus checkout at `core`. */
+const made = (core, f) => (f.fill
+  ? Buffer.from(render(fs.readFileSync(path.join(core, f.from), 'utf8'), fs.readFileSync(path.join(core, f.fill), 'utf8')))
+  : fs.readFileSync(path.join(core, f.from)));
+const hash = (data) => crypto.createHash('sha256').update(data).digest('hex');
+
 /** Copies that differ from the hash shared.json records for them, or are missing. */
 function checkCopies(root) {
   const off = [];
@@ -58,9 +89,9 @@ function checkCopies(root) {
 function checkCore(root, core) {
   const ahead = [];
   for (const f of readManifest(root).files) {
-    const file = path.join(core, f.from);
-    if (!fs.existsSync(file)) ahead.push(`${f.from} is gone from Agent Plus`);
-    else if (sha256(file) !== f.sha256) ahead.push(`${f.from} has changed in Agent Plus`);
+    const gone = [f.from, f.fill].filter((x) => x && !fs.existsSync(path.join(core, x)));
+    if (gone.length) ahead.push(`${gone.join(' and ')} ${gone.length > 1 ? 'are' : 'is'} gone from Agent Plus`);
+    else if (hash(made(core, f)) !== f.sha256) ahead.push(`${f.fill ? `${f.from} with ${f.fill}` : f.from} has changed in Agent Plus`);
   }
   return ahead;
 }
@@ -80,13 +111,14 @@ function sync(root, core) {
   const changed = [];
   for (const f of m.files) {
     const from = path.join(core, f.from);
-    if (!fs.existsSync(from)) throw new Error(`${f.from} is not in ${core}`);
+    for (const x of [f.from, f.fill]) if (x && !fs.existsSync(path.join(core, x))) throw new Error(`${x} is not in ${core}`);
     if (!namesSource(fs.readFileSync(from, 'utf8'), f.from)) throw new Error(`${f.from} does not carry the line naming its source`);
+    const data = made(core, f);
     const to = path.join(root, f.path);
-    const sum = sha256(from);
+    const sum = hash(data);
     if (!fs.existsSync(to) || sha256(to) !== sum) {
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      writeAtomic(to, fs.readFileSync(from), fs.statSync(from).mode & 0o777);
+      writeAtomic(to, data, fs.statSync(from).mode & 0o777);
       changed.push(f.path);
     }
     f.sha256 = sum;
@@ -96,7 +128,7 @@ function sync(root, core) {
   return changed;
 }
 
-module.exports = { MANIFEST, sha256, coreDir, readManifest, sourceLine, namesSource, checkCopies, checkCore, coreCommit, sync };
+module.exports = { MANIFEST, sha256, coreDir, readManifest, sourceLine, namesSource, render, checkCopies, checkCore, coreCommit, sync };
 
 if (require.main === module) {
   const root = path.join(__dirname, '..');

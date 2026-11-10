@@ -25,10 +25,11 @@ const { readTasks, rememberDirs } = require('./src/tasks');
 const background = require('./src/background');
 const efforts = require('./src/efforts');
 const { sweepOrphans, planDir, readPlan } = require('./src/workplan');
-const { transcriptOf, writeAtomic } = require('./src/claude-files');
+const { transcriptOf } = require('./src/claude-files');
 const waiting = require('./src/waiting');
 const { createClaudeSource } = require('./src/claude-source');
 const coreLink = require('./src/core-link');
+const hookSettings = require('./src/hook-settings');
 const pluginInstall = require('./src/plugin-install');
 const pythonRuntime = require('./src/python-runtime');
 const latency = require('./src/openlatency');
@@ -598,20 +599,9 @@ function start(context, log, renamed, handing = false) {
       else if (typeof v === 'string' && v) values[key] = v;
     }
     /* planDir(), not PLAN_DIR: that one is only the directory's name, and joined on its own it resolves against the
-       extension host's working directory - a config.json the hooks never read. */
-    const dir = planDir();
-    const file = path.join(dir, 'config.json');
-    const next = JSON.stringify(values, null, 2) + '\n';
-    try {
-      let current = null;
-      try { current = fs.readFileSync(file, 'utf8'); } catch (_) {}
-      /* Several windows write this, and they all write the same thing from the same settings - so comparing first keeps
-         them from taking turns rewriting one file, the way the live stylesheet already does. */
-      if (current === next) return;
-      fs.mkdirSync(dir, { recursive: true });
-      // Replaced whole: the hooks read it at any moment, and a file written in place can be caught half-written.
-      writeAtomic(file, next);
-    } catch (e) {
+       extension host's working directory - a config.json the hooks never read. Written only when it changes, and
+       replaced whole (src/hook-settings.js). */
+    try { hookSettings.writeHookSettings(planDir(), values); } catch (e) {
       log.appendLine('work plan hook settings: ' + e.message);
     }
   }
@@ -663,17 +653,7 @@ function start(context, log, renamed, handing = false) {
      a panel, so it is left for them in a file. The last panel to report wins: one person behind several windows reads
      them all in one zone. A window that has not heard from a panel yet writes nothing rather than an empty zone. */
   const writeClientZone = () => {
-    const zone = clientZone();
-    if (!zone) return;
-    const file = path.join(planDir(), 'client-time-zone.json');
-    const next = JSON.stringify({ timeZone: zone }) + '\n';
-    try {
-      let current = null;
-      try { current = fs.readFileSync(file, 'utf8'); } catch (_) {}
-      if (current === next) return;
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      writeAtomic(file, next);
-    } catch (e) {
+    try { hookSettings.writeClientZone(planDir(), clientZone()); } catch (e) {
       log.appendLine('client time zone: ' + e.message);
     }
   };
@@ -750,8 +730,10 @@ function start(context, log, renamed, handing = false) {
 
   globalThis.__cceAnswerHook = (key, sent, reason) => claude.answered(key, sent, reason);
   context.subscriptions.push({ dispose: () => { if (globalThis.__cceAnswerHook) delete globalThis.__cceAnswerHook; } });
-  coreLink.register(vscode, claude.source, (m) => log.appendLine(m)).then((registration) => {
-    if (!registration) return;
+  coreLink.link(vscode, claude.source, { name: 'the Claude Code source', log: (m) => log.appendLine(m) }).then((r) => {
+    if (!r.registered) return;
+    const { registration } = r;
+    log.appendLine(`registered with Agent Plus ${r.core.version || ''}`.trim());
     if (closing) { registration.dispose(); return; }
     context.subscriptions.push(registration);
     claude.refocus();

@@ -23,6 +23,7 @@ const path = require('path');
 const waiting = require('./waiting');
 const conversations = require('./conversations');
 const { SESSION } = require('./claude-files');
+const { oncePerDelivery } = require('./core-link');
 
 /* The protocol major this source implements; package.json repeats it under "agentPlus". */
 const PROTOCOL = 1;
@@ -100,8 +101,6 @@ function createClaudeSource(deps) {
   const panels = new Map();
   const unsubscribe = (subs) => { for (const d of subs) { try { d.dispose(); } catch (_) { /* already disposed */ } } };
   const pending = new Map();
-  /* Never trimmed, so a repeated delivery id is always recognized. */
-  const deliveries = new Map();
   let keys = 0;
   const enabled = () => { try { return deps.enabled ? deps.enabled() !== false : true; } catch (_) { return true; } };
   const say = (sessionId) => { front = sessionId; focused.fire({ sessionId }); };
@@ -121,6 +120,9 @@ function createClaudeSource(deps) {
       pending.set(key, (sent, reason) => { clearTimeout(timer); resolve(outcomeOf(sent, reason)); });
     });
   };
+  /* Agent Plus can hand over one answer twice under the same delivery id; it is typed once, even while the first try runs.
+     An answer that never reached a panel can be handed over again (src/core-link.js). */
+  const deliverOnce = oncePerDelivery(deliver);
 
   const source = {
     protocol: PROTOCOL,
@@ -185,16 +187,7 @@ function createClaudeSource(deps) {
 
     canDeliver: (sessionId) => deps.canDeliver(sessionId) === true,
 
-    deliverAnswer(sessionId, text, opts) {
-      const id = opts && typeof opts.deliveryId === 'string' ? opts.deliveryId : '';
-      if (id && deliveries.has(id)) return deliveries.get(id);
-      const p = deliver(sessionId, text);
-      if (id) {
-        deliveries.set(id, p);
-        p.then((r) => { if (r.outcome === 'notReceived' && deliveries.get(id) === p) deliveries.delete(id); });
-      }
-      return p;
-    },
+    deliverAnswer(sessionId, text, opts) { return deliverOnce(sessionId, text, opts); },
 
     planNotice: () => notice,
     timeZone: () => { try { return deps.timeZone ? deps.timeZone() || '' : ''; } catch (_) { return ''; } },

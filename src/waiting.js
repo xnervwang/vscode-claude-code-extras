@@ -21,6 +21,8 @@ const fs = require('fs');
 const path = require('path');
 const { transcriptOf } = require('./claude-files');
 const bgSessions = require('./bgsessions');
+/* Real paths are compared, so a folder reached through a symbolic link still matches. */
+const { folderTest } = require('./folders');
 
 const AGENTS_TIMEOUT_MS = 15000;
 /* The end of a transcript, where Claude Code appends the conversation's title again every turn. */
@@ -91,41 +93,6 @@ function pidsOf(records, sessionId) {
     if (r && r.sessionId === sessionId && Number.isInteger(r.pid) && r.pid > 0) out.add(r.pid);
   }
   return [...out].sort((a, b) => a - b);
-}
-
-/* How far up a deleted folder's path to look for a parent that still exists; bounded so a path that never resolves
-   cannot spin. */
-const MAX_WALK_UP = 64;
-
-/* Resolves links, so /home/x and /local/home/x match when one links to the other. For a deleted path, only the part
-   that still exists is resolved. */
-function realPath(p) {
-  const abs = path.resolve(p);
-  try { return fs.realpathSync.native(abs); } catch (_) { /* gone, or not readable */ }
-  let head = abs;
-  const tail = [];
-  for (let i = 0; i < MAX_WALK_UP; i++) {
-    const parent = path.dirname(head);
-    if (parent === head) break;
-    tail.unshift(path.basename(head));
-    head = parent;
-    try { return path.join(fs.realpathSync.native(head), ...tail); } catch (_) { /* keep going up */ }
-  }
-  return abs;
-}
-const caseOf = process.platform === 'win32' || process.platform === 'darwin' ? (s) => s.toLowerCase() : (s) => s;
-
-/* Compares real paths, so a folder reached through a symbolic link still matches. */
-function folderTest(folders) {
-  const roots = (folders || []).filter(Boolean).map((f) => caseOf(realPath(f)));
-  return (dir) => {
-    if (!dir || !roots.length) return false;
-    const cwd = caseOf(realPath(dir));
-    return roots.some((root) => {
-      const rel = path.relative(root, cwd);
-      return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
-    });
-  };
 }
 
 /** Drops background sessions, and sessions started outside `folders`. */

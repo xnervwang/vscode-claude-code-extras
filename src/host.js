@@ -11,8 +11,9 @@
  * started. This adapter adds the one field back.
  *
  * Same discipline as the webview patcher: the edit must match exactly once, the result must parse,
- * the untouched original is saved next to the file first, and the replacement is atomic. A build
- * whose shape does not match is left alone with a warning rather than patched on a guess.
+ * the untouched original is saved next to the file first, and the replacement is atomic (the steps
+ * every patch target shares, src/patch-target.js). A build whose shape does not match is left alone
+ * with a warning rather than patched on a guess.
  *
  * The host bundle is far riskier to patch than the webview: a broken file means the extension fails
  * to activate. Hence a single, minimal edit and a separate marker and backup, so a failure here
@@ -24,6 +25,8 @@ const path = require('path');
 const vm = require('vm');
 
 const { applyEdits, shapesOf } = require('./edits');
+const { writeAtomic } = require('./files');
+const { patchTarget } = require('./patch-target');
 
 const VERSION = 16;
 const ANY_MARK = '/* CLAUDE-CODE-EXTRAS-HOST v';
@@ -272,7 +275,7 @@ function hostFile(claudeExtensionPath) { return path.join(claudeExtensionPath, '
 /** Pure transform. Returns { out, chosen } or { error }. Never partially applies. */
 function patchSource(src) {
   if (src.includes(ANY_MARK)) return { error: 'the source to patch already carries a host patch' };
-  const r = applyEdits(src, EDITS);
+  const r = applyEdits(src, EDITS, 'Claude Code');
   if (r.error) return { error: r.error };
   const out = MARK + '\n' + r.out;
   try { new vm.Script(out, { filename: 'extension.js' }); }
@@ -280,73 +283,25 @@ function patchSource(src) {
   return { out, chosen: r.chosen };
 }
 
-/** 'patched' (this version), 'outdated' (another version of this patch), 'clean', 'missing'. */
-function status(claudeExtensionPath) {
-  const file = hostFile(claudeExtensionPath);
-  if (!fs.existsSync(file)) return 'missing';
-  const src = fs.readFileSync(file, 'utf8');
-  if (src.includes(MARK)) return 'patched';
-  if (src.includes(ANY_MARK)) return 'outdated';
-  return 'clean';
-}
+/* Every window patches the same file, so each write has a temporary name of its own (src/files.js). */
+const write = (file, text) => writeAtomic(file, text, undefined, { tag: TMP_SUFFIX });
 
-/* Per-process temporary name with a random part: every window patches the same file, and two windows sharing one
-   temporary name truncate each other's half-written copy and then find it gone at the rename. */
-function writeAtomic(file, text) {
-  const tmp = `${file}${TMP_SUFFIX}.${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
-  try {
-    fs.writeFileSync(tmp, text);
-    fs.renameSync(tmp, file);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (_) { /* never written */ }
-    throw e;
-  }
-}
-
-/*
- * Apply (or upgrade) the host patch. Returns { changed, liveChanged, current, message }; `current` means the file
- * already carries this patch, which is not a failure.
- */
-function apply(claudeExtensionPath) {
-  const file = hostFile(claudeExtensionPath);
-  const backup = file + BACKUP_SUFFIX;
-  const state = status(claudeExtensionPath);
-  const no = (message) => ({ changed: false, liveChanged: false, current: false, message });
-  if (state === 'missing') return no(`Claude Code host bundle not found at ${file}`);
-  if (state === 'patched') return { changed: false, liveChanged: false, current: true, message: 'already patched' };
-  let original;
-  if (state === 'outdated') {
-    if (!fs.existsSync(backup)) return no('an older host patch is present but its backup is missing; reinstall Claude Code');
-    original = fs.readFileSync(backup, 'utf8');
-    if (original.includes(ANY_MARK)) return no('an older host patch is present and its backup carries one too; reinstall Claude Code');
-  } else {
-    original = fs.readFileSync(file, 'utf8');
-  }
-  const r = patchSource(original);
-  if (r.error) return no(r.error);
-  if (state === 'clean') writeAtomic(backup, original);
-  writeAtomic(file, r.out);
-  /* A restore in another window can have moved the backup over the file after it was read here. The file is patched
-     now, so the backup is rewritten from `original`. */
-  if (!fs.existsSync(backup)) writeAtomic(backup, original);
-  return { changed: true, liveChanged: false, current: true, message: 'patched' };
-}
-
-/** Put the original host bundle back and remove the backup. Returns { changed, message }. */
-function restore(claudeExtensionPath) {
-  const file = hostFile(claudeExtensionPath);
-  const backup = file + BACKUP_SUFFIX;
-  if (!fs.existsSync(backup)) return { changed: false, message: 'nothing to restore' };
-  const original = fs.readFileSync(backup, 'utf8');
-  if (original.includes(ANY_MARK)) return { changed: false, message: 'backup is itself patched; not restored' };
-  const { wholeScript, moveBack } = require('./webview');
-  if (!wholeScript(original, 'extension.js')) return { changed: false, message: 'backup is empty or cut off; not restored' };
-  return moveBack(backup, file);
-}
+const target = patchTarget({
+  file: hostFile, mark: MARK, anyMark: ANY_MARK, backupSuffix: BACKUP_SUFFIX, tmpTag: TMP_SUFFIX,
+  transform: patchSource,
+  /* A backup cut short by a full disk would stop Claude Code activating if it were moved back over the bundle. */
+  usableBackup: (text) => require('./webview').wholeScript(text, 'extension.js'),
+  say: {
+    missing: (file) => `Claude Code host bundle not found at ${file}`,
+    noBackup: 'an older host patch is present but its backup is missing; reinstall Claude Code',
+    markedBackup: 'an older host patch is present and its backup carries one too; reinstall Claude Code',
+    badBackup: 'backup is empty or cut off; not restored',
+  },
+});
 
 module.exports = {
   id: 'anthropic.claude-code', name: 'Claude Code host',
   VERSION, MARK, ANY_MARK, BACKUP_SUFFIX, EDITS, LOAD_WATCH, LOAD_WATCH_OFF, PANEL_TZ,
-  patchSource, status, apply, restore, writeAtomic, hostFile, targetFile: hostFile,
-  findInstalls: require('./webview').findInstalls,
+  patchSource, status: target.status, apply: target.apply, restore: target.restore, writeAtomic: write, hostFile,
+  targetFile: hostFile, findInstalls: require('./webview').findInstalls,
 };
