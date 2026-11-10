@@ -12,6 +12,8 @@ test/**
 CONTRIBUTING.md
 docs/**
 supported-versions.json
+# The list of files copied from Agent Plus, read by build/sync-shared.js.
+shared.json
 
 # Python leaves compiled bytecode beside a module it imports, so running the plugin's hooks locally seeds these inside
 # the tree that ships. They are a build artifact of whoever last ran them.

@@ -2049,7 +2049,7 @@ if (explicit.length) {
    for the person who wrote it.
 
    Content is exempt by construction rather than by rule: a work plan's own words live in a file this extension only
-   reads, so they never enter these files. The scan covers what build/pack.sh copies and nothing else - test/ is not
+   reads, so they never enter these files. The scan covers the paths build/pack.sh packs and nothing else - test/ is not
    shipped, and its fixtures carry non-ASCII on purpose to prove the encoding survives a round trip.
 
    Translations are the one place another language belongs, and they are kept where the scan can tell them apart:
@@ -2061,9 +2061,8 @@ console.log('\nshipped text');
   const root = path.join(__dirname, '..');
   /* What ships is read out of pack.sh rather than repeated here, so adding a path there cannot leave it unscanned.
      A second copy of that list is exactly the kind that drifts with nothing saying so. */
-  const line = (fs.readFileSync(path.join(root, 'build', 'pack.sh'), 'utf8')
-    .match(/^cp -r (.+) "\$stage\/extension\/"$/m) || [])[1];
-  if (!line) bad('build/pack.sh no longer has a recognisable copy line, so what ships cannot be determined');
+  const listed = require(path.join(root, 'build', 'pack-vsix.js')).listedIn(root);
+  if (!listed.length) bad('build/pack.sh no longer runs pack-vsix.js with a list of paths, so what ships cannot be determined');
   else {
     const walk = (rel) => {
       if (rel.includes('*')) {
@@ -2074,7 +2073,7 @@ console.log('\nshipped text');
       return fs.readdirSync(path.join(root, rel)).sort().flatMap((f) => walk(path.join(rel, f)));
     };
     const TRANSLATION = /^(package\.nls\.[a-z]{2}(-[a-z]+)?\.json|src\/l10n\/.+)$/i;
-    const files = line.trim().split(/\s+/).flatMap(walk);
+    const files = listed.flatMap(walk);
     const hits = [];
     for (const rel of files.filter((f) => !TRANSLATION.test(f.split(path.sep).join('/')))) {
       fs.readFileSync(path.join(root, rel), 'utf8').split('\n')
@@ -4892,6 +4891,7 @@ console.log('\nwhat the package format can carry');
   try {
     ['extension/package.json', 'extension/extension.js', 'extension/README.md', 'extension/LICENSE.txt', 'extension/images/icon.png',
       'extension/images/workplan.svg', 'extension/claude-plugin/agent-work-plan/hooks/plan-row.py'].forEach(put);
+    fs.copyFileSync(path.join(__dirname, '..', 'package.json'), path.join(stage, 'extension', 'package.json'));
     const script = path.join(__dirname, '..', 'build', 'make-manifest.js');
     let ran = true;
     try { cp.execFileSync(process.execPath, [script, stage], { encoding: 'utf8' }); } catch (_) { ran = false; }
@@ -4911,8 +4911,9 @@ console.log('\nwhat the package format can carry');
     else bad('a file with no extension was packed');
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
   const sh = (f) => fs.readFileSync(path.join(__dirname, '..', 'build', f), 'utf8');
-  if (/cp LICENSE "\$stage\/extension\/LICENSE\.txt"/.test(sh('pack.sh')) && /shim\/LICENSE" "\$stage\/extension\/LICENSE\.txt"/.test(sh('pack-shim.sh'))
-    && !/\bLICENSE "\$stage\/extension\/"/.test(sh('pack.sh'))) {
+  /* build/pack.sh hands its paths to pack-vsix.js, which copies LICENSE as LICENSE.txt; test/pack-check.js checks the
+     result. The shim is packed by a script of its own. */
+  if (/pack-vsix\.js" "\$root" /.test(sh('pack.sh')) && /shim\/LICENSE" "\$stage\/extension\/LICENSE\.txt"/.test(sh('pack-shim.sh'))) {
     ok('both packages carry the license as LICENSE.txt, as vsce does');
   } else bad('a package still carries LICENSE without an extension');
 }
@@ -5220,15 +5221,8 @@ console.log('\nthe old id\'s last version, shim/');
   if (!ascii.length && read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')) ok('its files are ASCII and its LICENSE is this one');
   else bad(`shim files missing or not ASCII: ${JSON.stringify(ascii)}, LICENSE same ${read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')}`);
   const ignore = fs.readFileSync(path.join(__dirname, '..', '.vscodeignore'), 'utf8').split('\n');
-  {
-    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-    const shots = Array.from(readme.matchAll(/\]\((images\/[^)\s]+)\)/g)).map((m) => m[1]);
-    const globOf = (line) => new RegExp('^' + line.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
-    const shipped = shots.filter((f) => !ignore.some((l) => l && !l.startsWith('#') && globOf(l.trim()).test(f)));
-    if (shots.length && !shipped.length) ok('the README\'s screenshots are left out of the published package, which links to them on GitHub instead');
-    else bad(`README screenshots that would ship in the package: ${shipped.join(', ') || '(the README links no image)'}`);
-  }
-  if (ignore.includes('shim/**') && !/\bshim\b/.test((fs.readFileSync(path.join(__dirname, '..', 'build', 'pack.sh'), 'utf8').match(/^cp -r .*$/m) || [''])[0])) {
+  const packed = require('../build/pack-vsix.js').listedIn(path.join(__dirname, '..'));
+  if (ignore.includes('shim/**') && packed.length && !packed.some((p) => p.split('/')[0] === 'shim')) {
     ok('this extension\'s own package leaves shim/ out');
   } else bad('shim/ would ship inside this extension');
   let carry = {};
@@ -8445,6 +8439,27 @@ console.log('\nwith Agent Plus');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
-const ran = `${passed} passed` + (skipped ? `, ${skipped} skipped for want of an install here` : '');
-console.log(failures ? `\n${failures} check(s) failed (${ran})` : `\nall checks passed (${ran})`);
-process.exit(failures ? 1 : 0);
+/* ── copied from Agent Plus ──
+   shared.json lists the files this repository copies from Agent Plus's shared/ folder; build/sync-shared.js copies
+   them. Their checks come with them and take the helpers below. They are the one asynchronous part of this file, so the
+   summary waits for them. */
+const eq = (got, want, msg) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g === w) ok(msg); else bad(`${msg}: got ${g}, want ${w}`);
+};
+const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-shared-')));
+let made = 0;
+const tmp = (name = 'd') => { const d = path.join(scratch, `${++made}-${name}`); fs.mkdirSync(d, { recursive: true }); return d; };
+const t = { ok, bad, eq, note, tmp };
+const repo = path.join(__dirname, '..');
+(async () => {
+  console.log('\ncopies of Agent Plus\'s shared files');
+  await require('./shared-copies.js')(t, repo);
+  console.log('\nthe package');
+  await require('./pack-check.js')(t, repo);
+})().catch((e) => bad(`a check copied from Agent Plus threw: ${(e && e.stack) || e}`)).finally(() => {
+  fs.rmSync(scratch, { recursive: true, force: true });
+  const ran = `${passed} passed` + (skipped ? `, ${skipped} skipped for want of an install here` : '');
+  console.log(failures ? `\n${failures} check(s) failed (${ran})` : `\nall checks passed (${ran})`);
+  process.exit(failures ? 1 : 0);
+});

@@ -1,0 +1,30 @@
+{
+  "core": "241702240ab190ec08901a249a87025b3fb2d84e",
+  "files": [
+    {
+      "path": "build/sync-shared.js",
+      "from": "shared/build/sync-shared.js",
+      "sha256": "3d110f0161f63564221885ea28c2816f9f9d5349058c66a8f5a9b8e51f132f05"
+    },
+    {
+      "path": "build/pack-vsix.js",
+      "from": "shared/build/pack-vsix.js",
+      "sha256": "7ed479fc55474da7a847ba5841c147b74769c1096753665ca07764b9fbf71538"
+    },
+    {
+      "path": "build/make-manifest.js",
+      "from": "shared/build/make-manifest.js",
+      "sha256": "83de82a407957be6542962b3c0a44e2896f93ca49c309e78742ed7d8314343e3"
+    },
+    {
+      "path": "test/shared-copies.js",
+      "from": "shared/test/shared-copies.js",
+      "sha256": "593676decba75697dcc9b3781f52b7dd3560da309d3792874baf931e753cd9f6"
+    },
+    {
+      "path": "test/pack-check.js",
+      "from": "shared/test/pack-check.js",
+      "sha256": "30734381c5b65ae77309a546b380e227821a5fe5fb665ef8ce9668fa6345a9dd"
+    }
+  ]
+}
