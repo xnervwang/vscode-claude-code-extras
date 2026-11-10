@@ -5415,49 +5415,52 @@ console.log('\nplans an uninstall copied aside come back');
     } else bad(`without hard links: ${JSON.stringify(unlinked)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 
-  /* The copy runs only on a normal start with the plugin registered. The stand-in claude records a
-     registration the way Claude Code does. */
-  const bin = 'ext/anthropic.claude-code-2.1.999-linux-x64/resources/native-binary/claude';
-  const claudeSh = '#!/bin/sh\nif [ "$1" = plugin ]; then\n  mkdir -p "$HOME/.claude/plugins"\n'
-    + '  printf %s \'{"version":2,"plugins":{"agent-work-plan@claude-code-extras":[{"scope":"user"}]}}\' > "$HOME/.claude/plugins/installed_plugins.json"\n'
-    + '  printf %s \'{"claude-code-extras":{"source":{"source":"directory"}}}\' > "$HOME/.claude/plugins/known_marketplaces.json"\n  exit 0\nfi\nexit 1\n';
-  const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
-  const files = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '',
-    ['.claude/agent-work-plan-plans-20261101-000000/' + A + '.json']: '{"nodes":[]}', '.claude/agent-work-plan-plans-20261101-000000/WHAT-THIS-IS.txt': 'note' };
-  const back = (r) => Object.keys(r.files || {}).includes('.claude/plugins/data/agent-work-plan-claude-code-extras/' + A + '.json');
-  const real = { packageJSON: { name: 'claude-code-extras', version: '1.0.21', extensionDependencies: ['anthropic.claude-code'] }, extensionPath: '/x' };
-  const usual = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 4000 });
-  const removedRun = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 2000,
-    state: { 'claudeCodeExtras.removed': true } });
-  const asideRun = activateStub({ extensions: { 'anthropic.claude-code': cc, [LEGACY_ID]: real }, files, aged: true, executable: [bin], after: 2000 });
-  if (!usual.threw && back(usual) && (usual.state || {})['claudeCodeExtras.workPlanPlugin'] && usual.state['claudeCodeExtras.workPlanPlugin'].registered === true) {
-    ok('a start that registers the plugin copies the rescued plans back');
-  } else bad(`usual start: ${JSON.stringify({ threw: (usual.threw || '').slice(0, 300), back: back(usual), plugin: (usual.state || {})['claudeCodeExtras.workPlanPlugin'], logs: (usual.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 5) })}`);
-  if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while an earlier version of the old extension is installed, nothing is copied back');
-  else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
+  if (process.platform === 'win32') note('the stand-in binary is a shell script, which Windows cannot run as claude.exe');
+  else {
+    /* The copy runs only on a normal start with the plugin registered. The stand-in claude records a
+       registration the way Claude Code does. */
+    const bin = 'ext/anthropic.claude-code-2.1.999-linux-x64/resources/native-binary/claude';
+    const claudeSh = '#!/bin/sh\nif [ "$1" = plugin ]; then\n  mkdir -p "$HOME/.claude/plugins"\n'
+      + '  printf %s \'{"version":2,"plugins":{"agent-work-plan@claude-code-extras":[{"scope":"user"}]}}\' > "$HOME/.claude/plugins/installed_plugins.json"\n'
+      + '  printf %s \'{"claude-code-extras":{"source":{"source":"directory"}}}\' > "$HOME/.claude/plugins/known_marketplaces.json"\n  exit 0\nfi\nexit 1\n';
+    const cc = { packageJSON: { name: 'claude-code', version: '2.1.999' }, extensionPath: '$HOME/ext/anthropic.claude-code-2.1.999-linux-x64' };
+    const files = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '', 'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '',
+      ['.claude/agent-work-plan-plans-20261101-000000/' + A + '.json']: '{"nodes":[]}', '.claude/agent-work-plan-plans-20261101-000000/WHAT-THIS-IS.txt': 'note' };
+    const back = (r) => Object.keys(r.files || {}).includes('.claude/plugins/data/agent-work-plan-claude-code-extras/' + A + '.json');
+    const real = { packageJSON: { name: 'claude-code-extras', version: '1.0.21', extensionDependencies: ['anthropic.claude-code'] }, extensionPath: '/x' };
+    const usual = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 4000 });
+    const removedRun = activateStub({ extensions: { 'anthropic.claude-code': cc }, files, aged: true, executable: [bin], after: 2000,
+      state: { 'claudeCodeExtras.removed': true } });
+    const asideRun = activateStub({ extensions: { 'anthropic.claude-code': cc, [LEGACY_ID]: real }, files, aged: true, executable: [bin], after: 2000 });
+    if (!usual.threw && back(usual) && (usual.state || {})['claudeCodeExtras.workPlanPlugin'] && usual.state['claudeCodeExtras.workPlanPlugin'].registered === true) {
+      ok('a start that registers the plugin copies the rescued plans back');
+    } else bad(`usual start: ${JSON.stringify({ threw: (usual.threw || '').slice(0, 300), back: back(usual), plugin: (usual.state || {})['claudeCodeExtras.workPlanPlugin'], logs: (usual.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 5) })}`);
+    if (!removedRun.threw && !back(removedRun) && !asideRun.threw && !back(asideRun)) ok('after Remove, and while an earlier version of the old extension is installed, nothing is copied back');
+    else bad(`copied back when it should not be: removed ${back(removedRun)}, standing aside ${back(asideRun)}`);
 
-  /* The old extension's uninstall hook runs at the editor's next start, when the editor deletes its folder, and can
-     come after this extension has started: it copies the plans aside and unregisters the plugin, which deletes the plan
-     directory, leaving Claude Code's two records without the plugin and its marketplace. The 30-second timer registers
-     the plugin again and copies the plans back, without waiting for the folder to settle. The plugin alone gone, its
-     marketplace still known, is someone's own removal and is left so. */
-  const DATA = '.claude/plugins/data/agent-work-plan-claude-code-extras/';
-  const startFiles = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '',
-    'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '', [DATA + A + '.json']: '{"nodes":[]}' };
-  const hook = (records) => activateStub({ extensions: { 'anthropic.claude-code': cc }, files: startFiles, aged: true, executable: [bin],
-    tickMs: 200, laterMs: 3000, after: 3000, gone: [DATA],
-    later: Object.assign({ ['.claude/agent-work-plan-plans-20261108-000000/' + A + '.json']: '{"nodes":[]}' }, records) });
-  const listedIn = (r) => {
-    const rec = (r.files || {})['.claude/plugins/installed_plugins.json'];
-    return !!(rec && rec.plugins && rec.plugins['agent-work-plan@claude-code-extras']);
-  };
-  const bothGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}', '.claude/plugins/known_marketplaces.json': '{}' });
-  if (!bothGone.threw && listedIn(bothGone) && back(bothGone) && (bothGone.logs || []).some((l) => /unregistered while this window was running/.test(l))) {
-    ok('an uninstall of the old extension that runs after this one started is undone within a turn of the timer, plans included');
-  } else bad(`after the old uninstall hook ran: ${JSON.stringify({ threw: (bothGone.threw || '').slice(0, 300), listed: listedIn(bothGone), back: back(bothGone), logs: (bothGone.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 6) })}`);
-  const pluginGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}' });
-  if (!pluginGone.threw && !listedIn(pluginGone) && !back(pluginGone)) ok('the plugin removed on its own while its marketplace stays is not registered again by the timer');
-  else bad(`registered again after a removal of the plugin alone: ${JSON.stringify({ listed: listedIn(pluginGone), back: back(pluginGone) })}`);
+    /* The old extension's uninstall hook runs at the editor's next start, when the editor deletes its folder, and can
+       come after this extension has started: it copies the plans aside and unregisters the plugin, which deletes the plan
+       directory, leaving Claude Code's two records without the plugin and its marketplace. The 30-second timer registers
+       the plugin again and copies the plans back, without waiting for the folder to settle. The plugin alone gone, its
+       marketplace still known, is someone's own removal and is left so. */
+    const DATA = '.claude/plugins/data/agent-work-plan-claude-code-extras/';
+    const startFiles = { [bin]: claudeSh, 'ext/anthropic.claude-code-2.1.999-linux-x64/webview/index.js': '',
+      'ext/anthropic.claude-code-2.1.999-linux-x64/extension.js': '', [DATA + A + '.json']: '{"nodes":[]}' };
+    const hook = (records) => activateStub({ extensions: { 'anthropic.claude-code': cc }, files: startFiles, aged: true, executable: [bin],
+      tickMs: 200, laterMs: 3000, after: 3000, gone: [DATA],
+      later: Object.assign({ ['.claude/agent-work-plan-plans-20261108-000000/' + A + '.json']: '{"nodes":[]}' }, records) });
+    const listedIn = (r) => {
+      const rec = (r.files || {})['.claude/plugins/installed_plugins.json'];
+      return !!(rec && rec.plugins && rec.plugins['agent-work-plan@claude-code-extras']);
+    };
+    const bothGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}', '.claude/plugins/known_marketplaces.json': '{}' });
+    if (!bothGone.threw && listedIn(bothGone) && back(bothGone) && (bothGone.logs || []).some((l) => /unregistered while this window was running/.test(l))) {
+      ok('an uninstall of the old extension that runs after this one started is undone within a turn of the timer, plans included');
+    } else bad(`after the old uninstall hook ran: ${JSON.stringify({ threw: (bothGone.threw || '').slice(0, 300), listed: listedIn(bothGone), back: back(bothGone), logs: (bothGone.logs || []).filter((l) => /plugin|plans/.test(l)).slice(0, 6) })}`);
+    const pluginGone = hook({ '.claude/plugins/installed_plugins.json': '{"version":2,"plugins":{}}' });
+    if (!pluginGone.threw && !listedIn(pluginGone) && !back(pluginGone)) ok('the plugin removed on its own while its marketplace stays is not registered again by the timer');
+    else bad(`registered again after a removal of the plugin alone: ${JSON.stringify({ listed: listedIn(pluginGone), back: back(pluginGone) })}`);
+  }
 }
 
 /* Names the rename keeps, because installed machines already use them: a renamed marker or backup suffix would no
