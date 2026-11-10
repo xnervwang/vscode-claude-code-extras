@@ -32,6 +32,7 @@ const coreLink = require('./src/core-link');
 const hookSettings = require('./src/hook-settings');
 const pluginInstall = require('./src/plugin-install');
 const pythonRuntime = require('./src/python-runtime');
+const pythonOffer = require('./src/python-offer');
 const latency = require('./src/openlatency');
 const tabdot = require('./src/tabdot');
 const sessionPins = require('./src/sessionpins');
@@ -1147,56 +1148,42 @@ function start(context, log, renamed, handing = false) {
    */
   /*
    * Shown instead of the plan when no Python 3 runs; the plugin is then staged without its hooks and skill. On Windows,
-   * clicking the row offers to download Python from python.org (src/python-runtime.js); a downloaded python.exe comes
-   * after the ones on PATH.
+   * clicking the row offers to download Python from python.org into the folder Agent Plus and its extensions share
+   * (src/python-runtime.js); a downloaded python.exe comes after the ones on PATH, then one an earlier version of this
+   * extension downloaded into its own storage.
    */
   const storage = context.globalStorageUri.fsPath;
-  const canDownload = !!pythonRuntime.build();
-  const pythons = () => {
-    const exe = pythonRuntime.executable(storage);
-    return canDownload && fs.existsSync(exe) ? pluginInstall.PYTHONS.concat([[exe.replace(/\\/g, '/')]]) : pluginInstall.PYTHONS;
-  };
-  const NO_PYTHON = {
-    title: 'Work plans need Python 3',
-    step: 'finding Python 3',
-    said: `No Python 3.7 or later was found (tried ${pluginInstall.PYTHONS.map((l) => l.join(' ')).join(', ')}). `
-      + (canDownload
-        ? 'Click to download it, or install Python and reload the window.'
-        : 'Install it from python.org, then reload the window.'),
-    description: canDownload ? 'click to download it' : 'click to try again',
-    command: canDownload ? PREFIX + 'downloadPython' : '',
-  };
+  const pythons = () => pythonRuntime.pythons(storage);
+  const noPython = () => pythonOffer.notice(pythons(), {
+    download: PREFIX + 'downloadPython', install: PREFIX + 'installWorkPlanPlugin',
+    without: 'Until this succeeds nothing writes a work plan, so the plan stays empty.',
+  });
   const showProblem = (problem) => claude.setNotice(problem ? {
-    title: problem.title || 'The plugin that writes work plans is not installed',
-    description: problem.description || 'click to try again',
+    title: 'The plugin that writes work plans is not installed',
+    description: 'click to try again',
     detail: `${problem.step} failed. ${problem.said || 'It gave no reason.'} Until this succeeds nothing writes a work plan, `
       + 'so the plan stays empty.',
-    command: problem.command || PREFIX + 'installWorkPlanPlugin',
+    command: PREFIX + 'installWorkPlanPlugin',
     arguments: [],
   } : null);
-  const PYTHON_OFFER_KEY = 'pythonOffer';
-  /* Once per version. After "Not now" the row above the plan is the way to get it. */
-  const offerPython = async () => {
-    if (!canDownload || context.globalState.get(PYTHON_OFFER_KEY, '') === pythonRuntime.VERSION) return;
-    await context.globalState.update(PYTHON_OFFER_KEY, pythonRuntime.VERSION);
-    const pick = await vscode.window.showInformationMessage(
-      'Work plans need Python 3. Download it from python.org (11 MB)?',
-      'Download', 'Not now');
-    if (pick === 'Download') await getPython();
-  };
-  let gettingPython = null;
-  const getPython = () => gettingPython || (gettingPython = vscode.window.withProgress(
+  /* One download at a time in this window; a second request while one runs waits for it. */
+  const getPython = pythonOffer.single(() => vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Downloading Python ${pythonRuntime.VERSION} from python.org` },
     async () => {
-      const r = await pythonRuntime.download(storage);
+      const r = await pythonRuntime.download(undefined, { userAgent: 'claude-code-plus' });
       log.appendLine('python download: ' + r.said);
       if (!r.ok) {
         vscode.window.showErrorMessage('Claude Code Plus: downloading Python failed. ' + r.said);
-        return;
+        return false;
       }
       await syncPlugin(true);
       vscode.window.showInformationMessage('Claude Code Plus: Python is installed. Start a new conversation to get a work plan.');
-    }).finally(() => { gettingPython = null; }));
+      return true;
+    }));
+  /* Once per Python version on this machine, by whichever extension and window asks first. After "Not now" the row above
+     the plan is the way to get it. */
+  const offerPython = () => pythonOffer.offer({
+    ask: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons), get: getPython });
   const syncPlugin = async (retry) => {
     if (removed()) return;
     const state = context.globalState.get(PLUGIN_KEY, {});
@@ -1239,9 +1226,11 @@ function start(context, log, renamed, handing = false) {
     if (python) log.appendLine(`work plan plugin: hooks run with ${python.launcher.join(' ')} (Python ${python.version}, ${python.executable})`);
     if (result.ok) {
       await context.globalState.update(PLUGIN_KEY, { registered: true, stamp, staged: pluginInstall.digest(to), error: '' });
-      showProblem(python ? null : NO_PYTHON);
-      if (!python) {
-        log.appendLine('work plan plugin: ' + NO_PYTHON.said);
+      if (python) showProblem(null);
+      else {
+        const notice = noPython();
+        claude.setNotice(notice);
+        log.appendLine('work plan plugin: ' + notice.detail);
         offerPython().catch((e) => log.appendLine('python offer: ' + e.message));
       }
       return undone;
@@ -1309,7 +1298,7 @@ function start(context, log, renamed, handing = false) {
     registerCommand('downloadPython', async () => {
       const pick = await vscode.window.showInformationMessage(
         `Download Python ${pythonRuntime.VERSION} from python.org?`,
-        { modal: true, detail: `11 MB, saved in ${pythonRuntime.home(storage)}.` },
+        { modal: true, detail: `11 MB, saved in ${pythonRuntime.home()}.` },
         'Download');
       if (pick === 'Download') await getPython();
     }),

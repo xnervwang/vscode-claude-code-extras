@@ -1,6 +1,7 @@
 # BSD 3-Clause License
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
+# Source: vscode-agent-plus shared/plugin/hooks/changes.py; sync-shared.js copies it, so edit it there.
 
 """Whether a tool call changed something, as against looking at something.
 
@@ -8,12 +9,14 @@ Both reminders ask it - the one at the end of a turn, about the whole turn, and 
 about each batch of calls - so it is written once. Two copies of a judgement this delicate would be tuned apart one false
 alarm at a time, and the two reminders would then disagree about the same call with nothing saying which was right.
 """
+import json
 import re
 import sys
 
-# Tools that change something by definition. Everything not named here - reading, searching, fetching, measuring - is a
-# turn looking at the world rather than altering it, and owes the plan nothing.
-CHANGING_TOOLS = ("Write", "Edit", "NotebookEdit")
+# Tools that change something by definition, and the names a shell call goes by, as the agent names them (plan_agent).
+# Everything else - reading, searching, fetching, measuring - is a turn looking at the world rather than altering it,
+# and owes the plan nothing.
+from plan_agent import CHANGING_TOOLS, SHELL_TOOLS
 # A shell command that changes something. Bash cannot be judged by its name, so it is judged by what it runs, and the
 # uncertain cases are resolved towards silence: a command this misses makes a reminder miss a turn, while a command it
 # wrongly catches puts the reminder back on the turns it was just taken off.
@@ -62,11 +65,29 @@ def changes(name, tool_input):
     """True when a call of this tool with this input altered something."""
     if name in CHANGING_TOOLS:
         return True
-    if name == "Bash" and isinstance(tool_input, dict):
-        command = tool_input.get("command")
-        return isinstance(command, str) and bool(
-            CHANGING_SHELL.search(shell_words(command)) or WRITING_OPEN.search(command))
+    if name in SHELL_TOOLS:
+        command = shell_command(tool_input)
+        return bool(command) and bool(CHANGING_SHELL.search(shell_words(command)) or WRITING_OPEN.search(command))
     return False
+
+
+def shell_command(tool_input):
+    """The command line of a shell call, whichever shape it arrives in.
+
+    A hook is handed {"command": "..."}; a rollout records exec_command's arguments as a JSON string with `cmd`, and the
+    older shell tool's as a list of words.
+    """
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except ValueError:
+            return tool_input
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command", tool_input.get("cmd"))
+    if isinstance(command, list):
+        return " ".join(str(w) for w in command)
+    return command if isinstance(command, str) else ""
 
 
 READS = (
@@ -111,6 +132,11 @@ WRITES = (
 def selftest():
     wrong = [c for c in READS if changes("Bash", {"command": c})]
     missed = [c for c in WRITES if not changes("Bash", {"command": c})]
+    # A shell call recorded under another name has its arguments as a JSON string with `cmd`.
+    for shell in SHELL_TOOLS[1:]:
+        wrong += [c for c in READS[:3] if changes(shell, json.dumps({"cmd": c}))]
+        missed += [c for c in WRITES[:3] if not changes(shell, json.dumps({"cmd": c}))]
+    missed += [tool for tool in CHANGING_TOOLS if not changes(tool, "*** Begin Patch")]
     for c in wrong:
         print("FAIL read-only, counted as a change: %r" % c)
     for c in missed:

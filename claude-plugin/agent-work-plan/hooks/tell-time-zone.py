@@ -2,12 +2,16 @@
 # BSD 3-Clause License
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
+# Source: vscode-agent-plus shared/plugin/hooks/tell-time-zone.py; sync-shared.js copies it, so edit it there.
 
 """Tell the model which time zone the user reads the panel in, when that is not this machine's.
 
 With Remote SSH the model runs on one machine and the person reads on another, often hours apart. Every clock the model
-can see is this machine's - `date`, file times, logs, the date Claude Code gives as today - while the panel shows times
+can see is this machine's - `date`, file times, logs, the date the agent gives as today - while the panel shows times
 in the reader's zone, so a model that reports "finished at 04:30" is right by a clock the reader never sees.
+
+Where the agent itself has already told the model the same zone since the last compaction, nothing is said
+(plan_agent.agent_told): Codex's pages do, Claude Code does not.
 
 It is said when the conversation has not been told yet, and again only when something has made the last telling stale
 or far away (see `due`): after a compaction, which summarises it away; when the offset changes, at a daylight-saving
@@ -31,7 +35,8 @@ sys.dont_write_bytecode = True
 # The script's folder on the import path: see inject-work-plan.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import (TOLD_SUFFIX, current_context, data_dir, latest_reply_matches, open_tail, plan_file, read_payload,
+from plan_path import (AGENT, TOLD_BY, TOLD_SUFFIX, agent_told, current_context, data_dir, fixture_agent_told,
+                       fixture_compacted, fixture_usage, latest_reply_matches, open_tail, plan_file, read_payload,
                        settings, side_file, write_quietly)
 
 ZONE_FILE = "client-time-zone.json"
@@ -98,10 +103,10 @@ def named(t):
 
 def sentence(zone, theirs, ours):
     return ("The user is in %s (%s), where it is now %s. This machine runs on %s (%s): `date`, file times and log "
-            "lines here are in that zone, and so is the date Claude Code gives as today. Say times and dates to the "
+            "lines here are in that zone, and so is the date %s gives as today. Say times and dates to the "
             "user in their zone, converting any you read here."
             % (zone, named(theirs), time.strftime("%a %Y-%m-%d %H:%M", theirs),
-               getattr(ours, "tm_zone", "") or "local time", offset(ours.tm_gmtoff)))
+               getattr(ours, "tm_zone", "") or "local time", offset(ours.tm_gmtoff), AGENT))
 
 
 def describe(zone, now):
@@ -188,6 +193,11 @@ def respond(payload, now, directory=None):
                 # The first reading from after the compaction: from here on the context counts as it reads.
                 write_told(path, {k: v for k, v in told.items() if k != "compactedFrom"})
             return ""
+    # Recorded as told either way, so that it is looked for again only when something makes a telling due.
+    if agent_told(tail, zone):
+        if path:
+            write_told(path, dict(now_seen, by=TOLD_BY))
+        return ""
     if path:
         write_told(path, now_seen)
     return sentence(zone, *found)
@@ -268,8 +278,7 @@ def selftest():
         transcript = os.path.join(tmp, "t.jsonl")
 
         def context(tokens):
-            write("t.jsonl", json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
-                {"type": "text", "text": "ok"}], "usage": {"input_tokens": tokens}}}) + "\n")
+            write("t.jsonl", fixture_usage(tokens) + "\n")
 
         message = {"hook_event_name": "UserPromptSubmit", "session_id": "5e000000-0000-0000-0000-000000000000",
                    "transcript_path": transcript}
@@ -304,6 +313,23 @@ def selftest():
         check("once a reading from after the compaction is seen, the one from before it no longer reads as zero",
               respond(message, summer + 14 * 3600 + 58 * 60, tmp) != "")
         check("a change of offset says it again", respond(message, winter, tmp) != "")
+
+        # Where the agent tells the model the zone itself, its own telling counts until a compaction.
+        def agent_says(zone):
+            write("t.jsonl", "\n".join([fixture_agent_told(zone), fixture_usage(20_000)]) + "\n")
+        if fixture_agent_told("UTC"):
+            fresh = dict(message, session_id="5e000000-0000-0000-0000-000000000002")
+            agent_says("America/Los_Angeles")
+            check("where the agent told the model the same zone, nothing is said", respond(fresh, summer, tmp) == "")
+            check("and nothing on the next message either", respond(fresh, summer + 600, tmp) == "")
+            agent_says("Europe/Paris")
+            check("the agent's message naming another zone does not count",
+                  respond(dict(message, session_id="5e000000-0000-0000-0000-000000000003"), summer, tmp) != "")
+            agent_says("America/Los_Angeles")
+            with open(transcript, "a", encoding="utf-8") as fh:
+                fh.write(fixture_compacted() + "\n")
+            check("nor does one from before a compaction",
+                  respond(dict(message, session_id="5e000000-0000-0000-0000-000000000004"), summer, tmp) != "")
         check("a message with no session id is still told", respond(dict(message, session_id=""), summer, tmp) != "")
         write("config.json", json.dumps({"tellTimeZone": False}))
         check("the setting off says nothing even to a new conversation",

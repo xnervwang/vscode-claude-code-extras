@@ -24,6 +24,12 @@ const path = require('path');
 const cp = require('child_process');
 const vm = require('vm');
 
+/* The folder Agent Plus and its extensions share (sharedHome in src/files.js: the Python download and the mark that it
+   was offered) is a temporary one for every check and every process they start, so a run never reads or writes the
+   real ~/.agent-work-plan. */
+const SHARED_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-shared-home-'));
+process.env.AGENT_WORK_PLAN_HOME = SHARED_HOME;
+
 const webview = require('../src/webview');
 const host = require('../src/host');
 const ADAPTERS = require('../src/adapters');
@@ -31,6 +37,11 @@ const supported = require('../build/supported');
 const { pickShape } = require('../src/edits');
 /* Agent Plus's page helpers, which the fragments that use them need ahead of them when one is run on its own. */
 const KIT = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '03-kit.js'), 'utf8');
+/* The hooks import everything shared from plan_path.py, which re-exports the two modules that define it: plan_common.py
+   (the same for every agent) and plan_agent.py (Claude Code's part). */
+const PLAN_PATH = ['plan_path.py', 'plan_common.py', 'plan_agent.py'];
+const planPathSource = (hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks')) =>
+  PLAN_PATH.map((f) => fs.readFileSync(path.join(hooks, f), 'utf8')).join('\n');
 
 let failures = 0;
 /* Checks that could not run, as against ones that ran and passed. Two whole sections need a real Claude Code install and
@@ -2125,8 +2136,7 @@ console.log('\none limit on a description');
 {
   const root = path.join(__dirname, '..');
   const plan = require('../src/workplan');
-  const hook = fs.readFileSync(
-    path.join(root, 'claude-plugin', 'agent-work-plan', 'hooks', 'plan_path.py'), 'utf8');
+  const hook = planPathSource();
   const skill = fs.readFileSync(
     path.join(root, 'claude-plugin', 'agent-work-plan', 'skills', 'maintain', 'SKILL.md'), 'utf8');
   const num = (src, name) => {
@@ -3560,7 +3570,7 @@ console.log('\none list of states, in three places');
 {
   const root = path.join(__dirname, '..');
   const plan = require('../src/workplan');
-  const py = fs.readFileSync(path.join(root, 'claude-plugin', 'agent-work-plan', 'hooks', 'plan_path.py'), 'utf8');
+  const py = planPathSource();
   const skill = fs.readFileSync(path.join(root, 'claude-plugin', 'agent-work-plan', 'skills', 'maintain', 'SKILL.md'), 'utf8');
   const tuple = /^STATES = \(([^)]*)\)/m.exec(py);
   const inPython = tuple ? (tuple[1].match(/"([a-z]+)"/g) || []).map((s) => s.slice(1, -1)) : [];
@@ -4214,7 +4224,7 @@ console.log("\nthe reader's time zone, told to the model");
 
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   const writer = (/const writeClientZone = \(\) => \{[\s\S]*?\n  \};\n/.exec(ext) || [''])[0];
-  const defaults = fs.readFileSync(path.join(hooks, 'plan_path.py'), 'utf8');
+  const defaults = planPathSource(hooks);
   const zoneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-zone-'));
   const hs = require('../src/hook-settings');
   const wroteEmpty = hs.writeClientZone(zoneDir, '');
@@ -4238,7 +4248,7 @@ console.log("\nthe reader's time zone, told to the model");
 console.log('\none copy of what the hooks share');
 {
   const hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks');
-  const scripts = fs.readdirSync(hooks).filter((f) => f.endsWith('.py') && f !== 'plan_path.py');
+  const scripts = fs.readdirSync(hooks).filter((f) => f.endsWith('.py') && !PLAN_PATH.includes(f));
   const copies = [
     ['reads a transcript from its end', /\.seek\(/],
     ['writes a file and renames it into place', /os\.replace\(/],
@@ -5502,7 +5512,7 @@ console.log('\nnames the rename leaves alone');
     ['the page\'s console tag', /\[claude-code-extras\] /.test(src('src/page/99-sweep.js'))],
     ['the marketplace, the plugin and the plan directory', pi.MARKETPLACE === 'claude-code-extras' && market.name === 'claude-code-extras'
       && pi.PLUGIN === 'agent-work-plan' && pi.DATA_DIR === 'agent-work-plan-claude-code-extras'
-      && /"agent-work-plan-claude-code-extras"\)/.test(src('claude-plugin/agent-work-plan/hooks/plan_path.py'))],
+      && /"agent-work-plan-claude-code-extras"\)/.test(planPathSource())],
     ['the state keys the old extension\'s last version exports', /const REMOVED_KEY = 'claudeCodeExtras\.removed';/.test(ext)
       && /DIRS_KEY = 'claudeCodeExtras\.projectDirDays'/.test(ext)],
   ];
@@ -8488,6 +8498,7 @@ const repo = path.join(__dirname, '..');
   await require('./pack-check.js')(t, repo);
 })().catch((e) => bad(`a check copied from Agent Plus threw: ${(e && e.stack) || e}`)).finally(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
+  fs.rmSync(SHARED_HOME, { recursive: true, force: true });
   const ran = `${passed} passed` + (skipped ? `, ${skipped} skipped for want of an install here` : '');
   console.log(failures ? `\n${failures} check(s) failed (${ran})` : `\nall checks passed (${ran})`);
   process.exit(failures ? 1 : 0);

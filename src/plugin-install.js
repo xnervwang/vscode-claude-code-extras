@@ -74,37 +74,9 @@ function registrationGone(dir = configDir()) {
   return !Object.prototype.hasOwnProperty.call(listed, REF) && !Object.prototype.hasOwnProperty.call(markets, MARKETPLACE);
 }
 
-/*
- * Which Python 3 runs the plugin's hooks here.
- *
- * The hooks ship as `python3 <script>`, and that name is not on every machine: macOS and Linux have it, the python.org
- * installer for Windows provides python and the py launcher but no python3, and a clean Windows has no Python at all.
- * So the names are tried in turn, and the staged copy is fitted to the first one that runs (fitHooks). Each is asked to
- * print its version and its own path, which passes over a name that resolves to something else, such as the Microsoft
- * Store's stand-in python.exe that only offers to install Python.
- */
-const PYTHONS = process.platform === 'win32' ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python']];
-const PYTHON_MIN = [3, 7];
-const ASK_PYTHON = 'import sys; print(sys.version_info[0], sys.version_info[1]); print(sys.executable)';
-
-/** The first Python 3 that runs, as { launcher, executable, version }, or null. */
-async function findPython(run = cp.execFile, candidates = PYTHONS) {
-  for (const launcher of candidates) {
-    const said = await new Promise((resolve) => {
-      try {
-        run(launcher[0], launcher.slice(1).concat(['-c', ASK_PYTHON]), { timeout: 15000, windowsHide: true },
-          (err, stdout) => resolve(err ? '' : String(stdout || '')));
-      } catch (_) { resolve(''); }
-    });
-    const m = /^(\d+) (\d+)\s*\n\s*(\S.*?)\s*$/.exec(said.replace(/\r/g, '').trim());
-    if (!m) continue;
-    const major = Number(m[1]), minor = Number(m[2]);
-    if (major > PYTHON_MIN[0] || (major === PYTHON_MIN[0] && minor >= PYTHON_MIN[1])) {
-      return { launcher, executable: m[3], version: major + '.' + minor };
-    }
-  }
-  return null;
-}
+/* src/python-runtime.js, shared with Codex Plus, finds the Python 3 that runs the hooks; fitHooks fits the staged copy
+   to it. */
+const { PYTHONS, findPython } = require('./python-runtime');
 
 /* Where SKILL.md says how to start plan-row.py; fitHooks puts the launcher found here in place of python3. */
 const SKILL_RUN = 'run with `python3`.';

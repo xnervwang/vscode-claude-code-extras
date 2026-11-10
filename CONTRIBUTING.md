@@ -28,7 +28,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `src/page/91-answer.js` types an answer from Agent Plus into the conversation's message input.
 - `src/bounded.js` reads a plan file only if it is a regular file under a size limit.
 - `build/plan-health.js` counts how current the plans on this machine are: stale `doing` rows, `waiting` rows that name nobody.
-- `src/python-runtime.js` downloads Python from python.org for a Windows machine that has none.
+- `src/python-runtime.js` looks for a Python 3 to run the hooks and, on a Windows machine without one, downloads one from python.org; `src/python-offer.js` asks about that download once per Python version on each machine.
 - `claude-plugin/` holds the companion plugin: the skill that maintains a plan and the hooks that keep it honest.
 - `test/check.js` is the whole suite. It parses everything and checks every edit against an unpatched bundle. How
   many checks it runs depends on how many Claude Code builds are installed, so the count is not quoted here.
@@ -38,7 +38,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `test/with-core.js` runs this extension with Agent Plus from its checkout beside this one, in Agent Plus's
   fake VS Code (`test/fake-vscode.js`). Without that checkout its checks are skipped.
 - `build/pack.sh` produces the `.vsix` without npm.
-- `shared.json` lists the files copied from Agent Plus, each with the Agent Plus file it comes from. Besides the packing scripts and two checks, they are, in `src/`: the steps every patch target shares (`patch-target.js`, `edits.js`, `files.js`), finding the installed copies for the uninstall (`installed-copies.js`), writing the hooks' settings (`hook-settings.js`), registering with Agent Plus (`core-link.js`), the workspace folder test (`folders.js`), and the page helpers the fragments call through `agentPlusKit` (`page/03-kit.js`). Change them in Agent Plus and run `node build/sync-shared.js`; `test/shared-copies.js` fails on a copy changed here.
+- `shared.json` lists the files copied from Agent Plus and where each one comes from: the packing scripts, two checks, shared host and page code in `src/`, and the hooks the two plugins share. Claude Code's part of those hooks is `claude-plugin/agent-work-plan/hooks/plan_agent.py`, and `skills/maintain/SKILL.md` is generated from Agent Plus's template with this extension's text filled in. `guard-work-plan.py` and `refresh-work-plan.py` are not copied. To change a copied file, change it in Agent Plus and run `node build/sync-shared.js`; `test/shared-copies.js` fails when a copy is edited here.
 - `shim/` is the last version of the earlier id. It depends on Claude Code Plus, so updating the old extension installs Claude Code Plus. It writes `export.json`, which Claude Code Plus imports, and does nothing else. `bash build/pack-shim.sh` builds its `.vsix`.
 - `build/supported.js`, `build/update-versions.js`, and `supported-versions.json` maintain the record of verified Claude Code builds.
 

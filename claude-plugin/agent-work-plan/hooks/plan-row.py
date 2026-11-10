@@ -2,6 +2,7 @@
 # BSD 3-Clause License
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
+# Source: vscode-agent-plus shared/plugin/hooks/plan-row.py; sync-shared.js copies it, so edit it there.
 
 """Change one row of a work plan, or add a row: the state, the note, the description, and the times that go with them.
 
@@ -9,7 +10,8 @@
   plan-row.py PLAN add STATE TITLE [--under ROW] [--note TEXT] [--waiting-on WHO] [--question TEXT]
 
 ROW is the number shown in front of a row, closed rows counted: 3 is the third row at the top, 2.1 the first one under
-the second. Not a hook - the model runs it, and the injected block gives its full path every turn.
+the second. Not a hook: the model runs it, and the injected block gives its full path every turn. In Codex, plan-mcp.py
+also calls run() for the model's set_row and add_row tools.
 
 It exists because a change of state is one simple action and was being paid for as a large one. Done by hand it means
 reading the whole file, changing one field and writing all of it back - of 884 writes to plans measured on the machine
@@ -32,7 +34,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from plan_path import (CLOSED_STATES, HELD_STATES, MAX_DETAIL_CHARS, MAX_DETAIL_LINES, MAX_QUESTION_CHARS, PLAN_NAME,
-                       STATES, WAITING_ON, detail_over, now_stamp, plan_lock, questions_in, settings, write_atomic)
+                       SESSION_HINT, SETTING_PREFIX, STATES, WAITING_ON, detail_over, now_stamp, plan_lock, questions_in,
+                       settings, write_atomic)
 
 
 class Refused(Exception):
@@ -152,10 +155,6 @@ def hold(node, changed, who, question, now):
                       "can answer as it stands without reading the conversation.")
 
 
-# A `claude --bg` agent has a session of its own.
-SESSION_HINT = "If an agent you started with claude --bg or claude -p --resume is working on it, set the row to doing."
-
-
 def load(path, may_create):
     try:
         with open(path, encoding="utf-8") as fh:
@@ -183,8 +182,8 @@ def run(args):
     if not PLAN_NAME.match(os.path.basename(path)):
         raise Refused("%s is not a work plan: a plan is named by its conversation's session id." % path)
     if not settings(os.path.dirname(path))["enabled"]:
-        raise Refused("Work plans are switched off for this editor (claudeCodePlus.workPlan), so nothing reads this "
-                      "file. Track what is left in your reply instead.")
+        raise Refused("Work plans are switched off for this editor (%s.workPlan), so nothing reads this "
+                      "file. Track what is left in your reply instead." % SETTING_PREFIX)
     if args.action == "add":
         # The first row of a conversation can come before anything has made the plugin's data directory.
         try:

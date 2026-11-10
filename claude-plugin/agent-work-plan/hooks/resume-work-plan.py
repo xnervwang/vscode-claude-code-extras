@@ -2,6 +2,7 @@
 # BSD 3-Clause License
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
+# Source: vscode-agent-plus shared/plugin/hooks/resume-work-plan.py; sync-shared.js copies it, so edit it there.
 
 """Right after a compaction, point the conversation at its work plan and say the context is now at its smallest.
 
@@ -14,7 +15,7 @@ refresh-work-plan.py asked for the next concrete step, what not to do, and the u
 before the compaction. The summary covers more ground but orders it by kind, and it retells verdicts rather than stating
 them.
 
-A path and not the file's contents. Reading the file with the Read tool puts it in the recently-read set, so the client's
+A path and not the file's contents. Reading the file with a tool puts it in the recently-read set, so the client's
 own restore carries it through the next compaction for free; a hook's output is not a file read and forfeits that. And
 the summary has turned every tool call in the context into prose - the first real call after it is what puts the
 conversation back into using tools.
@@ -35,7 +36,7 @@ sys.dont_write_bytecode = True
 # The script's folder on the import path: see inject-work-plan.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import latest_reply_matches, open_tail, plan_file, read_payload, settings
+from plan_path import READ_HINT, fixture_reply, fixture_tool_call, latest_reply_matches, open_tail, plan_file, read_payload, settings
 
 
 def message(plan):
@@ -43,7 +44,7 @@ def message(plan):
         "The context was just compacted, so it is now at its smallest, not near a limit. Anything the summary above "
         "reports as pending because a compaction was approaching has been overtaken by it: the compaction is done.",
         "This conversation's work plan, a row per task: %s" % plan,
-        "Read it with a tool before doing anything else. The summary above retells the stretch in document order; the "
+        READ_HINT + " before doing anything else. The summary above retells the stretch in document order; the "
         "plan says what is still open, and the `detail` of a row that is `doing` was written for this moment - the next "
         "concrete step and what not to do, which a retelling flattens. The summary also turned every tool call into "
         "prose, and that first call is what puts this conversation back into using tools.",
@@ -91,11 +92,9 @@ def selftest():
     def write_transcript(*texts, tool_after=False):
         with open(transcript, "w", encoding="utf-8") as fh:
             for t in texts:
-                fh.write(json.dumps({"type": "assistant", "message": {
-                    "content": [{"type": "text", "text": t}]}}) + "\n")
+                fh.write(fixture_reply(t) + "\n")
             if tool_after:
-                fh.write(json.dumps({"type": "assistant", "message": {
-                    "content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}) + "\n")
+                fh.write(fixture_tool_call() + "\n")
 
     def run(payload):
         r = subprocess.run(me, input=json.dumps(payload), stdout=subprocess.PIPE, universal_newlines=True)

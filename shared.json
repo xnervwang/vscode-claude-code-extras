@@ -65,6 +65,72 @@
       "path": "src/page/03-kit.js",
       "from": "shared/page/kit.js",
       "sha256": "681e3d319bbeb69f5e3bf12a33cc2ef60121adb14532f15bc509c2db74a82068"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/plan_path.py",
+      "from": "shared/plugin/hooks/plan_path.py",
+      "sha256": "e82881afcc3c2e5d7335b600f53975bc1be290cc92c11a56bcf3ff6cf110bb98"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/plan_common.py",
+      "from": "shared/plugin/hooks/plan_common.py",
+      "sha256": "a78d9af2b678f36ffce53591ba23a0af515964d1250b3db7b98142aee6f3bb9f"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/plan-row.py",
+      "from": "shared/plugin/hooks/plan-row.py",
+      "sha256": "16353a183b410770483b12c97f3c6325de06d6b6a71969d5c393d7f48a537993"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/changes.py",
+      "from": "shared/plugin/hooks/changes.py",
+      "sha256": "ff66529f410b09c8b505b7ae0f937579f211aee1b3245e3197fb75d29b154c1e"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/inject-work-plan.py",
+      "from": "shared/plugin/hooks/inject-work-plan.py",
+      "sha256": "38330d426485911a8d960130cbdb435e9e3b92a0735703afccff3668f8991361"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/resume-work-plan.py",
+      "from": "shared/plugin/hooks/resume-work-plan.py",
+      "sha256": "a0610fdd62b35d27cd8d00ee301716ee2839dfc5ecd7e19fcef13be84cd39458"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/tell-time-zone.py",
+      "from": "shared/plugin/hooks/tell-time-zone.py",
+      "sha256": "5742f560cd7585ba3b747115a216ef4db51a60a3beabe0d2e8f4ccc598ac1cb6"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/nudge-work-plan.py",
+      "from": "shared/plugin/hooks/nudge-work-plan.py",
+      "sha256": "aa815f334ef83778cc5542fdb82100402f9158f6688070f5817940967d4176d6"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/remind-work-plan.py",
+      "from": "shared/plugin/hooks/remind-work-plan.py",
+      "sha256": "4260f08cb68da5c9bae1ec0735979cbdce5ea2ed81f510f5a359455edb2d8971"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/hooks/plan_agent.py",
+      "from": "shared/plugin/claude/plan_agent.py",
+      "sha256": "18268b8b3f182662add059df77fb7f584960053651ce73d6443ace46f14a36d6"
+    },
+    {
+      "path": "claude-plugin/agent-work-plan/skills/maintain/SKILL.md",
+      "from": "shared/plugin/skills/maintain/SKILL.md",
+      "fill": "shared/plugin/claude/maintain-skill.txt",
+      "sha256": "5157464db5342fd616bad2d23198e849a0dc5c23b15393b57d59a1d810c892d7"
+    },
+    {
+      "path": "src/python-runtime.js",
+      "from": "shared/host/python-runtime.js",
+      "sha256": "63d443e330f002aeefde6daad66a7fe63ff9abc8ad280bd99fa1ce2006ba3753"
+    },
+    {
+      "path": "src/python-offer.js",
+      "from": "shared/host/python-offer.js",
+      "sha256": "b1fcc195202ee74242541f8b7db8729100d0ca3a59661e03e64d59587b426c36"
     }
   ]
 }

@@ -2,6 +2,7 @@
 # BSD 3-Clause License
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
+# Source: vscode-agent-plus shared/plugin/hooks/nudge-work-plan.py; sync-shared.js copies it, so edit it there.
 
 """Say something when a turn did real work and left the work plan untouched.
 
@@ -59,8 +60,11 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from changes import changes
-from plan_path import (NUDGED_SUFFIX, OFFERED_SUFFIX, SETTLED_SUFFIX, children, epoch, listed, open_tail, plan_file,
-                       read_payload, row_command, settings, side_file, turn_began, write_quietly)
+from changes import shell_command  # noqa: F401  (kept beside changes so both read a call the same way)
+from plan_path import (AFTER_OFFER, MAYBE_CALL, MAYBE_USER, NOTE_WORD, NUDGED_SUFFIX, OFFERED_SUFFIX, QUESTION_WORD,
+                       SETTLED_SUFFIX, STOP_REENTERS, WAITING_ON_WORD, ask_how, children, epoch, listed, offer_how,
+                       open_tail, plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output,
+                       tool_calls, turn_began, write_quietly)
 
 # Every threshold this uses is in plan_path.DEFAULTS, where the editor's settings can override it.
 
@@ -68,40 +72,9 @@ from plan_path import (NUDGED_SUFFIX, OFFERED_SUFFIX, SETTLED_SUFFIX, children, 
 TURN_TAIL = 2 * 1024 * 1024
 
 
-def changed(row):
-    """How many things this row altered. Zero for a row that only looked at something."""
-    content = (row.get("message") or {}).get("content")
-    if not isinstance(content, list):
-        return 0
-    return sum(1 for block in content
-               if isinstance(block, dict) and block.get("type") == "tool_use"
-               and changes(block.get("name") or "", block.get("input")))
-
-
-def spoke(row):
-    """True for a user row that is a real message, not a tool result or a row the client wrote.
-
-    All of these are recorded as `user`. Rows the client writes are marked isMeta (skill text, scheduled wake-ups,
-    image-resize notes) or isCompactSummary (compaction summaries), and an interruption is a line of its own that starts
-    "[Request interrupted". Counted as the user, one transcript showed 180 more turns than were spoken, a skill loaded
-    at the end of a turn would move the turn's start past all its work, and a worker addressed once looked addressed
-    three times after two compactions.
-    """
-    if row.get("type") != "user" or row.get("isMeta") or row.get("isCompactSummary"):
-        return False
-    message = row.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, list):
-        texts = [str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text"]
-        if not texts:
-            return False
-        content = "".join(texts)
-    return isinstance(content, str) and not content.lstrip().startswith("[Request interrupted")
-
-
 def spellings(path):
-    """Spellings of `path` in a raw transcript line. JSON doubles a Windows path's backslashes, and a model may write
-    the path with forward slashes."""
+    """Spellings of `path` in a raw transcript line. JSON doubles a Windows path's backslashes, and a model may write the
+    path with forward slashes."""
     return {s for s in (path, json.dumps(path, ensure_ascii=False)[1:-1], path.replace("\\", "/")) if s}
 
 
@@ -110,23 +83,23 @@ def turn_shape(tail, plan="", began=None):
     went to the plan).
 
     With a plan, `began` (plan_path.turn_began) marks the turn's start and the backward walk stops at the first older
-    line, without counting turns; otherwise the turn starts at the user's last message. Only the tail is read, and only
-    lines that may be a tool call or a user message are parsed, since the whole file can be megabytes.
+    line, without counting turns; otherwise the turn starts at the user's last message. Only the tail is read, so the
+    count of turns is a lower bound, which can only make this quieter.
 
-    That tail is also where the count of turns comes from, and it is a lower bound rather than a total: a conversation
-    long enough to overflow the window has more turns than are visible here. The bound is in the safe direction - it can
-    only make this quieter, and being too quiet costs a reminder while being too loud costs every reminder's credibility.
+    Going to the plan is looked for only in the calls the model made, never anywhere else in the turn: the path is also
+    in the text this plugin injects at the start of every turn, so a search across whole rows would always find it. A
+    call to the plan's tools carries the plan's path, which they require; Codex records such a call by the tool's own
+    name (set_row) with the server in a field of its own, so the name says nothing about the server.
 
-    Going to the plan is looked for ONLY in the calls the assistant made, never anywhere else in the turn. The path is
-    also in the text this plugin injects at the start of every turn, so a search across whole rows would find it every
-    time and the reminder would never be able to fire at all.
+    Only lines holding one of plan_agent's MAYBE_CALL or MAYBE_USER strings are parsed. A line with several calls on it
+    counts as one tool call, and each of its calls is judged for a change.
     """
-    started, tools, changes, turns, reached = began, 0, 0, 0, False
+    started, tools, changes_made, turns, reached = began, 0, 0, 0, False
     names = spellings(plan) if plan else set()
     in_turn = True
     for line in tail.lines(TURN_TAIL):
-        used_tool = '"tool_use"' in line
-        if not used_tool and '"user"' not in line:
+        maybe_call = any(m in line for m in MAYBE_CALL)
+        if not maybe_call and not any(m in line for m in MAYBE_USER):
             continue
         try:
             row = json.loads(line)
@@ -143,19 +116,18 @@ def turn_shape(tail, plan="", began=None):
             if in_turn:
                 in_turn, started = False, epoch(row.get("timestamp"))
             continue
-        if in_turn and used_tool:
+        calls = tool_calls(row) if in_turn and maybe_call else []
+        if calls:
             tools += 1
-            changes += changed(row)
+            changes_made += sum(1 for name, given in calls if changes(name, given))
             if any(n in line for n in names):
                 reached = True
-    return started, tools, changes, turns, reached
+    return started, tools, changes_made, turns, reached
 
 
 def speak(payload, text):
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": payload.get("hook_event_name", "Stop"),
-        "additionalContext": text,
-    }}))
+    """Every caller has already made sure the same thing is said at most once (plan_agent.stop_output says how)."""
+    print(json.dumps(stop_output(payload, text)))
     return 0
 
 
@@ -180,8 +152,8 @@ def offer_once(payload, path, tools, turns, limits):
     return speak(payload, (
         "This conversation is keeping no work plan. You have spoken %d times and this turn used %d tools, which is "
         "long enough for the thread it started on to be out of sight. If the work has more than one strand to come "
-        "back to, start one at %s now - the skill agent-work-plan:maintain says what a row holds and what the states "
-        "mean. This is said once per conversation and will not be raised again." % (turns, tools, path)))
+        "back to, %s - the skill agent-work-plan:maintain says what a row holds and what the states mean.%s This is "
+        "said once per conversation and will not be raised again." % (turns, tools, offer_how(path), AFTER_OFFER)))
 
 
 def said_already(path, touched):
@@ -250,11 +222,10 @@ def settle(payload, path):
         return None
     shown = "; ".join("%s. %s" % (num, title[:60]) for num, title, _ in rows[:6]) + ("; ..." if len(rows) > 6 else "")
     return ("This turn is ending with %d row%s still `doing`: %s. `doing` is shown as work in progress, so move each one "
-            "on now: `done` if finished; `waiting` with --waiting-on (and --question for the user) if it waits on someone; "
-            "or keep it `doing` and say in --note what is still running for it. To change a row: %s set <row> <state> "
-            "[--note TEXT] "
-            "[--waiting-on WHO] [--question TEXT]. You will not be asked about these rows again."
-            % (len(rows), "" if len(rows) == 1 else "s", shown, row_command(path)))
+            "on now: `done` if finished; `waiting` with %s (and %s for the user) if it waits on someone; or keep it "
+            "`doing` and say in %s what is still running for it. %s You will not be asked about these rows again."
+            % (len(rows), "" if len(rows) == 1 else "s", shown, WAITING_ON_WORD, QUESTION_WORD, NOTE_WORD,
+               settle_how(path)))
 
 
 # A reply asks the user something when its last paragraph, without code and quoted lines, has a line ending in a
@@ -303,7 +274,7 @@ def unrecorded_question(payload, path, tail):
     The Conversations view lists only the questions written on rows. Measured over one day, conversations that had been
     told to put their questions there still left about four in ten in the reply only.
 
-    The reply comes from the Stop event's `last_assistant_message`. A question counts as recorded when the row command
+    The reply comes from the Stop event's `last_assistant_message`. A question counts as recorded when a row command or tool
     stamped its `asked` during the turn; one written straight into the file has no `asked`, so it draws the reminder
     once. It stays quiet on a Stop that follows one that kept the turn going (stop_hook_active), or it would ask again
     after its own reminder.
@@ -326,15 +297,18 @@ def unrecorded_question(payload, path, tail):
     if asked_since(plan.get("nodes") if isinstance(plan, dict) else None, began):
         return None
     return ("Your last reply may be asking the user something, but no row got a question this turn. Put each thing "
-            "you need from the user on a row of its own: %s set <row> <state> --waiting-on user --question TEXT, or "
-            "`add` for a new row. Offers to carry on do not count. If it is already on a row, or needs no answer, stop "
-            "here without writing more." % row_command(path))
+            "you need from the user on a row of its own: %s Offers to carry on do not count. If it is already on a row, "
+            "or needs no answer, stop here without writing more." % ask_how(path))
 
 
 def main():
     try:
         payload = read_payload()
     except Exception:
+        return 0
+    # Where speaking keeps the turn going, the Stop that follows carries stop_hook_active; saying anything then would be
+    # this hook talking to its own reminder.
+    if not isinstance(payload, dict) or (STOP_REENTERS and payload.get("stop_hook_active")):
         return 0
     path = plan_file(payload)
     if not path:
@@ -359,10 +333,10 @@ def main():
 
 
 def reconcile(payload, path, tail, limits):
-    started, tools, changes, turns, reached = turn_shape(tail, path, turn_began(path, payload))
+    started, tools, changed_count, turns, reached = turn_shape(tail, path, turn_began(path, payload))
     if started is None:
         return None
-    if changes < limits["nudgeMinChanges"]:
+    if changed_count < limits["nudgeMinChanges"]:
         return None
     # Reading the plan settles it as much as writing does. Reconciling begins by looking, and a turn that looked and
     # found nothing owed has reconciled - there is nothing else it could do. Without this the reminder had no way to
@@ -382,7 +356,7 @@ def reconcile(payload, path, tail, limits):
         "This turn changed %d things and neither read nor updated the work plan (%s). Reconcile it before finishing: "
         "add what this turn opened, close what it finished, and leave the rest alone. Reading it and finding nothing "
         "owed is a complete answer, but read it in the turn so this can tell. Only the user's word moves a row to "
-        "\"todo\". This will not be said again until the plan has been written to." % (changes, path)))
+        "\"todo\". This will not be said again until the plan has been written to." % (changed_count, path)))
 
 
 if __name__ == "__main__":

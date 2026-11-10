@@ -4,6 +4,7 @@ description: Keep this conversation's work plan up to date - the tree of what it
 version: 1.0.0
 tags: [work-plan, task-tracking, long-conversation, handoff]
 ---
+<!-- Source: vscode-agent-plus shared/plugin/skills/maintain/SKILL.md; sync-shared.js copies it, so edit it there. -->
 
 # Maintain this conversation's work plan
 
