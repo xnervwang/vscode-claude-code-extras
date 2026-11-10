@@ -5215,6 +5215,14 @@ console.log('\nthe old id\'s last version, shim/');
   if (!ascii.length && read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')) ok('its files are ASCII and its LICENSE is this one');
   else bad(`shim files missing or not ASCII: ${JSON.stringify(ascii)}, LICENSE same ${read('LICENSE') === fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')}`);
   const ignore = fs.readFileSync(path.join(__dirname, '..', '.vscodeignore'), 'utf8').split('\n');
+  {
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+    const shots = Array.from(readme.matchAll(/\]\((images\/[^)\s]+)\)/g)).map((m) => m[1]);
+    const globOf = (line) => new RegExp('^' + line.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
+    const shipped = shots.filter((f) => !ignore.some((l) => l && !l.startsWith('#') && globOf(l.trim()).test(f)));
+    if (shots.length && !shipped.length) ok('the README\'s screenshots are left out of the published package, which links to them on GitHub instead');
+    else bad(`README screenshots that would ship in the package: ${shipped.join(', ') || '(the README links no image)'}`);
+  }
   if (ignore.includes('shim/**') && !/\bshim\b/.test((fs.readFileSync(path.join(__dirname, '..', 'build', 'pack.sh'), 'utf8').match(/^cp -r .*$/m) || [''])[0])) {
     ok('this extension\'s own package leaves shim/ out');
   } else bad('shim/ would ship inside this extension');

@@ -19,7 +19,7 @@ supported-versions.json
 
 # The README's screenshots. Packaging rewrites every relative image link to an absolute one, so the copies inside the
 # package are never the ones displayed - and they are most of its weight. The icon stays: that one is read from here.
-images/tools-*.png
+images/work-plan.png
 
 # Source of images/icon.png, which the store reads.
 images/icon.svg
