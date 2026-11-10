@@ -6580,6 +6580,20 @@ console.log('\nopen sessions on the session list');
   if (header && text(header) === '4' && walk(tree, (n) => n.props && n.props.className === 'sl').some((n) => text(n) === 'Open sessions')) {
     ok('the header is the list\'s own section header, labelled Open sessions, with the count');
   } else bad('the header was not the list\'s section header with a count of 4');
+  {
+    const styles = [];
+    env.head.appendChild = (el) => styles.push(el);
+    env.document.createElement = () => ({ setAttribute() {}, textContent: '' });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '84-open-sessions.js'), 'utf8'), env);
+    const drawn = env.window.__cceOpenSessions(ui);
+    const css = styles.map((el) => el.textContent).join('\n');
+    const head = walk(drawn, (n) => n.props && n.props['data-cce-section-head'])[0];
+    if (/\[data-cce-section\]:not\(\[data-cce-collapsed="1"\]\)>\[data-cce-section-body\]\{margin-bottom:10px\}/.test(css)
+      && /\[data-cce-section\]:not\(:first-child\)>\[data-cce-section-head\]\{border-top:1px solid var\(--app-primary-border-color\)\}/.test(css)
+      && head && head.props.className === 'sh') {
+      ok('an open section leaves 10px under its last row and a later section header gets the list\'s divider line; a closed one leaves no space');
+    } else bad(`section spacing: header ${JSON.stringify(head && head.props)}, style ${css}`);
+  }
   rows[3].props.onClick();
   if (opened.length === 1 && opened[0][0] === 'B' && opened[0][1] === undefined && opened[0][2].openState === 'unread' && opened[0][2].isRemote === false) {
     ok('a click opens the conversation the way a click on its row in the list does');

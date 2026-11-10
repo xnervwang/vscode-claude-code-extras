@@ -22,7 +22,11 @@
    */
   var OPEN_SECTION = { attr: 'data-cce-open-sessions', key: 'cce.openSessionsCollapsed', storesExpanded: false,
     label: 'Open sessions', title: 'open sessions' };
+  /* 10px under an open section, as under Account & usage. The list's header loses its top line as a first child, which
+     ours always is. */
   var SECTION_CSS = '[data-cce-section][data-cce-collapsed="1"] [data-cce-section-body]{display:none}'
+    + '[data-cce-section]:not([data-cce-collapsed="1"])>[data-cce-section-body]{margin-bottom:10px}'
+    + '[data-cce-section]:not(:first-child)>[data-cce-section-head]{border-top:1px solid var(--app-primary-border-color)}'
     + '[data-cce-section-count]{margin-left:auto;padding:0 6px;border-radius:9px;font-size:.85em;line-height:16px;'
     + 'background:var(--vscode-badge-background,rgba(128,128,128,.35));color:var(--vscode-badge-foreground,inherit)}';
   var sectionStyle = null;
@@ -105,7 +109,7 @@
     var F = ui.jsx, W = ui.jsxs, c = ui.cls || {}, l = window.__cceListCls || {};
     var collapsed = sectionCollapsed(s);
     var props = { 'data-cce-section': '1', 'data-cce-collapsed': collapsed ? '1' : '0', children: [
-      F('div', { className: c.sectionHeader || '', children: W('button', {
+      F('div', { className: c.sectionHeader || '', 'data-cce-section-head': '1', children: W('button', {
         className: c.sectionToggle || '', onClick: function(e){ toggleSection(e, s); }, 'aria-expanded': collapsed ? 'false' : 'true',
         title: (collapsed ? 'Expand ' : 'Collapse ') + s.title,
         children: [
