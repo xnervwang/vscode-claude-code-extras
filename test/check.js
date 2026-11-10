@@ -4889,6 +4889,10 @@ console.log('\nwhat the package format can carry');
     if (ran && JSON.stringify(listed) === JSON.stringify(['.js', '.json', '.md', '.png', '.py', '.svg', '.txt', '.vsixmanifest'])) {
       ok('[Content_Types].xml lists every extension of the files staged, .py and .svg included');
     } else bad(`content types for the staged files: ${JSON.stringify(listed)}`);
+    const manifest = ran ? fs.readFileSync(path.join(stage, 'extension.vsixmanifest'), 'utf8') : '';
+    if (/<Asset Type="Microsoft\.VisualStudio\.Services\.Content\.License" Path="extension\/LICENSE\.txt" Addressable="true" \/>/.test(manifest)) {
+      ok('the package manifest lists LICENSE.txt as the license, as vsce does');
+    } else bad('the package manifest does not list the license');
     put('extension/LICENSE');
     let refused = false;
     try { cp.execFileSync(process.execPath, [script, stage], { encoding: 'utf8', stdio: 'pipe' }); } catch (e) { refused = /LICENSE/.test(String(e.stderr)); }
