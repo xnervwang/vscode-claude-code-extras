@@ -230,7 +230,7 @@ Claude Code delete the plugin's data directory along with it - "the removal also
 data where it can" - and these are not the extension's to delete. Nothing reads this folder; it is yours to keep or
 throw away.
 
-To use them again: install the extension, which registers the plugin again, then copy these files back into
+To use them again: install the extension, which registers the plugin again, then copy these files and the closed folder back into
 ~/.claude/plugins/data/${DATA_DIR}/
 `;
 

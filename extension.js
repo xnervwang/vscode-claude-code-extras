@@ -26,6 +26,7 @@ const background = require('./src/background');
 const efforts = require('./src/efforts');
 const { sweepOrphans, planDir, readPlan } = require('./src/workplan');
 const { transcriptOf } = require('./src/claude-files');
+const planInjections = require('./src/plan-injections');
 const waiting = require('./src/waiting');
 const { createClaudeSource } = require('./src/claude-source');
 const coreLink = require('./src/core-link');
@@ -673,9 +674,16 @@ function start(context, log, renamed, handing = false) {
     } catch (_) { /* the next update */ }
   };
   /* The info box asks for its conversation's process id. `claude agents` is run for it unless the last run is under
-     half a minute old. */
+     half a minute old. The Work plan line is sent separately, without waiting for `claude agents`. */
   globalThis.__cceProcessHook = (sessionId) => {
     if (removed() || !enabled() || switchedOff().includes('footerInfo')) return;
+    const transcript = cfg().get(WORK_PLAN_SETTING, true) !== false ? transcriptOf(sessionId) : '';
+    if (transcript) {
+      planInjections.measure(transcript).then((m) => {
+        const reply = { type: 'cce_plan', sessionId, text: planInjections.describe(m) };
+        if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
+      }).catch((e) => log.appendLine('work plan line for the info box: ' + (e && e.message)));
+    }
     claude.freshAgents().then((r) => {
       const reply = { type: 'cce_process', sessionId, pids: r.records ? waiting.pidsOf(r.records, sessionId) : null };
       if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);

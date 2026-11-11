@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { SESSION } = require('./claude-files');
 const { RESCUE_PREFIX } = require('./plugin-install');
+const { CLOSED_DIR } = require('./workplan');
 
 const LEGACY_ID = 'xnervwang.claude-code-extras';
 const PLUS_ID = 'xnervwang.claude-code-plus';
@@ -106,9 +107,10 @@ const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { retu
 
 /**
  * Copy the plans in every rescue folder (<RESCUE_PREFIX><stamp>/ in Claude Code's own directory, src/plugin-install.js)
- * back into `planDir`: only <session id>.json files, never over a plan already there, newest folder first, so that of two
- * copies of one plan the later wins. A folder whose plans were all dealt with gets COPIED_BACK; one written within
- * RESCUE_SETTLE_MS is left for later, and waitMs says how long until the first of those can be read.
+ * back into `planDir`: only <session id>.json files and their closed rows in closed/, never over a file already there,
+ * newest folder first, so that of two copies of one plan the later wins. A folder whose plans were all dealt with gets
+ * COPIED_BACK; one written within RESCUE_SETTLE_MS is left for later, and waitMs says how long until the first of those
+ * can be read.
  *
  * Returns { copied, dirs, waitMs }: plan file names copied, folders finished.
  */
@@ -130,6 +132,8 @@ function restoreRescued({ dir = require('./claude-files').claudeDir(), planDir, 
       continue;
     }
     const plans = entries.filter((e) => e.isFile() && e.name.endsWith('.json') && SESSION.test(e.name.slice(0, -5))).map((e) => e.name);
+    let closed = [];
+    try { closed = fs.readdirSync(path.join(dir, CLOSED_DIR)).filter((n) => n.endsWith('.json') && SESSION.test(n.slice(0, -5))); } catch (_) { /* none */ }
     const copied = [];
     let there = 0, failed = false;
     for (const p of plans) {
@@ -137,6 +141,9 @@ function restoreRescued({ dir = require('./claude-files').claudeDir(), planDir, 
       if (r === 'copied') copied.push(p);
       else if (r === 'there') there++;
       else failed = true;
+    }
+    for (const p of closed) {
+      if (copyNew(path.join(dir, CLOSED_DIR, p), path.join(planDir, CLOSED_DIR, p)) === 'failed') failed = true;
     }
     out.copied.push(...copied);
     if (failed) continue;

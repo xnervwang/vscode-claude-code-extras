@@ -50,7 +50,7 @@ Work you ask Claude to do now goes straight to `doing`. Work Claude suggests on 
 The extension registers a Claude Code plugin whose hooks hand the plan to Claude on each turn and around compactions. Its skill holds the rules Claude follows to keep the plan up to date.
 
 - The plugin's skill description loads in every session at about 110 tokens.
-- With a plan, every turn carries short fixed instructions and up to 40 rows. Every open top-level row is included, even past 40; the rows under them fill what is left of the 40, newest first, and a last line says how many open rows were left out. A finished row can be included when a row under it is still open. The cost grows with the number of rows and the length of their text; the page linked below has a measured example.
+- With a plan, every turn carries its open rows: the whole block, with the instructions, on the first turn and the first after each compaction; a short head when a row has changed; one line when none has. Rows that are `doing` and questions to you carry their notes; other rows show their title only. A finished row can be included when a row under it is still open. The block is cut to fit 6,000 characters, and a last line says how many open rows were left out. See [What it costs in tokens](#what-it-costs-in-tokens).
 - Before an automatic compaction, Claude is asked to bring the rows it is working on up to date. After compaction, it is asked to read the plan file before anything else.
 
 ### Where the plan lives
@@ -102,7 +102,56 @@ Verified against Claude Code 2.1.322.
 | Background commands | See a count such as `1 task` while a background build, test run or `sleep` timer runs, with the list one click away. | Footer |
 | Tabs back after a restart | Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection, are opened again when it starts. Tabs you closed while connected stay closed. | Editor tabs |
 | Status dots | A Claude Code tab's logo shows a green dot while Claude works, where Claude Code shows none, and a red one instead of Claude Code's orange when it finished while you were away. The session list uses the same green and red. | Editor tabs, session list |
-| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size; click a value to copy it. | Footer button |
+| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size, and how much the work plan has added since the last compaction; click a value to copy it. | Footer button |
+
+## What it costs in tokens
+
+The tables show the text Claude Code Plus adds to what Claude Code sends the model. All of it comes from the work plan plugin Claude Code Plus registers with Claude Code; what Claude Code Plus draws in VS Code sends nothing to the model. Text added to a conversation stays in context and goes with every later model call until compaction replaces the conversation with a summary. A token is about four characters of English.
+
+### Added to every message
+
+| What | When | At most | Turned off by |
+| --- | --- | --- | --- |
+| The work plan | Each message, while the conversation's plan has a row that is not `done` or `dropped`. The whole block, with what the states mean and how to change a row, on the conversation's first message and the first after each compaction; a short head in its place otherwise; one line when no row has changed since the message before | 6,000 characters, the brief included; the one line is about 160 characters and the plan's path | `claudeCodePlus.workPlan` |
+
+### Added now and then
+
+| What | When | At most | Turned off by |
+| --- | --- | --- | --- |
+| End-of-turn reminders | At the end of a turn that left rows `doing`, asked you something without putting the question on a row, or changed things without reading or updating the plan | About 2,400 characters and the paths of the plan and of the row command, when every reminder and both of the brief's requests come at once | `claudeCodePlus.workPlan` |
+| The brief's requests | At the end of a turn: the status once per turn, after a turn that did work; the summary when there is none, after a top-level row was added, removed or closed, and after a compaction | Included in the end-of-turn reminders | `claudeCodePlus.conversationBrief` |
+| No row `doing` | At most once per turn, when the main thread has made three tool calls or changed two things besides the plan and no row is `doing` | About 430 characters, and the plan's path and the row command's path twice each | `claudeCodePlus.workPlan` |
+| Before a compaction | At 170k, 180k and 195k tokens of a 200K window, or 960k, 970k and 995k of a 1M window, once each between compactions, while a row is `doing`; said once more at the end of the turn if the plan was not written | About 540 characters, and the plan's path and the row command's path once each | `claudeCodePlus.workPlan`; `claudeCodePlus.workPlanQuietWhenReplyMatches` |
+| After a compaction | Once per compaction | About 950 characters, the plan's path, and the path of its closed rows when it has any | `claudeCodePlus.workPlan`; `claudeCodePlus.workPlanQuietWhenReplyMatches` |
+| The offer of a plan | Once, in a conversation with no plan, after your third message and a turn of 25 tool calls | About 390 characters and the plan's path | `claudeCodePlus.workPlan`; `claudeCodePlus.workPlanOfferMinTurns`, `claudeCodePlus.workPlanOfferMinToolCalls` |
+| A write to the plan, refused | When Claude writes or edits the plan file with a row description longer than the view shows, or a question that asks more than one thing | About 450 characters | `claudeCodePlus.workPlan` |
+| Your time zone | When the panel reads in another time zone than this machine's: on the conversation's first message and after each compaction, then when either side's date turns over, the offset changes, or the context has grown by 100k tokens | About 300 characters | `claudeCodePlus.tellClaudeYourTimeZone` |
+
+- The work plan is cut at 6,000 characters by the plugin. The reminders have no cut: each is fixed text with at most six row titles of 60 characters.
+- Rows closed more than a day ago are moved out of the plan file to `closed/<session ID>.json` beside it, so reading the plan after a compaction costs less too; Agent Plus's views read both files.
+
+### Sent with every call
+
+| What | When | At most | Turned off by |
+| --- | --- | --- | --- |
+| The work plan skill in Claude Code's list of skills | Every call | Its name and a 573-character description, about 110 tokens | `Claude Code Plus: Stop Loading the Work Plan Plugin` |
+
+### Costing nothing
+
+- Everything Claude Code Plus and Agent Plus draw in VS Code.
+- An answer you give in Agent Plus's Answer view is typed into the conversation and sent as your message, as if you had typed it there.
+- The information button shows, for the conversation in front, how many times the work plan was added since the last compaction, how many characters that came to, and about what share of the context in use.
+
+### Typical values
+
+Measured on 2026-11-11 on one machine.
+
+| What | Typical | How it was measured |
+| --- | --- | --- |
+| The work plan, whole block | Median 2,246 characters, 90th percentile 4,720 | The 41 Claude Code plans written on that machine in the 14 days before; each was copied and put through the work plan plugin's hook that adds the plan to a message, once |
+| The work plan, short head | Median 1,102 characters, 90th percentile 3,576 | The same plans |
+| The work plan, one line | 220 characters with a 60-character path | The same plans |
+| Messages whose plan is unchanged since the message before | 48% | 8,587 messages with the plan in 63 Claude Code conversations over the same 14 days, counted as unchanged when only how long a row had been in its state differed; counted by `build/plan-injection-stats.js` in Agent Plus's repository |
 
 ## Settings
 

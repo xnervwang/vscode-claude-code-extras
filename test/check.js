@@ -2322,6 +2322,28 @@ console.log('\nabandoned work plans');
         return t;
       },
       (t, r) => r.deleted === 0 && left(t.dir).join() === id(2) + '.watermark'],
+    ['what the injection hook last showed a conversation goes when the conversation does',
+      () => {
+        const t = build([id(1)], []);
+        const f = path.join(t.dir, id(2) + '.injected');
+        fs.writeFileSync(f, '{}');
+        fs.utimesSync(f, OLD / 1000, OLD / 1000);
+        return t;
+      },
+      (t, r) => r.deleted === 1 && left(t.dir).length === 0],
+    /* The row command moves rows closed for a day to closed/<session id>.json. */
+    ['a conversation\'s closed rows go when the conversation does, and stay while it is there',
+      () => {
+        const t = build([id(1)], []);
+        fs.mkdirSync(path.join(t.dir, 'closed'));
+        for (const k of [1, 2]) {
+          const f = path.join(t.dir, 'closed', id(k) + '.json');
+          fs.writeFileSync(f, '{}');
+          fs.utimesSync(f, OLD / 1000, OLD / 1000);
+        }
+        return t;
+      },
+      (t, r) => r.deleted === 1 && fs.readdirSync(path.join(t.dir, 'closed')).join() === id(1) + '.json'],
     /* What the time-zone hook last told a conversation; the reader's zone itself belongs to no conversation. */
     ['what a conversation was last told about the time zone goes with it, and the zone the panel reported stays',
       () => {
@@ -3678,7 +3700,7 @@ console.log('\nwhat the injected block says about the work in hand');
     return { text, mark };
   };
   const ago = (s) => new Date(Date.now() - s * 1000).toISOString();
-  const rowOf = (text, title) => text.split('\n').find((l) => l.includes('. ' + title + '   [')) || '';
+  const rowOf = (text, title) => text.split('\n').find((l) => /^\s*\S [0-9.]+\. /.test(l) && (l.endsWith('. ' + title) || l.includes('. ' + title + '   ['))) || '';
 
   {
     const idle = inject([{ title: 'a', state: 'todo' }]).text;
@@ -3701,13 +3723,13 @@ console.log('\nwhat the injected block says about the work in hand');
       { title: 'decide', state: 'discussing', waitingOn: 'user', question: 'A or B?' },
     ]).text;
     const titles = ['working', 'held', 'untimed', 'queued', 'colonless', 'asked', 'built', 'decide'];
-    const got = titles.map((t) => rowOf(text, t).replace(/^.*\[/, '['));
-    const want = ['[doing for 2h]', '[waiting on ? for 3d · on the user]', '[doing]', '[todo]', '[doing for 5h]',
-      '[waiting on user for 1h · asks: Ship 2.0 now?]', '[waiting on build for 2m]', '[discussing on user · asks: A or B?]'];
+    const got = titles.map((t) => { const l = rowOf(text, t); return l ? (l.includes('   [') ? l.replace(/^.*?   \[/, '[') : 'title') : 'missing'; });
+    const want = ['[doing for 2h]', 'title', '[doing]', 'title', '[doing for 5h]',
+      '[waiting on user for 1h · asks: Ship 2.0 now?]', 'title', '[discussing on user · asks: A or B?]'];
     if (got.join('|') === want.join('|')) {
-      ok('a row doing or waiting says for how long, and a held row who it waits on and what it asks the user');
+      ok('a doing row says for how long, a question to the user says who and what, and every other row gives its title only');
     } else bad(`the rows came out ${JSON.stringify(got)}`);
-    if (/^1 waiting row does not say who it waits for \(shown `on \?`\)/m.test(text)) {
+    if (/^1 waiting row does not say who it waits for \(row 2\)\./m.test(text)) {
       ok('a waiting row from before the field is counted, so the conversation gives it one');
     } else bad(`no line about the waiting row without a party: ${JSON.stringify(text.slice(0, 900))}`);
   }
@@ -3735,14 +3757,14 @@ console.log('\nwhat the injected block says about the work in hand');
   {
     /* Cutting newest first and depth first would give the newest row's subtree every line and silently hide the other
        open top-level rows. */
-    const kids = Array.from({ length: 60 }, (_, i) => ({ title: 'kid' + i, state: 'todo' }));
+    const kids = Array.from({ length: 300 }, (_, i) => ({ title: 'a row with a title of some length, number ' + i, state: 'todo' }));
     const text = inject([{ title: 'older', state: 'todo' }, { title: 'old', state: 'waiting' },
       { title: 'newest', state: 'doing', children: kids }]).text;
     const drawn = text.split('\n').filter((l) => /^\s*[?o>~=+x] [0-9.]+\. /.test(l)).length;
-    if (rowOf(text, 'older') && rowOf(text, 'old') && rowOf(text, 'newest') && drawn === 40
-      && /^\.\.\. 23 more open rows in the file$/m.test(text)) {
-      ok('every open row at the top is drawn, rows under them are cut to fit, and the block says how many were left out');
-    } else bad(`with 60 rows under the newest of three: ${drawn} drawn, top rows ${['older', 'old', 'newest'].map((t) => !!rowOf(text, t))}, `
+    const left = /^\.\.\. (\d+) more open rows, see the file$/m.exec(text);
+    if (text.length <= 6000 && rowOf(text, 'newest') && left && drawn + Number(left[1]) === 303) {
+      ok('a plan too long for 6,000 characters is cut to fit, the newest row stays, and the block says how many rows were left out');
+    } else bad(`with 300 rows under the newest of three: ${text.length} characters, ${drawn} drawn, newest ${!!rowOf(text, 'newest')}, `
       + `last line ${JSON.stringify(text.split('\n').pop())}`);
   }
   {
@@ -4719,6 +4741,8 @@ console.log('\nthe work plan plugin after an uninstall and a reinstall');
     const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-amp-'));
     fs.cpSync(hooks, copy, { recursive: true });
     fs.writeFileSync(path.join(copy, 'launcher.json'), JSON.stringify({ row: ['C:/Users/Jo Ann/py/python.exe'] }));
+    // The first injection left a record of what it showed; without removing it, an unchanged plan comes back as one line.
+    fs.rmSync(path.join(data, sess + '.injected'), { force: true });
     const q = cp.spawnSync('python3', [path.join(copy, 'inject-work-plan.py'), data], {
       encoding: 'utf8', input: JSON.stringify({ session_id: sess, hook_event_name: 'UserPromptSubmit' }) });
     let text = '';
@@ -5420,6 +5444,65 @@ console.log('\nthe old id\'s last version, shim/');
   } else bad('the uninstall question is not held back by a reload the first sync asks for');
 }
 
+/* The Work plan line of the info box, counted from the transcript back to its latest compaction. */
+console.log('\nthe Work plan line of the info box');
+{
+  const pi = require('../src/plan-injections');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-planline-'));
+  const rec = (o) => JSON.stringify(o) + '\n';
+  const hook = (uuid, event, text) => rec({ type: 'attachment', uuid, attachment: { type: 'hook_additional_context', hookEvent: event, hookName: event, content: [text] } });
+  const plan = pi.MARK + ' (1 doing). Only open rows are shown; ' + 'x'.repeat(340);
+  const persisted = '<persisted-output>\nOutput too large (12.0KB). Full output saved to: /x/hook.txt\n\nPreview (first 2KB):\n' + pi.MARK + ' (9 doing). ' + 'y'.repeat(1900);
+  const body = rec({ type: 'user', message: { content: 'go' } })
+    + hook('u1', 'UserPromptSubmit', pi.MARK + ' ' + 'z'.repeat(1000))
+    + rec({ type: 'system', subtype: 'compact_boundary' })
+    + hook('u2', 'UserPromptSubmit', 'The user is in America/Los_Angeles (PST, UTC-08:00).')
+    + hook('u3', 'UserPromptSubmit', plan) + hook('u3', 'UserPromptSubmit', plan)
+    + rec({ type: 'assistant', message: { content: [{ type: 'text', text: 'w'.repeat(2500000) }] } })
+    + hook('u4', 'UserPromptSubmit', persisted)
+    + hook('u5', 'PostToolBatch', pi.MARK + ' is not this one')
+    + rec({ type: 'assistant', message: { usage: { input_tokens: 100, cache_read_input_tokens: 39000, cache_creation_input_tokens: 900, output_tokens: 50 } } })
+    + rec({ type: 'assistant', isSidechain: true, message: { usage: { input_tokens: 999999 } } });
+  const file = path.join(dir, 'a.jsonl'), plain = path.join(dir, 'b.jsonl');
+  fs.writeFileSync(file, body);
+  fs.writeFileSync(plain, hook('v1', 'UserPromptSubmit', plan));
+  const r = cp.spawnSync(process.execPath, ['-e', `
+    const pi = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'plan-injections.js'))});
+    Promise.all([pi.measure(${JSON.stringify(file)}), pi.measure(${JSON.stringify(plain)}), pi.measure(${JSON.stringify(file)}, 1000),
+      pi.measure(${JSON.stringify(path.join(dir, 'none.jsonl'))})]).then((m) => process.stdout.write(JSON.stringify(m)));`], { encoding: 'utf8' });
+  let got = null;
+  try { got = JSON.parse(r.stdout); } catch (_) { got = null; }
+  const [full, begun, capped, missing] = got || [];
+  const chars = plan.length + persisted.length;
+  if (full && full.count === 2 && full.chars === chars && full.context === 40000 && full.since === 'compaction') {
+    ok('only plan injections after the latest compaction count, once each, a stored one by its preview, against the latest main-thread reply');
+  } else bad(`measured ${JSON.stringify(full)}, wanted 2 injections of ${chars} characters against 40000 since the compaction (${r.stderr.slice(0, 200)})`);
+  if (begun && begun.count === 1 && begun.since === 'start' && begun.context === 0 && capped && capped.since === 'limit' && missing === null) {
+    ok('with no compaction it counts from the start, a read cut short says so, and a missing transcript gives nothing');
+  } else bad(`no compaction ${JSON.stringify(begun)}, capped ${JSON.stringify(capped)}, missing ${JSON.stringify(missing)}`);
+  const lines = [
+    pi.describe({ count: 2, chars: 9412, context: 80000, since: 'compaction' }),
+    pi.describe({ count: 1, chars: 1909, context: 0, since: 'start' }),
+    pi.describe({ count: 3, chars: 400, context: 900000, since: 'limit' }),
+    pi.describe({ count: 0, chars: 0, context: 5, since: 'start' }),
+  ];
+  const want = [
+    'injected 2 times since the last compaction: 9412 characters, about 2353 tokens, 3% of the 80000 in context',
+    'injected 1 time since the conversation began: 1909 characters, about 477 tokens',
+    'injected 3 times in the last 64 MB of the transcript: 400 characters, about 100 tokens, under 1% of the 900000 in context',
+    '',
+  ];
+  if (JSON.stringify(lines) === JSON.stringify(want)) ok('the line reads the same way as Codex Plus\'s, and is left out when nothing was injected');
+  else bad(`the Work plan lines came out ${JSON.stringify(lines)}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const page = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '80-session-info.js'), 'utf8');
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  if (/m\.type === 'cce_plan'/.test(page) && /rows\.push\(\['Work plan', PLANS\[sid\]\]\)/.test(page)
+    && /type: 'cce_plan', sessionId, text: planInjections\.describe\(m\)/.test(ext) && /WORK_PLAN_SETTING, true\) !== false \? transcriptOf\(sessionId\)/.test(ext)) {
+    ok('the box shows the line the extension sends, which is not worked out while the work plan is off');
+  } else bad('the info box or the extension does not carry the Work plan line');
+}
+
 /* Uninstalling the old extension unregisters the plugin, and its uninstall hook first copies the plans to
    ~/.claude/agent-work-plan-plans-<stamp>/, since Claude Code deletes the plan directory along with the plugin. Once
    this extension has registered the plugin again, the plans come back. A folder still being written is left for later,
@@ -5450,7 +5533,7 @@ console.log('\nplans an uninstall copied aside come back');
     fs.mkdirSync(plans, { recursive: true });
     fs.writeFileSync(path.join(plans, B + '.json'), 'mine');
     const older = rescue('20261101-000000', { [A + '.json']: 'old A', [B + '.json']: 'old B', [C + '.json']: 'older C', 'WHAT-THIS-IS.txt': 'note',
-      'config.json': '{}', [A + '.tz']: 'tz', ['sub/' + A + '.json']: 'nested' }, 3600000);
+      'config.json': '{}', [A + '.tz']: 'tz', ['sub/' + A + '.json']: 'nested', ['closed/' + A + '.json']: 'closed A' }, 3600000);
     const newer = rescue('20261102-000000', { [C + '.json']: 'newer C' }, 3600000);
     const r = run();
     const has = (n) => fs.existsSync(path.join(plans, n));
@@ -5461,6 +5544,8 @@ console.log('\nplans an uninstall copied aside come back');
        original's. */
     if (has(A + '.json') && Math.abs(fs.statSync(path.join(plans, A + '.json')).mtimeMs - fs.statSync(path.join(older, A + '.json')).mtimeMs) < 1000) ok('a copied plan keeps the time its rescued copy has');
     else bad(`a copied plan was given the time ${has(A + '.json') ? new Date(fs.statSync(path.join(plans, A + '.json')).mtimeMs).toISOString() : 'none'}`);
+    if (body('closed/' + A + '.json') === 'closed A') ok('a rescued plan\'s closed rows come back to closed/');
+    else bad(`closed rows copied back: ${JSON.stringify(body('closed/' + A + '.json'))}`);
     if (body(B + '.json') === 'mine') ok('a plan already in the plan directory is not overwritten');
     else bad(`the plan already there now holds ${JSON.stringify(body(B + '.json'))}`);
     if (!has('WHAT-THIS-IS.txt') && !has('config.json') && !has(A + '.tz') && !has('sub')) ok('the note and anything that is not <session id>.json stay behind');
@@ -7229,6 +7314,8 @@ console.log('\ndeleting an archived conversation');
       fs.writeFileSync(path.join(root3, 'projects', '-a', A + '.jsonl'), 'x');
       fs.writeFileSync(path.join(root3, 'projects', '-c', B + '.jsonl'), 'x');
       fs.mkdirSync(path.join(root3, 'plans', A + '.json.lock'), { recursive: true });
+      fs.mkdirSync(path.join(root3, 'plans', 'closed'), { recursive: true });
+      fs.writeFileSync(path.join(root3, 'plans', 'closed', A + '.json'), '{}');
       const realReaddir = fs.readdirSync;
       const listed = [];
       fs.readdirSync = function (p, ...rest) { listed.push(String(p)); return realReaddir.call(fs, p, ...rest); };
@@ -7238,9 +7325,9 @@ console.log('\ndeleting an archived conversation');
       const walked = listed.filter((p) => p.startsWith(path.join(root3, 'projects')));
       const kinds = (id) => all.get(id).map((f) => path.relative(root3, f.path).split(path.sep).join('/')).sort();
       if (all.size === 2 && walked.length === 4 && new Set(walked).size === 4
-        && JSON.stringify(kinds(A)) === JSON.stringify([`plans/${A}.json.lock`, `projects/-a/${A}.jsonl`])
+        && JSON.stringify(kinds(A)) === JSON.stringify([`plans/${A}.json.lock`, `plans/closed/${A}.json`, `projects/-a/${A}.jsonl`].sort())
         && JSON.stringify(kinds(B)) === JSON.stringify([`projects/-c/${B}.jsonl`])) {
-        ok('several conversations are found in one walk of the project folders, a plan\'s lock with its plan');
+        ok('several conversations are found in one walk of the project folders, a plan\'s lock and closed rows with its plan');
       } else bad(`finding two at once listed ${JSON.stringify(walked.map((p) => path.relative(root3, p)))} and found ${JSON.stringify([...all].map(([k, v]) => [k, v.map((f) => path.relative(root3, f.path))]))}`);
     } finally { fs.rmSync(root3, { recursive: true, force: true }); }
   }

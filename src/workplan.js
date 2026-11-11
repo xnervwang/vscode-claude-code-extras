@@ -62,10 +62,14 @@ const { readBounded } = require('./bounded');
  *   .tz          what the time-zone hook last told it
  *   .compacted   when the conversation was last compacted, left by the SessionStart hook for the brief
  *   .briefed     which parts of the brief the Stop hook last asked for
+ *   .injected    what the plan looked like when the injection hook last showed it, so an unchanged plan is one line
  *   .effort      where each reply's effort changed (src/efforts.js)
+ *
+ * The row command also moves rows closed for a day to closed/<session id>.json (CLOSED_DIR), deleted with the rest.
  */
 const SIDE_SUFFIXES = ['.json', '.offered', '.nudged', '.settled', require('./background').SUFFIX, '.turn', '.watermark', '.tz',
-  '.compacted', '.briefed', require('./efforts').SUFFIX];
+  '.compacted', '.briefed', '.injected', require('./efforts').SUFFIX];
+const CLOSED_DIR = 'closed';
 const SIDE_FILE = new RegExp('^[0-9a-f][0-9a-f-]{7,}(?:' + SIDE_SUFFIXES.map((s) => s.replace('.', '\\.')).join('|') + ')$', 'i');
 const PLAN_FILE = /^[0-9a-f][0-9a-f-]{7,}\.json$/i;
 /* Plan lock directories (<plan>.lock), made with mkdir around a read-change-write. Writers give up on one older than
@@ -218,10 +222,12 @@ function sweepOrphans(opts = {}) {
   if (!live) return { deleted: 0, kept: 0, live: null, why: 'the transcripts could not all be read, so nothing was treated as abandoned' };
   if (!names) return { deleted: 0, kept: 0, live, why: '' };
   let deleted = 0, kept = 0;
-  for (const name of names) {
-    if (!SIDE_FILE.test(name)) continue;
+  let closed = [];
+  try { closed = fs.readdirSync(path.join(dir, CLOSED_DIR)).filter((n) => PLAN_FILE.test(n)).map((n) => path.join(CLOSED_DIR, n)); } catch (_) { /* none */ }
+  for (const name of names.concat(closed)) {
+    if (!SIDE_FILE.test(path.basename(name))) continue;
     // The session id is the name without its last extension, whichever of the side files it is.
-    if (live.has(name.replace(/\.[^.]+$/, ''))) { kept++; continue; }
+    if (live.has(path.basename(name).replace(/\.[^.]+$/, ''))) { kept++; continue; }
     const file = path.join(dir, name);
     let st;
     try { st = fs.statSync(file); } catch (_) { continue; }
@@ -239,6 +245,6 @@ const OPEN_STATES = ['discussing', 'todo', 'doing', 'waiting', 'parked'];
 
 module.exports = {
   readPlan, readPlanAt, planDir, liveSessions, sweepOrphans,
-  dataRoot, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
+  dataRoot, PLAN_DIR, PLAN_FILE, SIDE_SUFFIXES, CLOSED_DIR, SETTLED_MS, LOCK_STALE_MS, OPEN_STATES,
   STATES, MAX_DEPTH, MAX_NODES, MAX_DETAIL_LINES, MAX_DETAIL_CHARS, WAITING_ON, MAX_QUESTION_CHARS,
 };

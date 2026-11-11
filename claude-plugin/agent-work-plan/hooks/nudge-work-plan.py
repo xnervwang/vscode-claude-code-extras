@@ -368,8 +368,8 @@ def status_owed(path, brief, shape, keep):
     A status written during the turn counts even if rows changed after it. Otherwise a turn that wrote the status and
     then closed a row would be asked for it again.
 
-    One exchange can end in several Stops, so the turn that was asked is kept in `keep` (BRIEFED_SUFFIX) by its start
-    time, the same start the turn is measured from.
+    One exchange can end in several Stops, so the start time of the turn that was asked goes into `keep`
+    (BRIEFED_SUFFIX), and a later Stop in the same turn does not ask again.
     """
     started, tools = shape[0], shape[1]
     if started is None:

@@ -55,6 +55,11 @@ For a row that is not in that block - a closed one - the number is an index into
 rather than a search: `3` is `nodes[2]`, and `2.1.1` is `nodes[1].children[0].children[0]`. Never search the file for the
 digits; they are not written in it.
 
+A closed row whose whole subtree was closed more than a day ago is a placeholder in the file: `"archived": true`, its state
+and a short title, at the same position, so the arithmetic still holds. The row itself, with its note, detail and
+children, is in `closed/<session id>.json` beside the plan, under `"row"` with its number. Changing it with the row command
+or tools puts it back; read that file only for an old row's note or detail, and never edit or delete a placeholder.
+
 **Closed rows are counted.** They are skipped when the open rows are drawn, so the fifth row you were handed this turn is
 not row 5 - it might be row 44. Counting what you can see is the one mistake here that silently closes the wrong task.
 That is also what makes a number worth quoting: finishing something leaves a gap rather than moving every number after
@@ -303,6 +308,6 @@ to.
 
 ## What it costs to read
 
-Only the open rows are put in front of you each turn, with a count of the closed ones. So a plan can hold the whole
-history of a long conversation without the history being paid for on every turn - which is why closing a row is cheap
-and deleting it is never necessary.
+Only the open rows are put in front of you each turn, with a count of the closed ones, and closed rows a day old move to
+the archive beside the plan. So a plan can hold the whole history of a long conversation without the history being paid
+for on every turn or on every read of the file - which is why closing a row is cheap and deleting it is never necessary.

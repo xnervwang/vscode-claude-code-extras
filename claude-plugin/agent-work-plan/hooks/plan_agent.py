@@ -87,6 +87,11 @@ def row_help(path, command, quoted):
             % (command, command, " In PowerShell, put & and a space in front of either command line." if quoted else "")]
 
 
+def row_gist(path, command):
+    """The few words on changing a row that the injected block gives on a turn when it leaves row_help out."""
+    return "%s set <row> <state>, or add <state> TITLE" % command
+
+
 def fixture_reply(text):
     """A transcript line holding an assistant reply, for the hooks' self-tests."""
     return json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
@@ -131,7 +136,7 @@ MAYBE_USER = ('"user"',)
 NOTE_WORD = "--note"
 AFTER_OFFER = ""
 # Context a Stop hook adds keeps the turn going: the model answers it before the turn ends, and the Stop after that
-# answer carries stop_hook_active. Checked on Claude Code 2.1.322 with `claude -p`.
+# answer carries stop_hook_active.
 STOP_REENTERS = True
 
 

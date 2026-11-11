@@ -354,6 +354,7 @@ WATERMARK_SUFFIX = ".watermark"  # which context marks have asked (refresh-work-
 TOLD_SUFFIX = ".tz"              # what the user's time zone was last told as (tell-time-zone.py)
 COMPACTED_SUFFIX = ".compacted"  # when the context was last compacted (resume-work-plan.py)
 BRIEFED_SUFFIX = ".briefed"      # what the end of a turn last asked about the brief (nudge-work-plan.py)
+INJECTED_SUFFIX = ".injected"    # what the plan looked like when it was last injected (inject-work-plan.py)
 LOCK_SUFFIX = ".lock"            # appended to the plan's own name, not put in place of .json (see plan_lock)
 
 
@@ -372,6 +373,33 @@ def plan_file(payload, directory=None):
 def side_file(plan, suffix):
     """A file the hooks keep beside `plan`, swept with it when the conversation is gone."""
     return os.path.splitext(plan)[0] + suffix
+
+
+"""Closed rows moved out of a plan, kept where agents and hooks do not read them.
+
+A subtree whose rows are all closed, the newest of them more than ARCHIVE_AFTER seconds ago, is moved by plan-row.py to
+closed/<session id>.json in the plan's directory - a folder rather than another *.json beside the plan, since every such
+file there is taken to be a plan. The archive has the plan's shape, {"format": 1, "nodes": [...]}, each row in it with a
+`row` field giving its number in the plan. The plan keeps a placeholder in its place, so that no number changes:
+
+  {"title": TITLE CUT TO ARCHIVED_TITLE_CHARS, "state": "done" or "dropped", "archived": true}
+
+Agents and hooks read the plan only. The Agent Plus views read both and show the rows as they were. A placeholder read
+without its archive is a closed row with a short title.
+"""
+CLOSED_DIR = "closed"
+ARCHIVE_AFTER = 24 * 3600
+ARCHIVED_TITLE_CHARS = 80
+
+
+def closed_file(plan):
+    """Where the closed rows moved out of `plan` are kept."""
+    return os.path.join(os.path.dirname(plan), CLOSED_DIR, os.path.basename(plan))
+
+
+def archived(node):
+    """Whether a row is the placeholder of one moved to the archive."""
+    return isinstance(node, dict) and node.get("archived") is True
 
 
 def write_atomic(path, text):

@@ -3,7 +3,7 @@
 // All rights reserved.
 
 // The session id, the Claude process id, the directory the conversation started in, where its transcripts are kept,
-// and their size.
+// their size, and what the work plan has added to the conversation.
 // Fragment of the in-page script - see README.md in this folder.
 
   var INFO = null, INFOBOX = null, infoWired = false;
@@ -13,6 +13,8 @@
    * the row says unknown.
    */
   var PROCS = {}, procsWired = false;
+  /* Work plan lines by session id. This extension sends one each time the box asks for the process id. */
+  var PLANS = {};
   var PROC_WAIT_MS = 20000;
 
   var bytesFmt = function(n){
@@ -63,6 +65,7 @@
     }
     var size = sigValue('fileSize');
     if (typeof size === 'number') rows.push(['On disk', bytesFmt(size)]);
+    if (sid && PLANS[sid]) rows.push(['Work plan', PLANS[sid]]);
     return rows;
   };
 
@@ -104,6 +107,11 @@
       procsWired = true;
       window.addEventListener('message', function(ev){
         var d = ev && ev.data, m = d && d.type === 'from-extension' ? d.message : null;
+        if (m && m.type === 'cce_plan' && typeof m.sessionId === 'string' && typeof m.text === 'string') {
+          PLANS[m.sessionId] = m.text;
+          if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
+          return;
+        }
         if (!m || m.type !== 'cce_process' || typeof m.sessionId !== 'string' || !PROCS[m.sessionId]) return;
         var pids = Array.isArray(m.pids) ? m.pids.filter(function(n){ return typeof n === 'number'; }) : null;
         PROCS[m.sessionId] = { at: Date.now(), pids: pids };
@@ -182,7 +190,7 @@
     INFO.setAttribute('data-cce-info', '1');
     INFO.textContent = String.fromCharCode(8505);   // information source
     setLabel(INFO, 'About this conversation: its session id, process id, the directory it started in, where its '
-      + 'transcripts are kept, and their size');
+      + 'transcripts are kept, their size, and what the work plan has added to it');
     var proto = document.querySelector('button[class*="menuButton"]');
     if (proto) INFO.className = proto.className;
     else {

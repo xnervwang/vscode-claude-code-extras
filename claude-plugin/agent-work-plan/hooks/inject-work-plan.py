@@ -15,6 +15,21 @@ skill is where it is explained at length.
 Only the open rows are injected. The closed ones are history; sending them every turn would cost context to say
 nothing, and the file itself is there for anyone who wants the whole thing.
 
+Every turn gets something, so that the plan stays in front of the model, but only what changed is said at length:
+
+  - the whole block, with the explanation of the states and of the row command, on a conversation's first injection
+    and on the first one after each compaction (COMPACTED_SUFFIX, written by resume-work-plan.py);
+  - on other turns a short head in its place;
+  - one line, with how many rows are doing and waiting and where the file is, when the rows are what they were at the
+    last injection apart from how long they have been in their state. What was last shown is kept beside the plan
+    (INJECTED_SUFFIX). The brief is not compared: the agent writes its status at the end of most turns that did work, so
+    counting it would leave almost no plan unchanged.
+
+A `doing` row and a row asking the user carry their note or question, cut at NOTED_CHARS; every other row is its title,
+cut at TITLE_CHARS. The whole text stays within MAX_CHARS, the brief included, and says how many open rows it left
+out. Claude Code saves a hook's output of more than 10,000 characters to a file and shows the model the first 2,000,
+which for a long plan is a few of its rows.
+
 Silence is the normal case. A conversation that keeps no plan gets nothing, so installing this plugin costs nothing
 until something starts writing one.
 
@@ -24,6 +39,7 @@ it. The mark is written as soon as the plan has been read, before the check that
 are all closed injects nothing, but those hooks still need the mark for new work started in that turn. A conversation
 with no plan, or one whose plan does not parse, gets no mark.
 """
+import hashlib
 import json
 import os
 import sys
@@ -36,13 +52,18 @@ sys.dont_write_bytecode = True
 # the import path, and plan_path is in it.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import (OPEN_STATES, QUESTION_WORD, STATUS_PARTS, TURN_FIELD, WAITING_ON, WAITING_ON_WORD, any_in,
-                       brief_of, children, epoch, launcher_quoted, listed, plan_file, read_payload, row_command, row_help,
-                       settings, write_turn)
+from plan_path import (COMPACTED_SUFFIX, INJECTED_SUFFIX, OPEN_STATES, QUESTION_WORD, STATUS_PARTS, TURN_FIELD,
+                       WAITING_ON, WAITING_ON_WORD, any_in, brief_of, children, epoch, launcher_quoted, listed, plan_file,
+                       read_payload, row_command, row_gist, row_help, settings, side_file, write_quietly, write_turn)
 
 GLYPH = {"discussing": "?", "todo": "o", "doing": ">", "waiting": "~", "parked": "=", "done": "+", "dropped": "x"}
+LEGEND = "> doing, ? discussing, o todo, ~ waiting, = parked"
 # Row cap for the injected block. Top-level rows are always drawn; only the rows under them are cut (see rows).
 MAX_ROWS = 40
+# The longest the injected text may be, brief included.
+MAX_CHARS = 6000
+TITLE_CHARS = 80
+NOTED_CHARS = 200
 # The two states a row is meant to leave soon, so how long one has been in either is worth saying: a row `doing` for
 # three days is not being done, and nothing else on the row shows that. Measured on the machine this was written on, the
 # six rows then `doing` included two added four days earlier, and four whose own notes said they were waiting on someone.
@@ -81,38 +102,57 @@ def numbered(nodes, prefix):
                           for i, node in enumerate(listed(nodes))]))
 
 
+def one_line(text):
+    return " ".join(str(text).split())
+
+
+def cut(text, limit):
+    return text if len(text) <= limit else text[:limit - 1] + u"\u2026"
+
+
+def asks(node):
+    """Whether a row puts a question to the user."""
+    return node.get("waitingOn") == "user" and bool(str(node.get("question", "")).strip())
+
+
 def line(node, num, depth, now):
+    """A row as one line. When `now` is None the time in the state is left out, which is how two injections are
+    compared."""
     state = node.get("state", "todo")
-    note = str(node.get("note", "")).strip()
+    title = one_line(node.get("title", ""))
+    # The dot is only in what is drawn; `num` stays bare because children are numbered from it.
+    lead = "%s%s %s. " % ("  " * depth, GLYPH.get(state, "o"), num)
+    if state != "doing" and not asks(node):
+        return lead + cut(title, TITLE_CHARS)
+    note = one_line(node.get("note", ""))
     said = str(state)
     on = node.get("waitingOn")
-    # A waiting row that does not say who it waits on predates the field; `?` marks it so it gets one when next touched.
     if on in WAITING_ON:
         said += " on " + on
-    elif state == "waiting":
-        said += " on ?"
-    if state in TIMED:
+    if state in TIMED and now is not None:
         since = epoch(node.get("since"))
         if since is not None and now >= since:
             said += " for " + age(int(now - since))
-    # The dot is only in what is drawn; `num` stays bare because children are numbered from it.
-    asked = str(node.get("question", "")).strip() if on == "user" else ""
-    return "%s%s %s. %s%s" % ("  " * depth, GLYPH.get(state, "o"), num, str(node.get("title", "")).strip(),
-                              "   [%s%s%s]" % (said, " · asks: " + asked if asked else "", " · " + note if note else ""))
+    asked = one_line(node.get("question", "")) if on == "user" else ""
+    return lead + cut("%s   [%s%s%s]" % (cut(title, TITLE_CHARS), said, " · asks: " + asked if asked else "",
+                                         " · " + note if note else ""), NOTED_CHARS)
 
 
-def unsaid(nodes):
-    """How many open `waiting` rows do not say who they wait on."""
-    n = 0
-    for node in listed(nodes):
+def unsaid(nodes, prefix=""):
+    """The numbers of the `waiting` rows that do not say who they wait on."""
+    out = []
+    for i, node in enumerate(listed(nodes)):
         if isinstance(node, dict):
-            n += int(node.get("state") == "waiting" and node.get("waitingOn") not in WAITING_ON)
-            n += unsaid(children(node))
-    return n
+            num = "%s%d" % (prefix + "." if prefix else "", i + 1)
+            if node.get("state") == "waiting" and node.get("waitingOn") not in WAITING_ON:
+                out.append(num)
+            out.extend(unsaid(children(node), num))
+    return out
 
 
 def rows(nodes, now, limit=MAX_ROWS):
-    """The open rows as lines, each numbered by where it sits in the file, and how many open rows did not fit.
+    """The open rows as (line, the same line without how long the row has been in its state, whether the row is open),
+    each numbered by where it sits in the file, and how many open rows did not fit.
 
     The number is what a person says to point at a row, so it comes from the file rather than from what is on screen:
     closed rows are skipped when drawing but still counted, or finishing one would renumber everything after it and a
@@ -127,9 +167,13 @@ def rows(nodes, now, limit=MAX_ROWS):
     room = [max(0, limit - len(top))]
     out, left = [], [0]
     for num, node in top:
-        out.append(line(node, num, 0, now))
+        out.append(entry(node, num, 0, now))
         below(children(node), 1, out, now, num, room, left)
     return out, left[0]
+
+
+def entry(node, num, depth, now):
+    return (line(node, num, depth, now), line(node, num, depth, None), node.get("state", "todo") in OPEN_STATES)
 
 
 def below(nodes, depth, out, now, prefix, room, left):
@@ -140,7 +184,7 @@ def below(nodes, depth, out, now, prefix, room, left):
             left[0] += open_below(node)
             continue
         room[0] -= 1
-        out.append(line(node, num, depth, now))
+        out.append(entry(node, num, depth, now))
         below(children(node), depth + 1, out, now, num, room, left)
 
 
@@ -174,6 +218,78 @@ def brief_lines(plan, now):
     return ["", "Your brief of this conversation, which the Conversations panel shows when its row is clicked:"] + out if out else []
 
 
+def read_side_text(path, suffix):
+    try:
+        with open(side_file(path, suffix), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except Exception:
+        return ""
+
+
+def read_side_json(path, suffix):
+    try:
+        value = json.loads(read_side_text(path, suffix))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def block(plan, nodes, path, head, missing, out, left, now, whole, with_brief):
+    """The injected text when rows are shown: the whole explanation when `whole`, else a short head."""
+    command = row_command(path)
+    doing = any_in(nodes, "doing")
+    # What is said about `doing` is here rather than only in the skill because here is the one moment that comes BEFORE
+    # the work, and the skill is rarely loaded at all. A row marked as the work starts shows up in the tree while the
+    # turn runs, which is the whole point of the state.
+    #
+    # The line after it changes with the plan rather than being the same every turn: a sentence repeated word for word
+    # on every turn is the one most easily read past, and "nothing is doing" is a fact about this turn that the model can
+    # check against what it is about to do.
+    left_doing = ("A row that is `doing` now was left that way by an earlier turn: unless this turn carries on with it, or "
+                  "an agent you started is still working on it, move it on.")
+    if whole:
+        lines = [
+            "This conversation's work plan (%s). Only open rows are shown; the file is %s." % (head or "nothing open", path),
+            "A child is something that has to be finished before its parent can be. Each row starts with its state: %s; "
+            "a closed row (+ done, x dropped) is shown only above open rows under it. Only `doing` rows and questions to "
+            "the user carry their notes here." % LEGEND,
+            "Set a row to `doing` as you start on it, not afterwards. Work the user asks for in this message goes in as "
+            "`doing` as soon as you start on it, and so does a request to look into something. When you stop working on a "
+            "row, move it on: `done` if it is finished, `waiting` if it now waits on someone else. A `waiting` row says who "
+            "with %s (user, build, someone, session, other), and one waiting on the user carries %s: the one sentence "
+            "they have to answer, answerable without reading the conversation. A `discussing` row you have put to the user "
+            "for a decision can say %s user with its question too." % (WAITING_ON_WORD, QUESTION_WORD, WAITING_ON_WORD),
+            left_doing if doing else "Nothing is `doing` right now.",
+        ] + row_help(path, command, launcher_quoted())
+    else:
+        lines = ["This conversation's work plan (%s), changed since it was last shown; the file is %s. Rows start with "
+                 "their state (%s). Set a row to `doing` as you start on it, and move it on when it is done or waits on "
+                 "someone: %s." % (head or "nothing open", path, LEGEND, row_gist(path, command))]
+        if doing:
+            lines.append(left_doing)
+    if missing:
+        lines.append("%s %s not say who %s for (row%s %s). Give each one %s when you next touch it." % (
+            "%d waiting row%s" % (len(missing), "" if len(missing) == 1 else "s"), "does" if len(missing) == 1 else "do",
+            "it waits" if len(missing) == 1 else "they wait", "" if len(missing) == 1 else "s", ", ".join(missing[:12]),
+            WAITING_ON_WORD))
+    tail = brief_lines(plan, now) if with_brief else []
+    return fit(lines + [""], out, left, tail)
+
+
+def fit(head, out, left, tail):
+    """`head`, as many of the row lines in `out` as fit within MAX_CHARS, a line on the open rows left out, and `tail`."""
+    more = lambda k: "... %d more open row%s, see the file" % (k, "" if k == 1 else "s")
+    room = MAX_CHARS - len("\n".join(head + tail)) - len(more(len(out) + left)) - 2
+    kept = []
+    for shown_line, _, _ in out:
+        if room - len(shown_line) - 1 < 0:
+            break
+        room -= len(shown_line) + 1
+        kept.append(shown_line)
+    left += sum(1 for _, _, is_open in out[len(kept):] if is_open)
+    return "\n".join(head + kept + ([more(left)] if left else []) + tail)
+
+
 def main():
     try:
         payload = read_payload()
@@ -201,39 +317,24 @@ def main():
     out, left = rows(nodes, now)
     if not out:
         return 0
-    if left:
-        out.append("... %d more open row%s in the file" % (left, "" if left == 1 else "s"))
     n = counts(nodes)
     head = " · ".join("%d %s" % (n[s], s) for s in OPEN_STATES if n.get(s))
     closed = n.get("done", 0) + n.get("dropped", 0)
     if closed:
         head += " · %d closed" % closed
-    command = row_command(path)
     missing = unsaid(nodes)
-    # What is said about `doing` is here rather than only in the skill because here is the one moment that comes BEFORE
-    # the work, and the skill is rarely loaded at all. A row marked as the work starts shows up in the tree while the
-    # turn runs, which is the whole point of the state.
-    #
-    # The line after it changes with the plan rather than being the same every turn: a sentence repeated word for word
-    # on every turn is the one most easily read past, and "nothing is doing" is a fact about this turn that the model can
-    # check against what it is about to do.
-    text = "\n".join([
-        "This conversation's work plan (%s). Only open rows are shown; the file is %s." % (head or "nothing open", path),
-        "A child is something that has to be finished before its parent can be.",
-        "Set a row to `doing` as you start on it, not afterwards. Work the user asks for in this message goes in as "
-        "`doing` as soon as you start on it, and so does a request to look into something. When you stop working on a "
-        "row, move it on: `done` if it is finished, `waiting` if it now waits on someone else. A `waiting` row says who "
-        "with %s (user, build, someone, session, other), and one waiting on the user carries %s: the one sentence "
-        "they have to answer, answerable without reading the conversation. A `discussing` row you have put to the user "
-        "for a decision can say %s user with its question too." % (WAITING_ON_WORD, QUESTION_WORD, WAITING_ON_WORD),
-        ("A row that is `doing` now was left that way by an earlier turn: unless this turn carries on with it, or an "
-         "agent you started is still working on it, move it on." if any_in(nodes, "doing")
-         else "Nothing is `doing` right now."),
-    ] + row_help(path, command, launcher_quoted()) + ([(
-        "%d waiting row%s %s not say who %s for (shown `on ?`). Give each one %s when you next touch it.")
-        % (missing, "" if missing == 1 else "s", "does" if missing == 1 else "do",
-           "it waits" if missing == 1 else "they wait", WAITING_ON_WORD)] if missing else []) + [""] + out
-        + (brief_lines(plan, now) if limits["brief"] else []))
+    digest = hashlib.sha1("\n".join([head, ",".join(missing), str(left)] + [o[1] for o in out]).encode("utf-8")).hexdigest()
+    last = read_side_json(path, INJECTED_SUFFIX)
+    compacted = read_side_text(path, COMPACTED_SUFFIX)
+    whole = not last or (bool(compacted) and last.get("compacted") != compacted)
+    if not whole and last.get("digest") == digest:
+        text = ("This conversation's work plan has not changed since it was last shown: %d doing, %d waiting, %d open in "
+                "all; the file is %s. Set a row to `doing` as you start on it." % (
+                    n.get("doing", 0), n.get("waiting", 0), sum(n.get(s, 0) for s in OPEN_STATES), path))
+    else:
+        text = block(plan, nodes, path, head, missing, out, left, now, whole, limits["brief"])
+    write_quietly(side_file(path, INJECTED_SUFFIX), json.dumps(
+        {"digest": digest, "compacted": compacted if whole else last.get("compacted", "")}))
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"),
         "additionalContext": text,

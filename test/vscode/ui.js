@@ -46,7 +46,7 @@ const RED_TITLE = 'rgb(241, 76, 76)';
 const PIN_PURPLE = 'rgb(177, 128, 215)';
 const COLORS = ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Cyan'];
 const LABELS = {
-  info: 'About this conversation: its session id, process id, the directory it started in, where its transcripts are kept, and their size',
+  info: 'About this conversation: its session id, process id, the directory it started in, where its transcripts are kept, their size, and what the work plan has added to it',
   focusOff: 'Showing thinking and tool calls - click for Focus view: only your messages and the replies',
   focusOn: 'Focus view is on: only your messages and the replies - click to show thinking and tool calls',
   mute: 'A chime when a turn finishes, and when Claude is waiting for you - click to mute',

@@ -28,7 +28,7 @@
 const fs = require('fs');
 const path = require('path');
 const { claudeDir, projectFolders, SESSION } = require('./claude-files');
-const { SIDE_SUFFIXES } = require('./workplan');
+const { SIDE_SUFFIXES, CLOSED_DIR } = require('./workplan');
 
 function list(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
@@ -82,6 +82,7 @@ function findAll(ids, { root = claudeDir(), planDir, extra = () => [] } = {}) {
     for (const name of todos) if (name.startsWith(id + '-') && name.endsWith('.json')) add(id, path.join(root, 'todos', name), 'session data');
     if (planDir) {
       for (const suffix of SIDE_SUFFIXES) add(id, path.join(planDir, id + suffix), suffix === '.json' ? 'work plan' : 'work plan data');
+      add(id, path.join(planDir, CLOSED_DIR, id + '.json'), 'work plan');
       add(id, path.join(planDir, id + '.json.lock'), 'work plan data');
     }
     for (const p of extra(id) || []) add(id, p, 'extension data');

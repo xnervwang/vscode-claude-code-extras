@@ -25,20 +25,31 @@ at the end of the turn, and `doing` is the one state that cannot wait that long.
 The caller picks the row and the state. The file is read just before the write and plan_lock is held from that read
 through the write, so neither a manual edit made a moment earlier nor a concurrent change by another run or the
 extension is lost.
+
+Every write also moves closed rows out of the plan (plan_common.closed_file says where and why): a subtree whose rows are
+all closed and were closed more than ARCHIVE_AFTER ago goes to the archive, with a placeholder left in its place. Before
+a command changes a row, or adds one under it, that row is put back if it or a row above it was moved; at the end of
+the command it goes back to the archive if it is still closed and old enough.
+
+The two files are written in the order that keeps every row in at least one of them for a reader of the plan such as
+the Agent Plus views: the archive with the rows newly moved into it first, then the plan, then the archive without the
+rows put back.
 """
 import argparse
 import json
 import os
 import sys
+import time
 
 # Set before the import below: see inject-work-plan.py.
 sys.dont_write_bytecode = True
 # The script's folder on the import path: see inject-work-plan.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import (BRIEF_WIDTH, CLOSED_STATES, HELD_STATES, MAX_DETAIL_CHARS, MAX_DETAIL_LINES, MAX_QUESTION_CHARS,
-                       PLAN_NAME, SESSION_HINT, SETTING_PREFIX, STATES, STATUS_PARTS, WAITING_ON, detail_over, now_stamp,
-                       plan_lock, questions_in, settings, width, write_atomic)
+from plan_path import (ARCHIVE_AFTER, ARCHIVED_TITLE_CHARS, BRIEF_WIDTH, CLOSED_STATES, HELD_STATES, MAX_DETAIL_CHARS,
+                       MAX_DETAIL_LINES, MAX_QUESTION_CHARS, PLAN_NAME, SESSION_HINT, SETTING_PREFIX, STATES, STATUS_PARTS,
+                       WAITING_ON, archived, children, closed_file, detail_over, epoch, now_stamp, plan_lock, questions_in,
+                       settings, width, write_atomic)
 
 
 class Refused(Exception):
@@ -208,6 +219,88 @@ def save(path, plan):
     write_atomic(path, json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
 
 
+def load_archive(path):
+    """The rows moved out of the plan at `path`, by their row numbers."""
+    file = closed_file(path)
+    try:
+        with open(file, encoding="utf-8") as fh:
+            kept = json.loads(fh.read())
+    except FileNotFoundError:
+        return {}
+    except ValueError as e:
+        raise Refused("The closed rows of this plan at %s do not parse (%s). Fix that file by hand rather than through "
+                      "this." % (file, e))
+    nodes = kept.get("nodes") if isinstance(kept, dict) else None
+    if not isinstance(nodes, list):
+        raise Refused("%s has no list of rows in it." % file)
+    return {n["row"]: n for n in nodes if isinstance(n, dict) and isinstance(n.get("row"), str)}
+
+
+def save_archive(path, rows):
+    file = closed_file(path)
+    if not rows:
+        try:
+            os.remove(file)
+        except FileNotFoundError:
+            pass
+        return
+    os.makedirs(os.path.dirname(file), exist_ok=True)
+    nodes = [rows[k] for k in sorted(rows, key=lambda k: [int(x) for x in k.split(".")])]
+    write_atomic(file, json.dumps({"format": 1, "nodes": nodes}, ensure_ascii=False, indent=2) + "\n")
+
+
+def bring_back(nodes, number, kept, back):
+    """Put back every archived row on the way down to row `number`, from `kept`, recording the numbers in `back`."""
+    level, prefix = nodes, ""
+    for part in str(number).split("."):
+        if not part.isdigit() or int(part) < 1 or not isinstance(level, list) or int(part) > len(level):
+            return
+        num = prefix + part
+        i = int(part) - 1
+        if archived(level[i]):
+            whole = dict(kept[num]) if num in kept else dict(level[i], archived=None)
+            whole.pop("row", None)
+            whole.pop("archived", None)
+            level[i] = whole
+            back.add(num)
+        level, prefix = level[i].get("children") if isinstance(level[i], dict) else None, num + "."
+
+
+def closed_since(node):
+    """The newest time a row in `node`'s subtree was closed, in epoch seconds, or None when some row in it is open or
+    has no time. Placeholders below it were closed long enough ago to have been moved already."""
+    if not isinstance(node, dict) or node.get("state") not in CLOSED_STATES:
+        return None
+    newest = epoch(node.get("closed")) or epoch(node.get("since"))
+    if newest is None:
+        return None
+    for child in children(node):
+        if archived(child) or not isinstance(child, dict):
+            continue
+        at = closed_since(child)
+        if at is None:
+            return None
+        newest = max(newest, at)
+    return newest
+
+
+def move_out(nodes, prefix, before, moved):
+    """Replace with placeholders the subtrees closed before `before`, recording them in `moved` by row number."""
+    for i, node in enumerate(nodes if isinstance(nodes, list) else []):
+        if not isinstance(node, dict) or archived(node):
+            continue
+        num = prefix + str(i + 1)
+        at = closed_since(node)
+        if at is not None and at < before:
+            moved[num] = dict(node, row=num)
+            title = " ".join(str(node.get("title", "")).split())
+            if len(title) > ARCHIVED_TITLE_CHARS:
+                title = title[:ARCHIVED_TITLE_CHARS - 1] + u"\u2026"
+            nodes[i] = {"title": title, "state": node.get("state"), "archived": True}
+        else:
+            move_out(node.get("children"), num + ".", before, moved)
+
+
 def run(args):
     path = os.path.abspath(args.plan)
     if not PLAN_NAME.match(os.path.basename(path)):
@@ -235,6 +328,25 @@ CREATES = ("add", "summary", "status")
 
 def change(path, args):
     plan = load(path, args.action in CREATES)
+    kept = load_archive(path)
+    back = set()
+    for number in (getattr(args, "row", None), getattr(args, "under", None)):
+        if number:
+            bring_back(plan["nodes"], number, kept, back)
+    said = edit(plan, args)
+    moved = {}
+    move_out(plan["nodes"], "", time.time() - ARCHIVE_AFTER, moved)
+    if moved:
+        save_archive(path, dict(kept, **moved))
+    save(path, plan)
+    if back - set(moved) or moved:
+        save_archive(path, dict({k: v for k, v in kept.items() if k not in back}, **moved))
+    if (getattr(args, "waiting_on", None) or "").strip() == "session":
+        said += ". " + SESSION_HINT
+    return said
+
+
+def edit(plan, args):
     now = now_stamp()
     if args.action in ("summary", "status"):
         said = brief(plan, args, now)
@@ -284,9 +396,6 @@ def change(path, args):
         said = "row %s%d added: %s" % (prefix, len(siblings), args.state)
         if node.get("waitingOn"):
             said += ", on %s" % node["waitingOn"]
-    save(path, plan)
-    if (getattr(args, "waiting_on", None) or "").strip() == "session":
-        said += ". " + SESSION_HINT
     return said
 
 
