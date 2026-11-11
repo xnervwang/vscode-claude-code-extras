@@ -26,7 +26,9 @@
       if (isOff('openInTabOrSidebar') || !ui || typeof ui.jsx !== 'function' || typeof ui.jsxs !== 'function'
           || !ui.ctx || typeof ui.ctx.openInEditor !== 'function') return null;
       var F = ui.jsx, W = ui.jsxs, c = ui.cls || {}, ctx = ui.ctx;
-      // Two halves of the row the one button filled, parted by the row's own border colour.
+      // Two halves of the row the one button filled, parted by the row's own border colour. In a narrow list a label does
+      // not fit its half, and the button's flex layout would shrink the icon instead; the icon keeps its size and the
+      // label is cut with an ellipsis.
       var button = function(where, label, title, parted){
         var style = { flex: '1 1 0', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' };
         if (parted) style.borderLeft = '1px solid var(--app-primary-border-color)';
@@ -34,7 +36,10 @@
           className: c.newSessionButton || '', style: style, title: title,
           'data-cce-new-session': where,
           onClick: function(){ openIn(where, function(){ ctx.openInEditor(); }); },
-          children: [ui.Icon ? F(ui.Icon, { className: c.newSessionIcon || '' }) : null, label],
+          children: [
+            ui.Icon ? F('span', { style: { display: 'inline-flex', flex: '0 0 auto' }, children: F(ui.Icon, { className: c.newSessionIcon || '' }) }) : null,
+            F('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }, children: label }),
+          ],
         }, where);
       };
       return W('div', { style: { display: 'flex', alignSelf: 'stretch', flex: '1 1 auto', minWidth: 0 }, children: [

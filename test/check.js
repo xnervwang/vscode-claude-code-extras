@@ -6789,6 +6789,10 @@ console.log('\nopening in a tab or the sidebar from the session list');
   if (JSON.stringify(labels) === JSON.stringify([['tab', 'nsb', 'New in tab', 1], ['sidebar', 'nsb', 'New in sidebar', 1]])) {
     ok('two buttons in the official button\'s style: New in tab and New in sidebar');
   } else bad(`the buttons were ${JSON.stringify(labels)}`);
+  const parts = buttons.map((b) => [].concat(b.props.children).filter(Boolean).map((k) => k.props.style || {}));
+  if (parts.length === 2 && parts.every(([icon, label]) => icon.flex === '0 0 auto' && label.textOverflow === 'ellipsis' && label.minWidth === 0)) {
+    ok('in a list too narrow for a label, the icon keeps its size and the label ends in an ellipsis');
+  } else bad(`the buttons' icon and label were styled ${JSON.stringify(parts)}`);
   buttons[0].props.onClick(); buttons[1].props.onClick();
   if (JSON.stringify(opens) === JSON.stringify([['tab', 0], ['sidebar', 0]]) && env.window.__cceOpenWhere === undefined) {
     ok('each does what New session does, with where to open it set only for that call');

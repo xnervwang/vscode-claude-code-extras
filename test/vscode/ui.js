@@ -345,6 +345,12 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(JSON.stringify(top.ours) === JSON.stringify([['tab', 'New in tab', 'Start a conversation in a new editor tab'],
         ['sidebar', 'New in sidebar', 'Start a conversation in the sidebar']]) && top.theirs === 0,
       'New in tab and New in sidebar stand in place of Claude Code\'s New session', top);
+      /* Each keeps its 16 px icon however narrow the list is; macOS and Windows open the window narrow enough to test it. */
+      const icons = await list.evaluate(() => [...document.querySelectorAll('[data-cce-new-session]')].map((b) => {
+        const i = b.querySelector('svg') || (b.firstElementChild && b.firstElementChild.firstElementChild);
+        return i ? Math.round(i.getBoundingClientRect().width) : 0;
+      }));
+      check(icons.length === 2 && icons.every((x) => x === 16), 'and each keeps its icon whole', icons);
       const listed = await until(async () => {
         const got = await list.evaluate(() => [...document.querySelectorAll('[class*="sessionItem_"] span[class*="sessionName_"]')].map((e) => e.textContent.trim()));
         return threads.every((t) => got.includes(t.title)) && got;
