@@ -462,7 +462,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
             return { x: b.left, y: b.top, width: b.width, height: b.height };
           }) };
       }), 5000, 200);
-      const asked = tab0.turns.map(([q]) => q.slice(0, 44));
+      const asked = tab0.turns.map(([q]) => (q.length > 44 ? q.slice(0, 44) + '\u2026' : q));
       check(!!toc && toc.filter && toc.rows.length === asked.length && toc.rows.every((r, i) => /^\d\d:\d\d:\d\d {2}/.test(r) && r.endsWith(asked[i])),
         'the handle opens the list of your messages, each with its time, under a filter box', toc && toc.rows);
       await page.mouse.move(5, 5);
