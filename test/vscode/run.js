@@ -10,7 +10,7 @@
  * .vsix into a profile of its own, and runs three stages against that install: ui.js, which drives the window and
  * checks what is drawn; ./suite inside VS Code, which checks the patched files and the plugin; and test/check.js
  * against the installed copies. Exits non-zero if any fails. Agent Plus is installed from its .vsix when one is given,
- * and from the marketplace otherwise; it has to be there before the .vsix, which depends on it. Screenshots, crops,
+ * and from the marketplace otherwise; this extension's .vsix depends on it, so it goes in first. Screenshots, crops,
  * diffs and VS Code's logs go to --out (by default a folder in the temporary root it makes).
  *
  * HOME (USERPROFILE and the AppData folders on Windows, the XDG folders on Linux), VS Code's user data and extensions
@@ -122,8 +122,8 @@ function writeSettings(user, model, key) {
     'window.dialogStyle': 'custom',
     /* Manual, so that a tool call stops for permission: that is the turn whose tab carries the blue dot. */
     'claudeCode.initialPermissionMode': 'default',
-    /* Claude Code is signed in to nothing: no login prompt, and its CLI sends each turn to fake-model.js with a made-up
-       key, which it takes as an API key login (lib/fake-home.js). */
+    /* No account: the login prompt is off, and the CLI sends each turn to fake-model.js with a fake API key
+       (lib/fake-home.js). */
     'claudeCode.disableLoginPrompt': true, 'claudeCode.hideOnboarding': true,
     'claudeCode.environmentVariables': [
       { name: 'ANTHROPIC_BASE_URL', value: model.url }, { name: 'ANTHROPIC_API_KEY', value: key },

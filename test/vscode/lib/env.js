@@ -4,7 +4,7 @@
 
 'use strict';
 /*
- * The environment for the VS Code that run.js starts and everything that VS Code starts in turn.
+ * The environment of the VS Code that run.js starts, which every process it starts inherits.
  *
  * Dropped: the variables a VS Code that runs this script sets (ELECTRON_RUN_AS_NODE would start VS Code as plain Node,
  * and VSCODE_IPC_HOOK_CLI would send an install to that other VS Code), LD_LIBRARY_PATH (VS Code brings its own

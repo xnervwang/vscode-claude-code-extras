@@ -37,7 +37,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `test/reply-shape.js` reads what a reply element holds out of a real bundle, which the stand-in panel cannot contradict.
 - `test/with-core.js` runs this extension with Agent Plus from its checkout beside this one, in Agent Plus's
   fake VS Code (`test/fake-vscode.js`). Without that checkout its checks are skipped.
-- `test/vscode/` holds the real-window checks run by `.github/workflows/vscode.yml`: `run.js` starts the run; `ui.js` drives the window through Playwright; `suite/` runs checks inside VS Code; `helper/` is a development extension that makes VS Code API calls for `ui.js`; `lib/` starts the window, prepares the made-up model and `~/.claude`, sets the window's environment, reads PNGs, and compares crops with approved copies; `baseline/<platform>/` holds those copies; and `update-baseline.js` copies a run's crops over them.
+- `test/vscode/` holds the checks that run in a real VS Code window, started by `.github/workflows/vscode.yml`. `run.js` is the entry point and `ui.js` drives the window through Playwright; `lib/` has the fake model, the fake `~/.claude` and the crop comparison, and `baseline/<platform>/` the approved crops.
 - `build/pack.sh` produces the `.vsix` without npm.
 - `shared.json` lists the files copied from Agent Plus and where each one comes from: the packing scripts, two checks, shared host and page code in `src/`, and the hooks the two plugins share. Claude Code's part of those hooks is `claude-plugin/agent-work-plan/hooks/plan_agent.py`, and `skills/maintain/SKILL.md` is generated from Agent Plus's template with this extension's text filled in. `guard-work-plan.py` and `refresh-work-plan.py` are not copied. To change a copied file, change it in Agent Plus and run `node build/sync-shared.js`; `test/shared-copies.js` fails when a copy is edited here.
 - `shim/` is the last version of the earlier id. It depends on Claude Code Plus, so updating the old extension installs Claude Code Plus. It writes `export.json`, which Claude Code Plus imports, and does nothing else. `bash build/pack-shim.sh` builds its `.vsix`.
@@ -96,7 +96,7 @@ The window checks these steps in order:
 - Delete session… asks for confirmation on an archived conversation. The window also checks Show Status, Settings, and the confirmation for Stop Loading the Work Plan Plugin.
 - Not covered by the window stage: the footer's filter for the main thread or one sub-agent, which only appears in a conversation that ran sub-agents; the sound of the chimes.
 
-Claude Code is not signed in during the run. `claudeCode.disableLoginPrompt` turns off its login prompt. `claudeCode.environmentVariables` gives its CLI a made-up API key and sends every turn to the model on `127.0.0.1` in `test/vscode/lib/fake-model.js`. The temporary `~/.claude.json` marks that key as accepted. The CLI started from the panel uses an API key only after it has been accepted once; otherwise every turn answers "Not logged in". `test/vscode/lib/fake-home.js` writes the made-up transcripts under the temporary `~/.claude/projects/`.
+Claude Code is not signed in during the run. `claudeCode.disableLoginPrompt` turns off its login prompt. `claudeCode.environmentVariables` gives its CLI a fake API key and sends every turn to the model on `127.0.0.1` in `test/vscode/lib/fake-model.js`. The temporary `~/.claude.json` marks that key as accepted. The CLI started from the panel uses an API key only after it has been accepted once; otherwise every turn answers "Not logged in". `test/vscode/lib/fake-home.js` writes the fake transcripts under the temporary `~/.claude/projects/`.
 
 Every home folder (`HOME`; `USERPROFILE` and the AppData folders on Windows; the XDG folders on Linux), along with VS Code's user data and extensions folders, sits under a new folder in `RUNNER_TEMP` or the system's temporary folder. The window's environment leaves out `VSCODE_*`, `ELECTRON_*`, `LD_LIBRARY_PATH`, `CLAUDE*`, `ANTHROPIC_*`, `AWS_*`, and `OTEL_*`. When the runner starts inside a Claude Code session or VS Code terminal, those variables could otherwise send installs to another VS Code or turns to that session's provider.
 
@@ -114,7 +114,7 @@ The person merging into `main` approves new copies. Before copying them, inspect
 node test/vscode/update-baseline.js <results folder or unpacked artifact> [<platform>] [--only <name>[,<name>]]
 ```
 
-The command copies `actual/<platform>/*.png` over `test/vscode/baseline/<platform>/`. Commit the new copies yourself, with an explanation of what changed in the drawing and why.
+The command copies `actual/<platform>/*.png` over `test/vscode/baseline/<platform>/`. Commit the updated baselines on their own, saying what changed on screen and why.
 
 For a local run, install the test dependencies outside the repository and point `NODE_PATH` at that folder's `node_modules`:
 

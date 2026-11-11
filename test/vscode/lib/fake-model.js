@@ -5,9 +5,9 @@
 'use strict';
 /*
  * A stand-in for the model behind Claude Code: an HTTP server on 127.0.0.1 that answers the Messages API's POST
- * /v1/messages with a made-up reply, streamed or not as the request asks, and POST /v1/messages/count_tokens with a
+ * /v1/messages with a canned reply, streamed or not as the request asks, and POST /v1/messages/count_tokens with a
  * count. Claude Code's CLI sends each turn here when ANTHROPIC_BASE_URL names this server (run.js passes it through
- * claudeCode.environmentVariables); the key it sends is made up too and nothing checks it.
+ * claudeCode.environmentVariables); the key it sends is fake and nothing checks it.
  *
  * A turn whose message contains ASK_TO_RUN is answered with a Bash tool call of RUN instead of text, so that Claude Code
  * stops to ask for permission to run it; the turn that carries the tool's result is answered with text again.

@@ -10,8 +10,8 @@
  * in the workspace. The entry point is claude-vscode: a transcript whose first record says sdk-cli, as one written by
  * `claude -p` does, is a background session, and this extension takes those out of the list.
  *
- * Claude Code itself is not signed in to anything. run.js turns its login prompt off and points its CLI at
- * fake-model.js with KEY, a made-up key. Started from the panel, the CLI uses an ANTHROPIC_API_KEY only once its last 20
+ * Claude Code has no account here. run.js turns its login prompt off and points its CLI at fake-model.js with KEY, a
+ * fake key. Started from the panel, the CLI uses an ANTHROPIC_API_KEY only once its last 20
  * characters are among the approved ones in ~/.claude.json, as they are after someone accepts the key when asked; without
  * that every turn ends in "Not logged in". So that file is written here too, with the key approved.
  */

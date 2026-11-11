@@ -15,11 +15,11 @@
  *
  * Two runs on one machine drew every crop the same, pixel for pixel, but for the times the masks leave out. Another
  * machine of the same platform can place anti-aliasing a little differently. A channel off by more than 32 of 255 is
- * past that and short of any change of colour a reader would see; 0.2 per cent of the 142 by 259 px Text color submenu
- * is 73 px, about one letter. A crop of another size than the approved copy fails on its own,
- * unless it is one pixel off: an element 258.5 px tall is drawn 259 px tall where its top lands on a whole pixel and
- * 258 px where it lands on a half, and how far down a menu opens moves by half pixels from run to run. A crop whose
- * width or height differs from the approved copy's by one pixel is compared on the part both have, from the top left.
+ * more than that noise and less than any colour change a reader would notice; 0.2 per cent of the 142 by 259 px Text
+ * color submenu is 73 px, about one letter. A crop whose size differs from the approved copy fails, unless it is one
+ * pixel off: an element 258.5 px tall is drawn 259 px tall where its top lands on a whole pixel and 258 px where it
+ * lands on a half, and how far down a menu opens moves by half pixels from run to run. A crop whose width or height
+ * differs from the approved copy's by one pixel is compared on the part both have, from the top left.
  *
  * `masks` are rectangles of the crop, { x, y, w, h }, that are not compared: time stamps.
  */

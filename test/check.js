@@ -8107,7 +8107,7 @@ console.log('\nthe workflows');
 }
 
 /* ── the workflow that runs the extension in a real VS Code window ──
-   Read from the YAML rather than run. A test stage left on the network, a screen of another size than the approved Linux
+   Read from the YAML rather than run. A test stage left on the network, a screen of a different size than the approved Linux
    crops were made at, or a results folder kept only when the run passed, all still let the run go green, so each is a
    check of its own. */
 console.log('\nthe workflow in a real VS Code window');
@@ -8149,8 +8149,9 @@ console.log('\nthe workflow in a real VS Code window');
 }
 
 /* ── the window test's own parts ──
-   The parts of test/vscode/ that keep a run off the machine it runs on, and the made-up conversations it opens. A window
-   run happens only on CI and when someone runs it on purpose, so these are checked with every commit instead. */
+   The parts of test/vscode/ that keep a run away from the real home folder and the network, and the fake conversations
+   it opens. A window run happens only on CI and when someone runs it on purpose, so these are checked with every commit
+   instead. */
 console.log('\nthe window test\'s own parts');
 {
   const expect = (cond, msg, detail) => (cond ? ok(msg) : bad(detail === undefined ? msg : `${msg}: ${detail}`));
@@ -8187,7 +8188,7 @@ console.log('\nthe window test\'s own parts');
     const now = new Date(2026, 10, 11, 0, 5, 0).getTime();
     const made = fakeHome.write(home, { folder, now });
     expect(made.dir === path.join(home, '.claude', 'projects', bg.folderName(folder)) && made.files.every((f) => fs.existsSync(f)),
-      'the made-up conversations go where Claude Code looks for those started in the window\'s folder', made.dir);
+      'the fake conversations go where Claude Code looks for those started in the window\'s folder', made.dir);
     expect(made.files.every((f) => bg.kindOf(f) === ''), 'and none of them reads as a background session, which the list would leave out',
       JSON.stringify(made.files.map((f) => bg.kindOf(f))));
     const records = (f) => fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -8199,7 +8200,7 @@ console.log('\nthe window test\'s own parts');
     expect(JSON.stringify(titles) === JSON.stringify(made.threads.map((t) => t.title)), 'each one carries its title where this extension reads it', JSON.stringify(titles));
     const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
     expect(JSON.stringify(settings.customApiKeyResponses) === JSON.stringify({ approved: [fakeHome.KEY.trim().slice(-20)], rejected: [] }),
-      'and the made-up key is approved the way Claude Code\'s CLI records an accepted key', JSON.stringify(settings));
+      'and the fake key is approved the way Claude Code\'s CLI records an accepted key', JSON.stringify(settings));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 
   const pixels = require('./vscode/lib/pixels');
@@ -8606,7 +8607,7 @@ const repo = path.join(__dirname, '..');
 
   /* The stand-in for the model that the window test sends its turns to: the streamed events Claude Code's CLI reads, a
      Bash tool call for a message that asks for one, and text again once the tool's result comes back. */
-  console.log('\nthe made-up model the window test talks to');
+  console.log('\nthe fake model the window test talks to');
   const fakeModel = require('./vscode/lib/fake-model');
   const http = require('http');
   const m = await fakeModel.start({ reply: 'Hello.' });
@@ -8639,7 +8640,7 @@ const repo = path.join(__dirname, '..');
     eq([counted.status, JSON.parse(counted.text).input_tokens > 0, other.status], [200, true, 404], 'it counts tokens, and answers nothing else');
     eq(m.turns(), 3, 'and counts only the streamed turns');
   } catch (e) {
-    bad(`the made-up model: ${(e && e.stack) || e}`);
+    bad(`the fake model: ${(e && e.stack) || e}`);
   } finally { await m.close(); }
 })().catch((e) => bad(`a check copied from Agent Plus threw: ${(e && e.stack) || e}`)).finally(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
