@@ -2690,7 +2690,8 @@ console.log('\nwhat the Stop hook says, and how often');
       const back = Date.parse('2025-01-01T00:00:00Z') / 1000;
       fs.utimesSync(f, back, back);
     }
-    if (limits) fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify(limits));
+    /* Brief off: these cases test the plan reminder. */
+    fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify(Object.assign({ brief: false }, limits)));
     return { dir, data, transcript };
   };
   const run = (t) => {
@@ -2737,6 +2738,16 @@ console.log('\nwhat the Stop hook says, and how often');
     fs.utimesSync(at, moved, moved);
     if (run(t).said) ok('and comes back once the plan has been written to since');
     else bad('the reminder stayed silent after the plan changed');
+    fs.rmSync(t.dir, { recursive: true, force: true });
+  }
+  /* Stop can fire several times in one turn; the hook asks for the brief on the first. */
+  {
+    const t = stage(10, { nodes: [{ title: 'x', state: 'todo' }] }, 3, { brief: true });
+    const first = run(t), later = [run(t), run(t), run(t)].filter((x) => x.said);
+    if (/status|summary/.test(first.said)) ok('with the brief on, a working turn is asked for its brief');
+    else bad(`with the brief on, a working turn said ${JSON.stringify(first.said.slice(0, 120))}`);
+    if (!later.length) ok('and a later Stop in the same turn asks nothing again');
+    else bad(`a later Stop in the same turn asked again ${later.length} times: ${JSON.stringify(later[0].said.slice(0, 120))}`);
     fs.rmSync(t.dir, { recursive: true, force: true });
   }
   /* What the threshold is really asking is whether the turn changed anything, not how busy it looked. A turn of reading
@@ -3533,9 +3544,16 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     const map = (/const HOOK_SETTINGS = \{([\s\S]*?)\};/.exec(ext) || [])[1] || '';
     const names = [...map.matchAll(/PREFIX \+ '(\w+)'/g)].map((m) => 'claudeCodePlus.' + m[1]);
     if (/WORK_PLAN_SETTING/.test(map)) names.push('claudeCodePlus.workPlan');
+    if (/brief: BRIEF_SETTING/.test(map)) names.push('claudeCodePlus.conversationBrief');
     const scoped = names.filter((n) => props[n] && props[n].scope === 'application');
-    if (names.length === 5 && scoped.length === names.length) ok('every setting the hooks read is an application setting');
+    if (names.length === 6 && scoped.length === names.length) ok('every setting the hooks read is an application setting');
     else bad(`hook settings ${JSON.stringify(names)}, application-scoped ${JSON.stringify(scoped)}`);
+    const brief = props['claudeCodePlus.conversationBrief'];
+    if (brief && brief.type === 'boolean' && brief.default === true
+      && /brief: \(\) => cfg\(\)\.get\(BRIEF_SETTING, true\) !== false,/.test(ext)
+      && /else if \(e\.affectsConfiguration\(BRIEF_SETTING\)\) claude\.changed\(\);/.test(ext)) {
+      ok('the brief is on by default, and turning it on or off lists the conversations again');
+    } else bad(`conversationBrief ${JSON.stringify(brief)}, or extension.js does not pass it to the source or redraw on its change`);
   }
 }
 
@@ -8330,6 +8348,15 @@ console.log('\nClaude Code\'s own source');
       out.shape = [c.source.protocol, c.source.id, c.source.label, JSON.stringify(c.source.features), c.source.extensionId,
         c.source.planPath(SID), c.source.planPath('S'), c.source.planDir(), c.source.logo, c.source.timeZone()];
       on = false; out.planOff = c.source.planPath(SID); on = true;
+      let briefOn = true;
+      const b = C.createClaudeSource({ planDir: () => '/plans', enabled: () => on, brief: () => briefOn, timeZone: () => '',
+        listAgents: async () => ({ records: null, error: 'no cli' }), folders: () => [], readPlan: () => null,
+        titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
+        activeChat: () => '', logo: () => null, canDeliver: () => false, hand: () => false, reveal: async () => false });
+      out.features = [JSON.stringify(b.source.features)];
+      on = false; out.features.push(JSON.stringify(b.source.features)); on = true;
+      briefOn = false; out.features.push(JSON.stringify(b.source.features)); briefOn = true;
+      b.dispose();
       const panel = (column, visible, active) => {
         const p = { viewColumn: column, visible, active, l: [], d: [] };
         p.onDidChangeViewState = (fn) => { p.l.push(fn); return { dispose() {} }; };
@@ -8405,6 +8432,9 @@ console.log('\nClaude Code\'s own source');
       path.join('/plans', SID + '.json'), null, '/plans', null, 'Asia/Tokyo']) && o.planOff === null) {
       ok('Claude Code\'s source has the protocol 1 members and plan paths');
     } else bad(`claude source shape ${JSON.stringify(o.shape || o)}, with the plan off ${JSON.stringify(o.planOff)}`);
+    if (JSON.stringify(o.features) === JSON.stringify(['["brief"]', '[]', '[]'])) {
+      ok('features lists brief only while both the work plan and the brief are on');
+    } else bad(`features with plan and brief on, plan off, brief off: ${JSON.stringify(o.features)}`);
     if (JSON.stringify(o.claims) === JSON.stringify(['A', 'C', null, null, '', '', false]) && o.listeners === 1 && o.afterDispose === '') {
       ok('sessionForTab() claims only Claude Code tabs');
     } else bad(`claims ${JSON.stringify([o.claims, o.listeners, o.afterDispose])}`);

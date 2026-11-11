@@ -216,6 +216,8 @@ undo.
 | The user decides against it | Move it to `dropped` and set `closed`, with the reason in `detail` |
 | Doing A turns out to need B finished first | Add B as a child of A, with its own `opened` |
 | A hook says the context has passed a water mark | For every `doing` row, `set <row> --detail TEXT`: the exact next step, anything not to do, and the user's own words written nowhere else |
+| A turn did work and the brief's status is older than the turn | `plan-row.py <plan> status --doing TEXT --progress TEXT --next TEXT`: what you are doing, the latest progress, who it waits on or the next step (widths 80, 100, 60; `none` for an empty part) |
+| The plan has rows and no summary, its top rows changed since the summary, or the context was compacted since | `plan-row.py <plan> summary TEXT`: what the conversation is for, its stage, decisions not to forget (width 400). Widths count a CJK character as 2; the conversation's own language; no names coined in it |
 | A compaction has just happened | Read the plan file with a tool before anything else; the `detail` of each `doing` row holds the next step |
 | The user says to leave something for later | Move it to `parked`, with the reason in `note` |
 

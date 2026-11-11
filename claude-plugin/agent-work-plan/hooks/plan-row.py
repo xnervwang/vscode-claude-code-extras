@@ -8,10 +8,13 @@
 
   plan-row.py PLAN set ROW [STATE] [--note TEXT] [--detail TEXT] [--waiting-on WHO] [--question TEXT]
   plan-row.py PLAN add STATE TITLE [--under ROW] [--note TEXT] [--waiting-on WHO] [--question TEXT]
+  plan-row.py PLAN summary TEXT
+  plan-row.py PLAN status --doing TEXT --progress TEXT --next TEXT
 
 ROW is the number shown in front of a row, closed rows counted: 3 is the third row at the top, 2.1 the first one under
-the second. Not a hook: the model runs it, and the injected block gives its full path every turn. In Codex, plan-mcp.py
-also calls run() for the model's set_row and add_row tools.
+the second. `summary` and `status` write the conversation's brief (plan_common.BRIEF_WIDTH). Not a hook: the model runs
+it, and the injected block gives its full path every turn. In Codex, plan-mcp.py also calls run() for the model's
+set_row, add_row, set_summary and set_status tools.
 
 It exists because a change of state is one simple action and was being paid for as a large one. Done by hand it means
 reading the whole file, changing one field and writing all of it back - of 884 writes to plans measured on the machine
@@ -33,9 +36,9 @@ sys.dont_write_bytecode = True
 # The script's folder on the import path: see inject-work-plan.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import (CLOSED_STATES, HELD_STATES, MAX_DETAIL_CHARS, MAX_DETAIL_LINES, MAX_QUESTION_CHARS, PLAN_NAME,
-                       SESSION_HINT, SETTING_PREFIX, STATES, WAITING_ON, detail_over, now_stamp, plan_lock, questions_in,
-                       settings, write_atomic)
+from plan_path import (BRIEF_WIDTH, CLOSED_STATES, HELD_STATES, MAX_DETAIL_CHARS, MAX_DETAIL_LINES, MAX_QUESTION_CHARS,
+                       PLAN_NAME, SESSION_HINT, SETTING_PREFIX, STATES, STATUS_PARTS, WAITING_ON, detail_over, now_stamp,
+                       plan_lock, questions_in, settings, width, write_atomic)
 
 
 class Refused(Exception):
@@ -155,6 +158,34 @@ def hold(node, changed, who, question, now):
                       "can answer as it stands without reading the conversation.")
 
 
+def fitted(name, text, one_line):
+    """`text` with its spaces tidied, or Refused when it is empty or wider than that part's limit."""
+    text = " ".join(str(text or "").split()) if one_line else str(text or "").strip()
+    if not text:
+        raise Refused("The %s is empty. Say what it is; where there is nothing to say, write none (or the word for it in "
+                      "the conversation's language)." % name)
+    wide, limit = width(text), BRIEF_WIDTH[name]
+    if wide > limit:
+        raise Refused("That %s is %d wide; the limit is %d, where a CJK character counts 2 and any other 1. Nothing was "
+                      "written: shorten it to the gist and write it again." % (name, wide, limit))
+    return text
+
+
+def brief(plan, args, now):
+    """Write the summary or the status, stamped with the current time."""
+    kept = plan.get("brief") if isinstance(plan.get("brief"), dict) else {}
+    if args.action == "summary":
+        kept["summary"] = fitted("summary", args.text, False)
+        kept["summaryAt"] = now
+        said = "summary written (%d of %d wide)" % (width(kept["summary"]), BRIEF_WIDTH["summary"])
+    else:
+        kept["status"] = {part: fitted(part, getattr(args, part), True) for part in STATUS_PARTS}
+        kept["statusAt"] = now
+        said = "status written"
+    plan["brief"] = kept
+    return said
+
+
 def load(path, may_create):
     try:
         with open(path, encoding="utf-8") as fh:
@@ -184,7 +215,7 @@ def run(args):
     if not settings(os.path.dirname(path))["enabled"]:
         raise Refused("Work plans are switched off for this editor (%s.workPlan), so nothing reads this "
                       "file. Track what is left in your reply instead." % SETTING_PREFIX)
-    if args.action == "add":
+    if args.action in CREATES:
         # The first row of a conversation can come before anything has made the plugin's data directory.
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -198,10 +229,16 @@ def run(args):
         return change(path, args)
 
 
+# The actions that may start a plan file that is not there yet.
+CREATES = ("add", "summary", "status")
+
+
 def change(path, args):
-    plan = load(path, args.action == "add")
+    plan = load(path, args.action in CREATES)
     now = now_stamp()
-    if args.action == "set":
+    if args.action in ("summary", "status"):
+        said = brief(plan, args, now)
+    elif args.action == "set":
         if args.state is None and args.note is None and args.detail is None and args.waiting_on is None \
                 and args.question is None:
             raise Refused("Nothing to change: give a state, --note, --detail, --waiting-on or --question.")
@@ -248,7 +285,7 @@ def change(path, args):
         if node.get("waitingOn"):
             said += ", on %s" % node["waitingOn"]
     save(path, plan)
-    if (args.waiting_on or "").strip() == "session":
+    if (getattr(args, "waiting_on", None) or "").strip() == "session":
         said += ". " + SESSION_HINT
     return said
 
@@ -274,6 +311,13 @@ def main(argv=None):
     add.add_argument("--note")
     add.add_argument("--waiting-on", metavar="WHO", help="who a waiting row waits on: %s" % ", ".join(WAITING_ON))
     add.add_argument("--question", help="with --waiting-on user: the one question the user has to answer")
+    summary = actions.add_parser("summary", help="write the conversation's summary: what it is for, the stage it has "
+                                 "reached, and the decisions later work must not forget (at most %d wide)"
+                                 % BRIEF_WIDTH["summary"])
+    summary.add_argument("text")
+    status = actions.add_parser("status", help="write where the conversation stands now, in three parts")
+    for part, says in zip(STATUS_PARTS, ("what you are doing", "the latest progress", "who it waits on, or the next step")):
+        status.add_argument("--" + part, required=True, help="%s (at most %d wide)" % (says, BRIEF_WIDTH[part]))
     args = parser.parse_args(argv)
     # Python on Windows encodes a pipe in the console's code page; titles need UTF-8.
     for stream in (sys.stdout, sys.stderr):

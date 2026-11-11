@@ -36,8 +36,9 @@ sys.dont_write_bytecode = True
 # the import path, and plan_path is in it.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import (OPEN_STATES, QUESTION_WORD, TURN_FIELD, WAITING_ON, WAITING_ON_WORD, any_in, children, epoch,
-                       launcher_quoted, listed, plan_file, read_payload, row_command, row_help, settings, write_turn)
+from plan_path import (OPEN_STATES, QUESTION_WORD, STATUS_PARTS, TURN_FIELD, WAITING_ON, WAITING_ON_WORD, any_in,
+                       brief_of, children, epoch, launcher_quoted, listed, plan_file, read_payload, row_command, row_help,
+                       settings, write_turn)
 
 GLYPH = {"discussing": "?", "todo": "o", "doing": ">", "waiting": "~", "parked": "=", "done": "+", "dropped": "x"}
 # Row cap for the injected block. Top-level rows are always drawn; only the rows under them are cut (see rows).
@@ -159,12 +160,27 @@ def counts(nodes, acc=None):
     return acc
 
 
+def brief_lines(plan, now):
+    """The brief as last written and the age of each part, so the agent updates it rather than starting over. Empty when
+    there is no brief."""
+    brief = brief_of(plan)
+    ago = lambda at: " %s ago" % age(int(now - at)) if at is not None and now >= at else ""
+    out = []
+    if brief["summary"]:
+        out.append("  Summary, written%s: %s" % (ago(brief["summaryAt"]), " ".join(brief["summary"].split())))
+    if brief["status"]:
+        out.append("  Status, written%s: %s" % (ago(brief["statusAt"]), " · ".join(
+            "%s: %s" % (part, brief["status"][part]) for part in STATUS_PARTS if part in brief["status"])))
+    return ["", "Your brief of this conversation, which the Conversations panel shows when its row is clicked:"] + out if out else []
+
+
 def main():
     try:
         payload = read_payload()
     except Exception:
         return 0
-    if not isinstance(payload, dict) or not settings()["enabled"]:
+    limits = settings()
+    if not isinstance(payload, dict) or not limits["enabled"]:
         return 0
     path = plan_file(payload)
     if not path:
@@ -216,7 +232,8 @@ def main():
     ] + row_help(path, command, launcher_quoted()) + ([(
         "%d waiting row%s %s not say who %s for (shown `on ?`). Give each one %s when you next touch it.")
         % (missing, "" if missing == 1 else "s", "does" if missing == 1 else "do",
-           "it waits" if missing == 1 else "they wait", WAITING_ON_WORD)] if missing else []) + [""] + out)
+           "it waits" if missing == 1 else "they wait", WAITING_ON_WORD)] if missing else []) + [""] + out
+        + (brief_lines(plan, now) if limits["brief"] else []))
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"),
         "additionalContext": text,

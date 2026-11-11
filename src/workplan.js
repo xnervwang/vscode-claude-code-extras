@@ -60,10 +60,12 @@ const { readBounded } = require('./bounded');
  *   .turn        which turn the conversation is in and how far it has got, left by the injection hook
  *   .watermark   which context marks have asked it to bring the plan up to date before a compaction
  *   .tz          what the time-zone hook last told it
+ *   .compacted   when the conversation was last compacted, left by the SessionStart hook for the brief
+ *   .briefed     which parts of the brief the Stop hook last asked for
  *   .effort      where each reply's effort changed (src/efforts.js)
  */
 const SIDE_SUFFIXES = ['.json', '.offered', '.nudged', '.settled', require('./background').SUFFIX, '.turn', '.watermark', '.tz',
-  require('./efforts').SUFFIX];
+  '.compacted', '.briefed', require('./efforts').SUFFIX];
 const SIDE_FILE = new RegExp('^[0-9a-f][0-9a-f-]{7,}(?:' + SIDE_SUFFIXES.map((s) => s.replace('.', '\\.')).join('|') + ')$', 'i');
 const PLAN_FILE = /^[0-9a-f][0-9a-f-]{7,}\.json$/i;
 /* Plan lock directories (<plan>.lock), made with mkdir around a read-change-write. Writers give up on one older than

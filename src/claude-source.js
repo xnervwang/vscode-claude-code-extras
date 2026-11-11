@@ -103,6 +103,7 @@ function createClaudeSource(deps) {
   const pending = new Map();
   let keys = 0;
   const enabled = () => { try { return deps.enabled ? deps.enabled() !== false : true; } catch (_) { return true; } };
+  const briefOn = () => { try { return deps.brief ? deps.brief() !== false : false; } catch (_) { return false; } };
   const say = (sessionId) => { front = sessionId; focused.fire({ sessionId }); };
 
   const ask = () => deps.listAgents().then((r) => { agentsLast = r; agentsAt = Date.now(); return r; });
@@ -126,7 +127,8 @@ function createClaudeSource(deps) {
 
   const source = {
     protocol: PROTOCOL,
-    features: [],
+    /* 'brief': Agent Plus shows the conversation's brief when its row is clicked. */
+    get features() { return enabled() && briefOn() ? ['brief'] : []; },
     id: ID,
     label: 'Claude Code',
     extensionId: EXTENSION_ID,

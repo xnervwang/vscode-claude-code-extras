@@ -130,9 +130,9 @@ MAYBE_CALL = ('"tool_use"',)
 MAYBE_USER = ('"user"',)
 NOTE_WORD = "--note"
 AFTER_OFFER = ""
-# Claude Code's Stop hook adds context for the next turn rather than keeping this one going, so it never runs again
-# because of its own output.
-STOP_REENTERS = False
+# Context a Stop hook adds keeps the turn going: the model answers it before the turn ends, and the Stop after that
+# answer carries stop_hook_active. Checked on Claude Code 2.1.322 with `claude -p`.
+STOP_REENTERS = True
 
 
 def tool_calls(row):
@@ -181,6 +181,15 @@ def settle_how(path):
 def ask_how(path):
     from plan_common import row_command
     return "%s set <row> <state> --waiting-on user --question TEXT, or `add` for a new row." % row_command(path)
+
+
+def brief_how(path, parts):
+    """The sentence that says how to write each of `parts`, which holds "summary", "status" or both."""
+    from plan_common import row_command
+    command = row_command(path)
+    forms = {"summary": "%s summary TEXT" % command,
+             "status": "%s status --doing TEXT --progress TEXT --next TEXT" % command}
+    return "Write %s with %s." % (" and ".join("the " + p for p in parts), " and ".join(forms[p] for p in parts))
 
 
 """The reminder when a turn starts working with nothing `doing` (remind-work-plan.py)."""

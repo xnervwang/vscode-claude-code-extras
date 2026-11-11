@@ -292,6 +292,12 @@
           "default": true,
           "markdownDescription": "Hooks put the plan's open rows in front of Claude every turn and remind it to reconcile them at the end of a turn. With the setting off, Claude is told nothing about the plan and plan files cannot be written.\n\nWhat stays is the skill's own description, about 110 tokens a session, because the plugin is still registered with Claude Code. **Claude Code Plus: Stop Loading the Work Plan Plugin** removes that too; it is a separate command because it changes Claude Code's own settings rather than this extension's."
         },
+        "claudeCodePlus.conversationBrief": {
+          "scope": "application",
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When on, each Claude Code conversation is asked to keep a brief of itself (a summary, and where it stands now), and clicking it in Agent Plus's Conversations panel shows that brief instead of going to the conversation. Needs `#claudeCodePlus.workPlan#`."
+        },
         "claudeCodePlus.tellClaudeYourTimeZone": {
           "scope": "application",
           "type": "boolean",

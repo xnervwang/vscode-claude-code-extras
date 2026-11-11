@@ -61,10 +61,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from changes import changes
 from changes import shell_command  # noqa: F401  (kept beside changes so both read a call the same way)
-from plan_path import (AFTER_OFFER, MAYBE_CALL, MAYBE_USER, NOTE_WORD, NUDGED_SUFFIX, OFFERED_SUFFIX, QUESTION_WORD,
-                       SETTLED_SUFFIX, STOP_REENTERS, WAITING_ON_WORD, ask_how, children, epoch, listed, offer_how,
-                       open_tail, plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output,
-                       tool_calls, turn_began, write_quietly)
+from plan_path import (AFTER_OFFER, BRIEF_WIDTH, BRIEFED_SUFFIX, CLOSED_STATES, COMPACTED_SUFFIX, MAYBE_CALL, MAYBE_USER,
+                       NOTE_WORD, NUDGED_SUFFIX, OFFERED_SUFFIX, QUESTION_WORD, SETTLED_SUFFIX, STOP_REENTERS,
+                       WAITING_ON_WORD, ask_how, brief_how, brief_of, children, epoch, listed, offer_how, open_tail,
+                       plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output, tool_calls,
+                       turn_began, write_quietly)
 
 # Every threshold this uses is in plan_path.DEFAULTS, where the editor's settings can override it.
 
@@ -327,13 +328,14 @@ def main():
         if started is None:
             return 0
         return offer_once(payload, path, tools, turns, limits)
-    texts = [t for t in (reconcile(payload, path, tail, limits), settle(payload, path),
-                         unrecorded_question(payload, path, tail)) if t]
+    shape = turn_shape(tail, path, turn_began(path, payload))
+    texts = [t for t in (reconcile(path, limits, shape), settle(payload, path), unrecorded_question(payload, path, tail),
+                         brief_due(payload, path, shape, limits)) if t]
     return speak(payload, "\n\n".join(texts)) if texts else 0
 
 
-def reconcile(payload, path, tail, limits):
-    started, tools, changed_count, turns, reached = turn_shape(tail, path, turn_began(path, payload))
+def reconcile(path, limits, shape):
+    started, tools, changed_count, turns, reached = shape
     if started is None:
         return None
     if changed_count < limits["nudgeMinChanges"]:
@@ -357,6 +359,139 @@ def reconcile(payload, path, tail, limits):
         "add what this turn opened, close what it finished, and leave the rest alone. Reading it and finding nothing "
         "owed is a complete answer, but read it in the turn so this can tell. Only the user's word moves a row to "
         "\"todo\". This will not be said again until the plan has been written to." % (changed_count, path)))
+
+
+def status_owed(path, brief, shape, keep):
+    """Whether to ask for a new status: the turn made a tool call or the plan was written during it, and the status was
+    not, and no earlier Stop in this turn asked already.
+
+    A status written during the turn counts even if rows changed after it. Otherwise a turn that wrote the status and
+    then closed a row would be asked for it again.
+
+    One exchange can end in several Stops, so the turn that was asked is kept in `keep` (BRIEFED_SUFFIX) by its start
+    time, the same start the turn is measured from.
+    """
+    started, tools = shape[0], shape[1]
+    if started is None:
+        return False
+    try:
+        written = os.stat(path).st_mtime >= started
+    except OSError:
+        written = False
+    # `statusAt` is written to the second, so the comparison is too.
+    if not (tools or written) or (brief["statusAt"] is not None and brief["statusAt"] >= int(started)):
+        return False
+    if keep.get("statusTurn") == started:
+        return False
+    keep["statusTurn"] = started
+    return True
+
+
+def read_side(path, suffix):
+    try:
+        with open(side_file(path, suffix), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except Exception:
+        return ""
+
+
+def read_briefed(path):
+    """What the end of a turn last asked about the brief (BRIEFED_SUFFIX), as a dict."""
+    try:
+        with open(side_file(path, BRIEFED_SUFFIX), encoding="utf-8") as fh:
+            kept = json.load(fh)
+    except Exception:
+        kept = {}
+    return kept if isinstance(kept, dict) else {}
+
+
+def summary_owed(path, plan, brief, kept, keep):
+    """Why the summary should be written again, or None.
+
+    It is due when there is none and the plan has rows; when a top-level row was added, removed or closed after it was
+    written; and at the end of the first turn after a compaction later than it (COMPACTED_SUFFIX, written by
+    resume-work-plan.py), since after a compaction the summary is the main record of what the conversation is for.
+    Changes below the top level do not count.
+
+    A reason is not repeated until the plan or the summary changes; what was asked is recorded in `keep`, which the
+    caller writes beside the plan (BRIEFED_SUFFIX), and `kept` is that record as it was read. A removed row has no
+    timestamp, so removals are found by comparing the number of top-level rows with the number at the first turn to
+    end after the summary was written.
+    """
+    top = [n for n in listed(plan.get("nodes")) if isinstance(n, dict)]
+    stamp = brief["summaryStamp"] if isinstance(brief["summaryStamp"], str) else ""
+    if keep.get("summaryAt") != stamp or not isinstance(keep.get("top"), int):
+        keep["summaryAt"], keep["top"] = stamp, len(top)
+    at = brief["summaryAt"]
+    reasons, key = [], None
+    if not brief["summary"]:
+        if top:
+            reasons.append("has not been written, and the plan has rows")
+            key = ["none", len(top)]
+    elif at is not None:
+        after = lambda field: [i + 1 for i, n in enumerate(top) if (epoch(n.get(field)) or 0) > at]
+        closed = [i for i in after("closed") if top[i - 1].get("state") in CLOSED_STATES]
+        opened = after("opened")
+        if closed:
+            reasons.append("was written before row%s %s at the top of the plan %s closed" % (
+                "" if len(closed) == 1 else "s", ", ".join(map(str, closed)), "was" if len(closed) == 1 else "were"))
+        if opened or len(top) != keep["top"]:
+            reasons.append("was written before rows were added to or taken out of the top of the plan")
+        if reasons:
+            key = [stamp, closed, opened, len(top)]
+    if key is not None and keep.get("asked") == key:
+        reasons, key = [], None
+    marker = read_side(path, COMPACTED_SUFFIX)
+    compacted = epoch(marker)
+    if compacted is not None and (at is None or compacted > at) and kept.get("compacted") != marker and brief["summary"]:
+        reasons.append("was written before the context was compacted")
+        keep["compacted"] = marker
+    if key is not None:
+        keep["asked"] = key
+    return "; it ".join(reasons) or None
+
+
+def brief_due(payload, path, shape, limits):
+    """One paragraph asking for whichever parts of the brief are out of date, or None.
+
+    Nothing is asked when stop_hook_active is set, because that Stop follows this hook's own reminder.
+    """
+    if not limits["brief"] or payload.get("stop_hook_active"):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            plan = json.load(fh)
+    except Exception:
+        return None
+    if not isinstance(plan, dict):
+        return None
+    brief = brief_of(plan)
+    kept = read_briefed(path)
+    keep = dict(kept)
+    summary = summary_owed(path, plan, brief, kept, keep)
+    status = status_owed(path, brief, shape, keep)
+    if keep != kept and not write_quietly(side_file(path, BRIEFED_SUFFIX), json.dumps(keep)):
+        # Without the record, the same request would be made at the end of every turn, or at every Stop of one.
+        return None
+    if not summary and not status:
+        return None
+    said, parts = [], []
+    if summary:
+        parts.append("summary")
+        said.append("The summary of this conversation %s. It says what the conversation is for, the stage it has "
+                    "reached, and the decisions made that later work must not forget, at most %d wide."
+                    % (summary, BRIEF_WIDTH["summary"]))
+    if status:
+        parts.append("status")
+        said.append("This turn did work, and the status %s. It says in three parts what you are doing (at most %d wide), "
+                    "the latest progress (%d), and who it waits on or the next step (%d); write none in a part with "
+                    "nothing to say." % ("has not been written yet" if brief["statusAt"] is None
+                                         else "was last written before the turn began",
+                                         BRIEF_WIDTH["doing"], BRIEF_WIDTH["progress"], BRIEF_WIDTH["next"]))
+    said.append("Write for someone who stepped away and has to pick up the moment they are back: in the language this "
+                "conversation is held in, with no names coined during it, the gist and not the details. A width counts a "
+                "CJK character as 2 and any other as 1. %s" % brief_how(path, parts))
+    return " ".join(said)
 
 
 if __name__ == "__main__":

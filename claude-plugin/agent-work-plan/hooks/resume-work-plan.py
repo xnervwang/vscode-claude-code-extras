@@ -26,6 +26,9 @@ empty. This is the only place that can say it has been overtaken.
 
 It says nothing when the conversation keeps no plan - nothing before the compaction asked it for anything, so there is
 nothing to overtake - and nothing when the latest reply matches quietWhenReplyMatches (see plan_path.py).
+
+It also writes the time of the compaction beside the plan, so that the Stop hook asks again for a summary written
+before it (nudge-work-plan.py summary_owed).
 """
 import json
 import os
@@ -36,7 +39,8 @@ sys.dont_write_bytecode = True
 # The script's folder on the import path: see inject-work-plan.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from plan_path import READ_HINT, fixture_reply, fixture_tool_call, latest_reply_matches, open_tail, plan_file, read_payload, settings
+from plan_path import (COMPACTED_SUFFIX, READ_HINT, fixture_reply, fixture_tool_call, latest_reply_matches, now_stamp, open_tail,
+                       plan_file, read_payload, settings, side_file, write_quietly)
 
 
 def message(plan):
@@ -67,6 +71,10 @@ def main():
     plan = plan_file(payload)
     if not plan or not os.path.isfile(plan):
         return 0
+    # The time of the compaction, which the Stop hook compares with the summary's (nudge-work-plan.py). Written even when
+    # this hook says nothing below.
+    if limits["brief"]:
+        write_quietly(side_file(plan, COMPACTED_SUFFIX), now_stamp())
     if latest_reply_matches(open_tail(payload.get("transcript_path")), limits["quietWhenReplyMatches"]):
         return 0
     print(json.dumps({"hookSpecificOutput": {

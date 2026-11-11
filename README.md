@@ -106,7 +106,7 @@ Verified against Claude Code 2.1.322.
 
 ## Settings
 
-Open `Claude Code Plus: Settings` for all 36 settings. Most take effect without a reload. Installing or upgrading the patch needs one.
+Open `Claude Code Plus: Settings` for all 37 settings. Most take effect without a reload. Installing or upgrading the patch needs one.
 
 **Work plan settings**
 
@@ -116,6 +116,7 @@ Open `Claude Code Plus: Settings` for all 36 settings. Most take effect without 
 | `claudeCodePlus.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
 | `claudeCodePlus.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
 | `claudeCodePlus.workPlanQuietWhenReplyMatches` | empty | A regular expression tested on the latest reply. If it matches, the prompts before and after compaction are not sent. Use it for conversations that relay another model's replies word for word. When empty, it never matches. |
+| `claudeCodePlus.conversationBrief` | on | Each conversation is asked to keep a brief: a summary, and where it stands now. Clicking the conversation in Agent Plus's Conversations panel then shows the brief instead of going to the conversation. |
 
 **To turn off**
 

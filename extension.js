@@ -72,6 +72,7 @@ const REOPEN_SETTING = PREFIX + 'reopenDroppedTabs';
 const RECENT_SETTING = PREFIX + 'recentClosedSessions';
 const HIDE_BG_SETTING = PREFIX + 'hideBackgroundSessions';
 const WORK_PLAN_SETTING = PREFIX + 'workPlan';
+const BRIEF_SETTING = PREFIX + 'conversationBrief';
 /* Read by the plugin's hooks, which are separate processes and cannot see editor settings. Keys match plan_path.py.
    package.json makes them application settings, since they go into one file that every conversation on the machine
    reads. */
@@ -81,6 +82,7 @@ const HOOK_SETTINGS = {
   offerMinToolCalls: PREFIX + 'workPlanOfferMinToolCalls',
   quietWhenReplyMatches: PREFIX + 'workPlanQuietWhenReplyMatches',
   tellTimeZone: PREFIX + 'tellClaudeYourTimeZone',
+  brief: BRIEF_SETTING,
 };
 
 /*
@@ -689,6 +691,7 @@ function start(context, log, renamed, handing = false) {
   const claude = createClaudeSource({
     planDir,
     enabled: () => cfg().get(WORK_PLAN_SETTING, true) !== false,
+    brief: () => cfg().get(BRIEF_SETTING, true) !== false,
     timeZone: () => clientZone(),
     listAgents: () => waiting.listAgents(pluginInstall.findClaude(claudeFolders())),
     folders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
@@ -1323,6 +1326,7 @@ function start(context, log, renamed, handing = false) {
       try { if (typeof globalThis.__cceSendSessionStates === 'function') globalThis.__cceSendSessionStates(); } catch (_) { /* next update */ }
     }
     if (e.affectsConfiguration(WORK_PLAN_SETTING)) listAgain();
+    else if (e.affectsConfiguration(BRIEF_SETTING)) claude.changed();
     if (e.affectsConfiguration(HIDE_BG_SETTING)) {
       try { if (typeof globalThis.__cceSessionsChanged === 'function') globalThis.__cceSessionsChanged(); } catch (_) { /* the list catches up on its next read */ }
     }

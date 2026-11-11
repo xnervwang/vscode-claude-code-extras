@@ -16,6 +16,7 @@ import re
 import shlex
 import sys
 import time
+import unicodedata
 
 import plan_agent as A
 
@@ -99,6 +100,9 @@ DEFAULTS = {
     # Whether the model is told the time zone the user reads the panel in when it differs from this machine's
     # (tell-time-zone.py). Separate from `enabled`: it has nothing to do with the plan.
     "tellTimeZone": True,
+    # Whether the Stop hook asks the agent for the brief (see BRIEF_WIDTH below) and the injected block shows it. The
+    # two commands that write it work either way.
+    "brief": True,
 }
 # Settings only one agent's hooks read, with their defaults.
 DEFAULTS.update(A.EXTRA_DEFAULTS)
@@ -179,6 +183,35 @@ def detail_over(value):
     if len(kept) > MAX_DETAIL_CHARS:
         return "%d characters" % len(kept)
     return None
+
+
+"""The conversation's brief: the plan file's top-level `brief`, written by the agent and shown in Agent Plus's
+Conversations view when the conversation's row is clicked.
+
+  "brief": {"summary": TEXT, "summaryAt": TIME, "status": {"doing": TEXT, "progress": TEXT, "next": TEXT},
+            "statusAt": TIME}
+
+Each part is limited by width rather than by characters, so that a limit allows about as much text in Chinese as in
+English: a wide character (an ideograph, kana, a full-width form) counts 2, any other 1. A part over its limit is
+refused, not cut, and the agent shortens it.
+"""
+BRIEF_WIDTH = {"summary": 400, "doing": 80, "progress": 100, "next": 60}
+STATUS_PARTS = ("doing", "progress", "next")
+
+
+def width(text):
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in str(text))
+
+
+def brief_of(plan):
+    """The brief of a parsed plan, with its times in epoch seconds. A part missing or of the wrong type is left out."""
+    raw = plan.get("brief") if isinstance(plan, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+    summary = raw.get("summary") if isinstance(raw.get("summary"), str) else ""
+    status = raw.get("status") if isinstance(raw.get("status"), dict) else {}
+    status = {k: status[k] for k in STATUS_PARTS if isinstance(status.get(k), str) and status[k].strip()}
+    return {"summary": summary.strip(), "summaryAt": epoch(raw.get("summaryAt")), "summaryStamp": raw.get("summaryAt"),
+            "status": status, "statusAt": epoch(raw.get("statusAt"))}
 
 
 """Reading the end of a transcript, once per hook run, shared by every lookup in that run.
@@ -319,6 +352,8 @@ SETTLED_SUFFIX = ".settled"      # which `doing` rows the end of a turn last ask
 OFFERED_SUFFIX = ".offered"      # that a conversation with no plan was offered one (nudge-work-plan.py)
 WATERMARK_SUFFIX = ".watermark"  # which context marks have asked (refresh-work-plan.py)
 TOLD_SUFFIX = ".tz"              # what the user's time zone was last told as (tell-time-zone.py)
+COMPACTED_SUFFIX = ".compacted"  # when the context was last compacted (resume-work-plan.py)
+BRIEFED_SUFFIX = ".briefed"      # what the end of a turn last asked about the brief (nudge-work-plan.py)
 LOCK_SUFFIX = ".lock"            # appended to the plan's own name, not put in place of .json (see plan_lock)
 
 
