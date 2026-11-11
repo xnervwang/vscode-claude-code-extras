@@ -194,7 +194,7 @@
           if (!effHere && cx.message.model) effortPending.add(msgs[j]);
           if (bits.length) v += '  ' + bits.join(' ' + String.fromCharCode(183) + ' ');
         }
-        set(row, lead(v));
+        set(row, lead(v), annot && (t === 'tool_use' || t === 'server_tool_use'));
       }
       if (uus.length) UUIDS_OF.set(msgs[j], uus);
       if (ownerDone && j < msgs.length - LIVE_TAIL) settleNext = true;

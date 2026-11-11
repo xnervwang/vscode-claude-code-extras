@@ -268,7 +268,7 @@ console.log('\nwhat the page costs, in a browser');
       /* Panels switch conversations in place (New and Resume in the sidebar); what the page reads from the session must
          follow. */
       const moved = harness.run(browser, { turns: 30, switchSession: true });
-      if (!moved.error && /ctx 10%/.test(moved.labelBeforeSwitch) && /ctx 50%/.test(moved.labelAfterSwitch)
+      if (!moved.error && /ctx\u00a010%/.test(moved.labelBeforeSwitch) && /ctx\u00a050%/.test(moved.labelAfterSwitch)
           && /Session11111111-2222-4333-8444-555555555555/.test(moved.infoAfterSwitch)) {
         ok('after the panel moves to another conversation, the newest reply\'s figures and the info box are that conversation\'s');
       } else bad('after the panel moved to another conversation: ' + (moved.error || JSON.stringify(
@@ -1011,6 +1011,34 @@ console.log('\na reopened conversation');
   else bad(`with the context share switched off later, that reply showed "${keptShareOff}"`);
 }
 
+console.log('\nwhere a stamp may wrap, and where a tool call\'s goes');
+{
+  const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '35-marks.js'), 'utf8');
+  const box = { out: {}, ATTR: 'data-cce-ts', WALK: { text: 0 }, WeakMap, Set };
+  new vm.Script(`(function(){${fragment}\n;out.set = set;})()`, { filename: '35-marks.js' }).runInNewContext(box);
+  const el = (kids = [], text = '') => ({ attrs: {}, className: '', tagName: 'DIV', isConnected: true, children: kids,
+    childNodes: text ? [{ nodeType: 3, nodeValue: text }] : [], contains: () => true,
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }, setAttribute(k, v) { this.attrs[k] = v; } });
+  const stampOf = (v) => { const line = el([], 'Done.'); box.out.set(el([line]), v); return line.attrs['data-cce-ts']; };
+  const NB = '\u00a0', SEP = `${NB}\u00b7 `;
+  const cases = [
+    ['a reply with all its figures', '11/09 04:05:06  40s · ctx 10% · cost $0.003 · sonnet-5-5 high',
+      `11/09${NB}04:05:06  40s${SEP}ctx${NB}10%${SEP}cost${NB}$0.003${SEP}sonnet-5-5${NB}high`],
+    ['a tool call with the time its result came', '04:41:12→04:41:13', '04:41:12→04:41:13'],
+    ['a sub-agent\'s reply with its tag', '04:41:12 #Survey the hooks  3s · opus-5-5', `04:41:12 #Survey${NB}the${NB}hooks  3s${SEP}opus-5-5`],
+    ['your message from another day', '11/09 04:05:06', `11/09${NB}04:05:06`],
+  ];
+  for (const [what, v, want] of cases) {
+    const got = stampOf(v);
+    if (got === want) ok(`${what}: it can break only between its parts`);
+    else bad(`${what}: the stamp came out ${JSON.stringify(got)}, not ${JSON.stringify(want)}`);
+  }
+  const name = el([], 'Bash '), header = el([name]), tool = el([header]);
+  box.out.set(tool, '04:41:12', true);
+  if (tool.attrs['data-cce-ts'] === '04:41:12' && !('data-cce-ts' in name.attrs)) ok('a tool call\'s stamp goes on its block, not on the tool\'s name');
+  else bad(`a tool call's stamp went on ${'data-cce-ts' in name.attrs ? 'the tool\'s name' : 'nothing'}`);
+}
+
 /* With the usage meter switch off the meter is Claude Code's own again (hidden while more than half the window is free,
    Claude Code's thresholds), and this script's arc trim and outline are removed. */
 console.log('\nthe usage meter, kept on screen or left to Claude Code');
@@ -1301,7 +1329,9 @@ console.log('\nreply efforts');
     // virtual, so the wait costs nothing unless they never come.
     const r = harness.run(browser, { turns: 30, focus: false, subagent: false, settleCapMs: 15000,
       efforts: { sid, css: `#cce-effort{--cce-effort:"${H(1)}=max,${H(40)}=high!${H(80)}"}\n` } });
-    const shown = (r.labels || []).map((l) => String(l || '').split('  ').pop().replace(/^\d+s · /, ''));
+    // The page keeps each part of a stamp together with no-break spaces; only the effort matters here.
+    const plain = (l) => String(l || '').replace(/\u00a0/g, ' ');
+    const shown = (r.labels || []).map((l) => plain(l).split('  ').pop().replace(/^\d+s · /, ''));
     const want = shown.map((_, i) => (i + 1 < 40 ? 'opus-5-5 max' : i + 1 <= 80 ? 'opus-5-5 high' : 'opus-5-5'));
     if (r.error) bad('the page with efforts did not run: ' + r.error);
     else if (shown.length === 90 && shown.join('|') === want.join('|') && r.idleSweeps === 0) {
@@ -1313,7 +1343,7 @@ console.log('\nreply efforts');
        runners, and it must neither miss the efforts nor count the sweeps that apply them as the page failing to rest. */
     const late = harness.run(browser, { turns: 30, focus: false, subagent: false, settleCapMs: 15000,
       efforts: { sid, sidAfterMs: 2500, css: `#cce-effort{--cce-effort:"${H(1)}=max,${H(40)}=high!${H(80)}"}\n` } });
-    const lateShown = (late.labels || []).map((l) => String(l || '').split('  ').pop().replace(/^\d+s · /, ''));
+    const lateShown = (late.labels || []).map((l) => plain(l).split('  ').pop().replace(/^\d+s · /, ''));
     if (late.error) bad('the page with late efforts did not run: ' + late.error);
     else if (lateShown.join('|') === want.join('|') && late.idleSweeps === 0 && late.effortsAt >= 2500) {
       ok(`efforts that come with a later probe are waited for, and the page rests after them (in at ${late.effortsAt} ms)`);

@@ -539,7 +539,7 @@ function run(browser, cfg, script) {
     const at = (r.stdout || '').indexOf(MARK);
     if (at === -1) return { error: 'no result in the page (exit ' + r.status + (r.error ? ', ' + r.error.message : '') + ')' };
     const json = r.stdout.slice(at + MARK.length, r.stdout.indexOf('<', at));
-    return JSON.parse(json.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    return JSON.parse(json.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, '\u00a0').replace(/&amp;/g, '&'));
   } catch (e) {
     return { error: e.message };
   } finally {

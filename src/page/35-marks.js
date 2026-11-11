@@ -42,10 +42,22 @@
     if (!live && textCache) textCache.set(el, out);
     return out;
   };
+  /* Where a stamp may wrap: after a "·", at the gap after the time and before an agent's tag. Every other space becomes a
+     no-break space, so a part such as "ctx 21%" stays on one line. */
+  var NBSP = String.fromCharCode(160), DOT = String.fromCharCode(183);
+  var breakable = function(v){
+    return v.split('  ').map(function(gap){
+      return gap.split(' ' + DOT + ' ').map(function(part){ return part.split(' ').join(NBSP); }).join(NBSP + DOT + ' ');
+    }).join('  ').split(NBSP + '#').join(' #');
+  };
   var marked = new Set(), nextMarked = new Set();
-  var set = function(el, v){
+  /* With `ownLine` the stamp goes on `el` itself, on a line of its own, instead of on its first line of text. The sweep
+     asks for it on a tool call. Its first line is Claude Code's header, the tool's name and then a description that may
+     break anywhere; a stamp in front of the name leaves the description less room and it breaks mid-word. */
+  var set = function(el, v, ownLine){
     if (!v) return;
-    var target = textLineOf(el) || el;
+    v = breakable(v);
+    var target = ownLine ? el : (textLineOf(el) || el);
     nextMarked.add(target);
     if (target.getAttribute(ATTR) !== v) target.setAttribute(ATTR, v);
   };

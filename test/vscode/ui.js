@@ -53,7 +53,9 @@ const LABELS = {
   muted: 'Chimes are muted - click to hear a chime when a turn finishes',
   rail: 'Your messages in this conversation - click one to jump to it',
 };
-const STAMP = '(?:\\d\\d/\\d\\d )?\\d\\d:\\d\\d:\\d\\d';
+/* A stamp as the page writes it: a no-break space inside each part, so it can wrap only after a "·" and after the time. */
+const NB = '\u00a0', SEP = `${NB}\u00b7 `;
+const STAMP = `(?:\\d\\d/\\d\\d${NB})?\\d\\d:\\d\\d:\\d\\d`;
 
 async function run({ exe, profile, env, playwright, model, threads, out, check, note }) {
   const shotsDir = path.join(out, 'shots');
@@ -425,7 +427,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       const st = await until(async () => { const s = await stampsIn(conv); return s.user.every(Boolean) && s.reply.every(Boolean) && s.user.length === tab0.turns.length && s; }, 20000, 500);
       const s = st || await stampsIn(conv);
       check(!!st && s.user.every((x) => new RegExp(`^${STAMP}$`).test(x)), 'each of your messages carries its time', s.user);
-      check(!!st && s.reply.length === tab0.turns.length && s.reply.every((x) => new RegExp(`^${STAMP} {2}\\d+s( · ctx \\d+%)? · sonnet-5-5$`).test(x)),
+      check(!!st && s.reply.length === tab0.turns.length && s.reply.every((x) => new RegExp(`^${STAMP} {2}\\d+s(${SEP}ctx${NB}\\d+%)?${SEP}sonnet-5-5$`).test(x)),
         'each reply carries its time, how long it took and its model', s.reply);
       const edges = await conv.evaluate(() => [...document.querySelectorAll('[class*="userMessage_"]')].map((e) => getComputedStyle(e).borderLeftWidth));
       check(edges.length === tab0.turns.length && edges.every((x) => x === '3px'), 'your messages have the bar down their left edge', edges);
@@ -586,7 +588,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(!!read, 'and bringing the tab to the front clears it', { dots: await dotsOn(t.label), windowFocused: await call('return vscode.window.state.focused;') });
       const after = await stampsIn(conv);
       const latest = after.reply[after.reply.length - 1] || '';
-      check(new RegExp(`^${STAMP} {2}\\d+s · ctx [1-9]\\d*% · cost \\$\\d+\\.\\d{3} · sonnet-5-5( \\w+)?$`).test(latest),
+      check(new RegExp(`^${STAMP} {2}\\d+s${SEP}ctx${NB}[1-9]\\d*%${SEP}cost${NB}\\$\\d+\\.\\d{3}${SEP}sonnet-5-5(${NB}\\w+)?$`).test(latest),
         'the new reply carries its time, how long it took, the context share, the estimated cost and the model', latest);
       await shot('tab-dot-read');
 
@@ -598,6 +600,17 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(!!await until(() => model.seen.slice(before).some((x) => x.tool), 30000, 300), 'a message asking to run the tests gets a Bash tool call from the fake model', model.seen.slice(before));
       const asking = await until(() => conv.evaluate((cmd) => /Allow this bash command\?/.test(document.body.innerText) && document.body.innerText.includes(cmd), RUN), 20000, 500);
       check(!!asking, `Claude Code asks for permission to run ${RUN}`);
+      /* The tool call's stamp is on its block, a line above Claude Code's header, which keeps its description whole. */
+      const toolRow = await until(() => conv.evaluate(() => {
+        const head = [...document.querySelectorAll('[class*="toolSummary_"]')].pop();
+        const block = head && head.closest('[data-testid="assistant-message"] > *');
+        const desc = head && head.querySelector('[class*="toolNameTextSecondary"]');
+        if (!block || !desc || !block.hasAttribute('data-cce-ts')) return null;
+        return { stamp: block.getAttribute('data-cce-ts'), inHeader: !!head.querySelector('[data-cce-ts]'),
+          below: Math.round(head.getBoundingClientRect().top - block.getBoundingClientRect().top), descLines: desc.getClientRects().length };
+      }), 10000, 500);
+      check(!!toolRow && !toolRow.inHeader && toolRow.below >= 8 && toolRow.descLines === 1,
+        'the tool call\'s stamp has a line of its own above Claude Code\'s header, whose description stays on one line', toolRow);
       const waiting = await until(async () => { const d = await dotsOn(t.label); return d && d.waiting >= 6 && d.running === 0 && d.unread === 0 && d; }, 20000, 500);
       check(!!waiting, 'and while it waits the tab\'s logo carries the blue dot', await dotsOn(t.label));
       const listWaiting = await until(async () => { const d = await listDot(tab0); return d && d.waiting >= 4 && d; }, 10000, 500);
@@ -642,6 +655,17 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(!!side && (await claudeTabs()).length === tabsBefore, 'Resume in sidebar opens the conversation in the secondary sidebar, with no new tab',
         { sidebar: await auxiliaryVisible(), tabs: await tabs() });
       await shot('resumed-in-sidebar');
+      /* The sidebar is narrower than a reply's stamp: it wraps between its parts rather than running past its column. */
+      const stampsFit = () => side.evaluate(() => [...document.querySelectorAll('[data-testid="assistant-message"] [data-cce-ts]')].map((e) => {
+        const b = getComputedStyle(e, '::before');
+        return { stamp: e.getAttribute('data-cce-ts'), width: Math.round(parseFloat(b.width)), column: e.clientWidth,
+          past: e.scrollWidth - e.clientWidth, wrapped: parseFloat(b.height) > 2 * parseFloat(b.fontSize) };
+      }));
+      const fit = (side && await until(async () => { const f = await stampsFit(); return f.length >= t2.turns.length && f; }, 10000, 500))
+        || (side ? await stampsFit() : []);
+      check(fit.length >= t2.turns.length && fit.every((f) => f.width <= f.column && f.past <= 0),
+        'in the sidebar every reply\'s stamp stays inside its column', fit);
+      if (fit.length && !fit.some((f) => f.wrapped)) note('the sidebar was wide enough for every stamp, so none had to wrap');
       await exec('workbench.action.closeAuxiliaryBar');
 
       await list.locator('[data-cce-new-session="sidebar"]').first().click();

@@ -99,9 +99,14 @@ const POLL_MS = 3000;
 /** How the panel marks the user's own messages. */
 const USER_SELECTOR = '[class*="userMessage_"]';
 
+/*
+ * The stamp wraps when its column is too narrow, but only at a normal space: 35-marks.js puts no-break spaces inside
+ * each part. white-space is normal rather than the pre-wrap of the reply text it sits in, which would keep the two spaces
+ * after the time; overflow-wrap breaks inside a part only when that part alone is wider than the column.
+ */
 const STAMP_CSS = `[${ATTR}]::before{content:attr(${ATTR});display:inline-block;margin-inline-end:.7em;`
   + 'unicode-bidi:isolate;vertical-align:baseline;font-family:var(--vscode-editor-font-family,monospace);'
-  + 'font-size:.8em;font-weight:normal;font-style:normal;opacity:.6;white-space:nowrap;}';
+  + 'font-size:.8em;font-weight:normal;font-style:normal;opacity:.6;white-space:normal;overflow-wrap:anywhere;}';
 
 /*
  * A bar down the left edge of what you said - carried by the injected script rather than by the live stylesheet.
