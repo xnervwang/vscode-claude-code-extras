@@ -3,7 +3,7 @@
 // All rights reserved.
 
 // The session id, the Claude process id, the directory the conversation started in, where its transcripts are kept,
-// their size, and what the work plan has added to the conversation.
+// their size, what the work plan has added to the conversation, and the token mode.
 // Fragment of the in-page script - see README.md in this folder.
 
   var INFO = null, INFOBOX = null, infoWired = false;
@@ -13,7 +13,8 @@
    * the row says unknown.
    */
   var PROCS = {}, procsWired = false;
-  /* Work plan lines by session id. This extension sends one each time the box asks for the process id. */
+  /* The Work plan line and the token mode by session id. This extension sends them each time the box asks for the
+     process id. */
   var PLANS = {};
   var PROC_WAIT_MS = 20000;
 
@@ -65,7 +66,9 @@
     }
     var size = sigValue('fileSize');
     if (typeof size === 'number') rows.push(['On disk', bytesFmt(size)]);
-    if (sid && PLANS[sid]) rows.push(['Work plan', PLANS[sid]]);
+    var plan = sid && PLANS[sid];
+    if (plan && plan.text) rows.push(['Work plan', plan.text]);
+    if (plan && plan.mode) rows.push(['Token mode', plan.mode]);
     return rows;
   };
 
@@ -108,7 +111,7 @@
       window.addEventListener('message', function(ev){
         var d = ev && ev.data, m = d && d.type === 'from-extension' ? d.message : null;
         if (m && m.type === 'cce_plan' && typeof m.sessionId === 'string' && typeof m.text === 'string') {
-          PLANS[m.sessionId] = m.text;
+          PLANS[m.sessionId] = { text: m.text, mode: typeof m.mode === 'string' ? m.mode : '' };
           if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
           return;
         }

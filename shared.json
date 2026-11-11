@@ -1,5 +1,5 @@
 {
-  "core": "d8a354cd24423ffab30c1d27a0c9d17c80835499",
+  "core": "3de2a83092df99ced0543f65f6a6fe13f8ca9492",
   "files": [
     {
       "path": "build/sync-shared.js",
@@ -131,6 +131,11 @@
       "path": "src/python-offer.js",
       "from": "shared/host/python-offer.js",
       "sha256": "b1fcc195202ee74242541f8b7db8729100d0ca3a59661e03e64d59587b426c36"
+    },
+    {
+      "path": "src/token-mode.js",
+      "from": "src/token-mode.js",
+      "sha256": "3c43bf2f53a34314697755db8f7dcfa24e92ef94365182696d1cd2d0b0e73348"
     }
   ]
 }

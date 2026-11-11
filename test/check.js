@@ -3589,7 +3589,7 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     const setting = manifest.contributes.configuration.properties['claudeCodePlus.workPlan'];
     const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
     if (setting && setting.default === true && /enabled: WORK_PLAN_SETTING,/.test(ext)
-      && /enabled: \(\) => cfg\(\)\.get\(WORK_PLAN_SETTING, true\) !== false,/.test(ext)) {
+      && /enabled: \(\) => runs\(WORK_PLAN_SETTING\),/.test(ext)) {
       ok('the hooks and the source read the same work plan switch, on by default');
     } else bad(`setting ${JSON.stringify(setting && setting.default)}, or extension.js reads another switch`);
   }
@@ -3600,12 +3600,13 @@ console.log('\nswitched off, the work plan costs nothing and keeps nothing');
     const names = [...map.matchAll(/PREFIX \+ '(\w+)'/g)].map((m) => 'claudeCodePlus.' + m[1]);
     if (/WORK_PLAN_SETTING/.test(map)) names.push('claudeCodePlus.workPlan');
     if (/brief: BRIEF_SETTING/.test(map)) names.push('claudeCodePlus.conversationBrief');
+    if (/tellTimeZone: TIME_ZONE_SETTING/.test(map)) names.push('claudeCodePlus.tellClaudeYourTimeZone');
     const scoped = names.filter((n) => props[n] && props[n].scope === 'application');
     if (names.length === 6 && scoped.length === names.length) ok('every setting the hooks read is an application setting');
     else bad(`hook settings ${JSON.stringify(names)}, application-scoped ${JSON.stringify(scoped)}`);
     const brief = props['claudeCodePlus.conversationBrief'];
     if (brief && brief.type === 'boolean' && brief.default === true
-      && /brief: \(\) => cfg\(\)\.get\(BRIEF_SETTING, true\) !== false,/.test(ext)
+      && /brief: \(\) => runs\(BRIEF_SETTING\),/.test(ext)
       && /else if \(e\.affectsConfiguration\(BRIEF_SETTING\)\) claude\.changed\(\);/.test(ext)) {
       ok('the brief is on by default, and turning it on or off lists the conversations again');
     } else bad(`conversationBrief ${JSON.stringify(brief)}, or extension.js does not pass it to the source or redraw on its change`);
@@ -4339,7 +4340,7 @@ console.log("\nthe reader's time zone, told to the model");
   if (/hookSettings\.writeClientZone\(planDir\(\), clientZone\(\)\)/.test(writer) && wroteEmpty === false && leftEmpty === 0
       && zoneRead === 'Asia/Tokyo'
       && /globalThis\.__cceTzHook = \(\) => \{[\s\S]*?writeClientZone\(\);[\s\S]*?\};\n[\s\S]*?\n  writeClientZone\(\);/.test(ext)
-      && /tellTimeZone: PREFIX \+ 'tellClaudeYourTimeZone'/.test(ext) && /"tellTimeZone": True/.test(defaults)) {
+      && /tellTimeZone: TIME_ZONE_SETTING/.test(ext) && /const TIME_ZONE_SETTING = PREFIX \+ 'tellClaudeYourTimeZone';/.test(ext) && /"tellTimeZone": True/.test(defaults)) {
     ok('a reported zone is written where the hook reads it, never as empty, and the setting reaches the hook');
   } else bad('extension.js does not write client-time-zone.json into planDir() on a report, or does not pass tellClaudeYourTimeZone to the hooks');
 }
@@ -5530,9 +5531,9 @@ console.log('\nthe Work plan line of the info box');
   fs.rmSync(dir, { recursive: true, force: true });
   const page = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '80-session-info.js'), 'utf8');
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  if (/m\.type === 'cce_plan'/.test(page) && /rows\.push\(\['Work plan', PLANS\[sid\]\]\)/.test(page)
-    && /type: 'cce_plan', sessionId, text: planInjections\.describe\(m\)/.test(ext) && /WORK_PLAN_SETTING, true\) !== false \? transcriptOf\(sessionId\)/.test(ext)) {
-    ok('the box shows the line the extension sends, which is not worked out while the work plan is off');
+  if (/m\.type === 'cce_plan'/.test(page) && /rows\.push\(\['Work plan', plan\.text\]\)/.test(page) && /rows\.push\(\['Token mode', plan\.mode\]\)/.test(page)
+    && /type: 'cce_plan', sessionId, text: planInjections\.describe\(m\), mode/.test(ext) && /runs\(WORK_PLAN_SETTING\) \? transcriptOf\(sessionId\)/.test(ext)) {
+    ok('the box shows the Work plan line and the token mode the extension sends, and no line while the work plan does not run');
   } else bad('the info box or the extension does not carry the Work plan line');
 }
 
@@ -5962,7 +5963,7 @@ console.log('\nwhat a tick and a change of setting cost');
     delete env.CLAUDE_CONFIG_DIR;
     try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
     catch (e) { r = { threw: e.message }; }
-    if (!r.threw && r.listeners === 1 && JSON.stringify(r.timers) === JSON.stringify([1000, 10000, 30000, 1800000]) && JSON.stringify(r.recent) === JSON.stringify(['abababab-1111-4222-8333-444444444444'])) {
+    if (!r.threw && r.listeners === 2 && JSON.stringify(r.timers) === JSON.stringify([1000, 10000, 30000, 1800000]) && JSON.stringify(r.recent) === JSON.stringify(['abababab-1111-4222-8333-444444444444'])) {
       ok('activation, a change of setting, every timer, the hooks and deactivation run against a stand-in editor without throwing');
     } else bad(`against a stand-in editor: ${JSON.stringify(r).slice(0, 600)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
@@ -8685,6 +8686,167 @@ console.log('\na panel\'s page getting the focus');
     && /delete globalThis\.__cceFocusHook/.test(ext)) {
     ok('extension.js passes page focus to Claude Code\'s source');
   } else bad('extension.js does not pass the page focus on');
+}
+
+/* ── the token mode ──
+   agentPlus.tokenMode in Agent Plus decides which of the three features that add to Claude's context run
+   (src/token-mode.js). For each mode the checks read config.json, which the hooks read, count the redraws of Agent
+   Plus's list, and look for the notice shown when a feature's own setting is changed outside Custom. */
+console.log('\nthe token mode');
+{
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-mode-')));
+  try {
+    const stub = path.join(home, 'vscode-stub.js');
+    fs.writeFileSync(stub, `
+      const listeners = [], values = {}, updates = [], told = [], disposable = { dispose() {} }, state = { source: null };
+      const core = { isActive: true, exports: { agentPlus: { version: '1.0.0',
+        registerSource: (s) => { state.source = s; return { accepted: true, code: '', reason: '', registration: disposable }; } } } };
+      module.exports = { state, listeners, values, updates, told, TabInputWebview: class {}, version: '1.120.0', env: { language: 'en' },
+        Uri: { file: (p) => ({ fsPath: p }) }, RelativePattern: class {}, ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+        workspace: { isTrusted: true, onDidGrantWorkspaceTrust: () => disposable, workspaceFolders: [],
+          getConfiguration: (section) => ({ get: (k, d) => { const key = section ? section + '.' + k : k; return key in values ? values[key] : d; },
+            inspect: () => undefined, update: async (k, v) => { updates.push([section + '.' + k, v]); values[section + '.' + k] = v; } }),
+          onDidChangeConfiguration: (fn) => { listeners.push(fn); return disposable; }, onDidChangeWorkspaceFolders: () => disposable },
+        window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
+          showInformationMessage: async (text, ...buttons) => { told.push([text, buttons]); return undefined; },
+          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null } },
+        commands: { registerCommand: () => disposable, executeCommand: async () => {} },
+        extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
+    const root = path.join(__dirname, '..');
+    const script = `
+      const Module = require('module'), realResolve = Module._resolveFilename, path = require('path'), fs = require('fs');
+      Module._resolveFilename = function (request, ...rest) { return request === 'vscode' ? ${JSON.stringify(stub)} : realResolve.call(this, request, ...rest); };
+      const vs = require(${JSON.stringify(stub)});
+      const ext = require(${JSON.stringify(path.join(root, 'extension.js'))});
+      const store = path.join(${JSON.stringify(home)}, 'storage');
+      const config = path.join(${JSON.stringify(home)}, '.claude', 'plugins', 'data', 'agent-work-plan-claude-code-extras', 'config.json');
+      const memo = () => { const m = new Map(); return { get: (k, d) => (m.has(k) ? m.get(k) : d), update: async (k, v) => { m.set(k, v); } }; };
+      const subs = [], keep = setInterval;
+      global.setInterval = () => keep(() => {}, 1 << 30);
+      const hooks = () => { try { const c = JSON.parse(fs.readFileSync(config, 'utf8')); return [c.enabled, c.tellTimeZone, c.brief]; } catch (_) { return null; } };
+      const change = (...keys) => { for (const fn of vs.listeners) fn({ affectsConfiguration: (k) => keys.some((x) => x === k || x.startsWith(k + '.')) }); };
+      const pause = () => new Promise((r) => setTimeout(r, 50));
+      (async () => {
+        const out = { threw: '', hooks: {}, features: {}, redraws: {} };
+        try {
+          await ext.activate({ subscriptions: subs, extensionPath: ${JSON.stringify(root)}, globalState: memo(), workspaceState: memo(),
+            extension: { id: 'x.y', packageJSON: require(${JSON.stringify(path.join(root, 'package.json'))}) },
+            globalStorageUri: { fsPath: store }, logUri: { fsPath: path.join(store, 'logs', 'exthost1', 'x.y') } });
+          await new Promise((r) => setTimeout(r, 200));
+          out.hooks.start = hooks();
+          let redraws = 0;
+          if (vs.state.source) vs.state.source.onDidChangeConversations(() => { redraws++; });
+          for (const mode of ['interface', 'essential', 'all']) {
+            vs.values['agentPlus.tokenMode'] = mode;
+            const before = redraws;
+            change('agentPlus.tokenMode');
+            await pause();
+            out.hooks[mode] = hooks();
+            out.features[mode] = vs.state.source ? JSON.stringify(vs.state.source.features) : null;
+            out.redraws[mode] = redraws - before;
+          }
+          Object.assign(vs.values, { 'claudeCodePlus.workPlan': true, 'claudeCodePlus.tellClaudeYourTimeZone': false, 'claudeCodePlus.conversationBrief': false });
+          vs.values['agentPlus.tokenMode'] = 'custom'; change('agentPlus.tokenMode'); await pause(); out.hooks.custom = hooks();
+          vs.values['agentPlus.tokenMode'] = 'all'; change('agentPlus.tokenMode'); await pause(); out.hooks.allAgain = hooks();
+          vs.values['agentPlus.tokenMode'] = 'custom'; change('agentPlus.tokenMode'); await pause(); out.hooks.customAgain = hooks();
+          out.updates = vs.updates.filter(([k]) => k.startsWith('claudeCodePlus.'));
+          vs.values['agentPlus.tokenMode'] = 'essential';
+          change('claudeCodePlus.conversationBrief'); change('claudeCodePlus.conversationBrief'); await pause();
+          vs.values['agentPlus.tokenMode'] = 'custom';
+          change('claudeCodePlus.workPlan'); await pause();
+          out.told = vs.told.filter(([t]) => /token mode/.test(t));
+          vs.values['agentPlus.tokenMode'] = 'essential';
+          out.status = typeof ext._tokenModeLine === 'function' ? ext._tokenModeLine() : null;
+        } catch (e) { out.threw = String(e && e.stack); }
+        for (const s of subs) { try { s.dispose(); } catch (e) { out.threw = out.threw || 'dispose: ' + e.message; } }
+        process.stdout.write(JSON.stringify(out));
+        process.exit(0);
+      })();`;
+    let r;
+    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
+    delete env.CLAUDE_CONFIG_DIR;
+    try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
+    catch (e) { r = { threw: e.message }; }
+    const h = r.hooks || {};
+    const want = { start: [true, true, true], interface: [false, false, false], essential: [true, true, false], all: [true, true, true] };
+    if (!r.threw && ['start', 'interface', 'essential', 'all'].every((k) => JSON.stringify(h[k]) === JSON.stringify(want[k]))) {
+      ok('each mode hands the hooks its work plan, time zone and brief, and a change of mode rewrites config.json at once');
+    } else bad(`the hooks were handed ${JSON.stringify(h)} (${(r.threw || '').slice(0, 300)})`);
+    if (JSON.stringify(h.custom) === '[true,false,false]' && JSON.stringify(h.allAgain) === '[true,true,true]'
+      && JSON.stringify(h.customAgain) === '[true,false,false]' && Array.isArray(r.updates) && !r.updates.length) {
+      ok('in Custom each feature follows its own setting, and no mode writes those settings');
+    } else bad(`custom ${JSON.stringify(h.custom)}, all ${JSON.stringify(h.allAgain)}, custom again ${JSON.stringify(h.customAgain)}, writes ${JSON.stringify(r.updates)}`);
+    const f = r.features || {}, d = r.redraws || {};
+    if (f.interface === '[]' && f.essential === '[]' && f.all === '["brief"]' && d.interface > 0 && d.essential > 0 && d.all > 0) {
+      ok('the brief is offered to Agent Plus only in a mode that runs it, and every change of mode redraws its list');
+    } else bad(`features ${JSON.stringify(f)}, redraws ${JSON.stringify(d)}`);
+    const told = r.told || [];
+    if (told.length === 1 && /^Claude Code Plus: the token mode is Essential features, so claudeCodePlus\.conversationBrief has no effect/.test(told[0][0])
+      && JSON.stringify(told[0][1]) === '["Switch to Custom"]') {
+      ok('outside Custom, changing a feature\'s own setting says once that it has no effect, with a button to switch to Custom');
+    } else bad(`the notices were ${JSON.stringify(told)}`);
+    if (typeof r.status === 'string' && /^Token mode: Essential features \(agentPlus\.tokenMode\); in Claude Code: work plan on, time-zone note on, conversation brief off$/.test(r.status)) {
+      ok('Show Status names the mode and what it leaves running');
+    } else bad(`Show Status says ${JSON.stringify(r.status)}`);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+
+  /* Interface features takes the plugin out of Claude Code, and leaving it puts it back - unless it was the user who
+     stopped loading it. */
+  const pi = require('../src/plugin-install');
+  const box = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-unload-')));
+  try {
+    const cfgDir = path.join(box, '.claude'), dir = path.join(cfgDir, 'plugins', 'data', 'agent-work-plan-claude-code-extras');
+    fs.mkdirSync(dir, { recursive: true });
+    const settings = path.join(cfgDir, 'settings.json');
+    const setEnabled = (v) => fs.writeFileSync(settings, JSON.stringify({ enabledPlugins: v === undefined ? {} : { [pi.REF]: v } }));
+    fs.writeFileSync(path.join(cfgDir, 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { [pi.REF]: [{}] } }));
+    const calls = [];
+    const call = async (args) => { calls.push(args.join(' ')); setEnabled(args[1] === 'enable'); return { ok: true, said: 'ok' }; };
+    const marker = () => fs.existsSync(path.join(dir, pi.UNLOADED_MARKER || 'none'));
+    const go = (unload, extra = {}) => (typeof pi.followTokenMode === 'function'
+      ? pi.followTokenMode(Object.assign({ unload, dir, config: cfgDir, call }, extra)) : Promise.resolve('missing'));
+    (async () => {
+      setEnabled(true);
+      const a = await go(true), aMark = marker(), aCalls = calls.splice(0);
+      const b = await go(true), bCalls = calls.splice(0);
+      const c = await go(false), cMark = marker(), cCalls = calls.splice(0);
+      setEnabled(false);
+      const d = await go(true), dMark = marker(), dCalls = calls.splice(0);
+      const e = await go(false), eCalls = calls.splice(0);
+      setEnabled(true);
+      await go(true); calls.splice(0);
+      const failing = await go(false, { call: async () => ({ ok: false, said: 'no' }) });
+      const keep = marker();
+      return { a, aMark, aCalls, b, bCalls, c, cMark, cCalls, d, dMark, dCalls, e, eCalls, failing, keep };
+    })().then((o) => {
+      if (o.a === 'unloaded' && o.aMark && JSON.stringify(o.aCalls) === JSON.stringify(['plugin disable ' + pi.REF])
+        && o.b === 'unloaded' && !o.bCalls.length && o.c === 'loaded' && !o.cMark && JSON.stringify(o.cCalls) === JSON.stringify(['plugin enable ' + pi.REF])) {
+        ok('Interface features stops Claude Code loading the plugin and marks that it did, and the next mode loads it again');
+      } else bad(`unloading and loading: ${JSON.stringify(o)}`);
+      if (o.d === 'left' && !o.dMark && !o.dCalls.length && o.e === 'left' && !o.eCalls.length) {
+        ok('a plugin the user stopped loading is left as it is, going into Interface features and out of it');
+      } else bad(`a plugin stopped by the user: ${JSON.stringify(o)}`);
+      if (o.failing === 'failed' && o.keep) ok('when loading it again fails, the mark stays for the next try');
+      else bad(`a failed load: ${JSON.stringify(o)}`);
+      fs.rmSync(box, { recursive: true, force: true });
+    }).catch((e) => { bad('unloading and loading threw: ' + e.message); fs.rmSync(box, { recursive: true, force: true }); });
+  } catch (e) { bad('unloading and loading: ' + e.message); fs.rmSync(box, { recursive: true, force: true }); }
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const props = pkg.contributes.configuration.properties;
+  const tm = require('../src/token-mode');
+  const mine = tm.SWITCHES.filter((x) => x.key.startsWith('claudeCodePlus.')).map((x) => x.key);
+  const short = mine.filter((k) => !props[k] || !String(props[k].markdownDescription || '').trim().endsWith(tm.ONLY_IN_CUSTOM));
+  if (mine.length === 3 && !short.length) ok('each of the three features\' settings ends its description saying it is used only in Custom');
+  else bad(`settings without the Custom sentence: ${JSON.stringify(short)} of ${JSON.stringify(mine)}`);
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const sec = readme.slice(readme.indexOf('## What it costs in tokens'));
+  const lines = sec.split('\n'), head = lines.find((l) => l.startsWith('| Feature |')) || '';
+  const cols = head.split('|').map((c) => c.trim()).filter(Boolean).slice(1);
+  const custom = lines.filter((l) => l.startsWith('| ') && l.trim().endsWith('|')).map((l) => l.split('|').map((c) => c.trim()).filter(Boolean)).filter((c) => c.length === 5).map((c) => c[4]);
+  if (JSON.stringify(cols) === JSON.stringify(tm.MODES.map((m) => m.label)) && mine.every((k) => custom.includes('`' + k + '`'))) {
+    ok('the README\'s token section opens with the four modes, its Custom column naming the three settings');
+  } else bad(`the README's mode table has columns ${JSON.stringify(cols)} and Custom ${JSON.stringify(custom)}`);
 }
 
 console.log('\nRestricted Mode');

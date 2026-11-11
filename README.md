@@ -102,11 +102,24 @@ Verified against Claude Code 2.1.322.
 | Background commands | See a count such as `1 task` while a background build, test run or `sleep` timer runs, with the list one click away. | Footer |
 | Tabs back after a restart | Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection, are opened again when it starts. Tabs you closed while connected stay closed. | Editor tabs |
 | Status dots | A Claude Code tab's logo shows a green dot while Claude works, where Claude Code shows none, and a red one instead of Claude Code's orange when it finished while you were away. The session list uses the same green and red. | Editor tabs, session list |
-| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size, and how much the work plan has added since the last compaction; click a value to copy it. | Footer button |
+| Token mode | Agent Plus's `agentPlus.tokenMode`, chosen from its entry in the status bar, decides which of the work plan, the time-zone note and the brief add to Claude's context; each one's own setting applies only in Custom. See [What it costs in tokens](#what-it-costs-in-tokens). | Status bar (Agent Plus) |
+| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size, how much the work plan has added since the last compaction, and the token mode; click a value to copy it. | Footer button |
 
 ## What it costs in tokens
 
-The tables show the text Claude Code Plus adds to what Claude Code sends the model. All of it comes from the work plan plugin Claude Code Plus registers with Claude Code; what Claude Code Plus draws in VS Code sends nothing to the model. Text added to a conversation stays in context and goes with every later model call until compaction replaces the conversation with a summary. A token is about four characters of English.
+| Feature | Interface features | Essential features | All features | Custom |
+| --- | --- | --- | --- | --- |
+| Work plan | Off, plugin not loaded | On | On | `claudeCodePlus.workPlan` |
+| Time zone | Off | On | On | `claudeCodePlus.tellClaudeYourTimeZone` |
+| Conversation brief | Off | Off | On | `claudeCodePlus.conversationBrief` |
+
+Claude Code Plus follows Agent Plus's `agentPlus.tokenMode` setting, which defaults to All features. Outside Custom, the three settings in the table's Custom column have no effect, and changing modes leaves their values as they are. Changing one of those settings outside Custom shows a notice with a Switch to Custom button.
+
+In Interface features, Claude Code does not load the work plan plugin, just as when you run `Claude Code Plus: Stop Loading the Work Plan Plugin`. Choosing another mode loads it again unless you stopped loading it yourself. Changes to plugin loading and the work plan skill in Claude Code's list of skills apply only to conversations started after the mode change.
+
+In a running conversation, a mode change applies from the next message to work plan injection and reminders, conversation brief requests, and the time zone. `Claude Code Plus: Show Status` shows the mode and which of the three features run. The information button in the footer of a Claude Code conversation names the mode.
+
+The tables below show the text Claude Code Plus adds to what Claude Code sends the model. All of it comes from the work plan plugin Claude Code Plus registers with Claude Code; what Claude Code Plus draws in VS Code sends nothing to the model. Text added to a conversation stays in context and goes with every later model call until compaction replaces the conversation with a summary. A token is about four characters of English.
 
 ### Added to every message
 
@@ -134,7 +147,7 @@ The tables show the text Claude Code Plus adds to what Claude Code sends the mod
 
 | What | When | At most | Turned off by |
 | --- | --- | --- | --- |
-| The work plan skill in Claude Code's list of skills | Every call | Its name and a 573-character description, about 110 tokens | `Claude Code Plus: Stop Loading the Work Plan Plugin` |
+| The work plan skill in Claude Code's list of skills | Every call | Its name and a 573-character description, about 110 tokens | `Claude Code Plus: Stop Loading the Work Plan Plugin`, or the Interface features token mode |
 
 ### Costing nothing
 
@@ -161,18 +174,19 @@ Open `Claude Code Plus: Settings` for all 37 settings. Most take effect without 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `claudeCodePlus.workPlan` | on | Turns the work plan on or off. When off, Claude is told nothing about plans and cannot write one. |
+| `claudeCodePlus.workPlan` | on | Turns the work plan on or off in Custom. When off, Claude is told nothing about plans and cannot write one. |
 | `claudeCodePlus.workPlanOfferMinTurns` | 3 | Messages you must have sent before a conversation without a plan is offered one. |
 | `claudeCodePlus.workPlanOfferMinToolCalls` | 25 | Tool calls one turn must make before that offer. |
 | `claudeCodePlus.workPlanQuietWhenReplyMatches` | empty | A regular expression tested on the latest reply. If it matches, the prompts before and after compaction are not sent. Use it for conversations that relay another model's replies word for word. When empty, it never matches. |
-| `claudeCodePlus.conversationBrief` | on | Each conversation is asked to keep a brief: a summary, and where it stands now. Clicking the conversation in Agent Plus's Conversations panel then shows the brief instead of going to the conversation. |
+| `claudeCodePlus.conversationBrief` | on | In Custom, each conversation is asked to keep a brief: a summary, and where it stands now. Clicking the conversation in Agent Plus's Conversations panel then shows the brief instead of going to the conversation. |
 
 **To turn off**
 
 | What | How |
 | --- | --- |
 | Timestamps, reply figures and sub-agent tags | Set `claudeCodePlus.enabled` to off. Every other addition has its own `claudeCodePlus.show.*` setting. The patch stays and its scripts keep running. |
-| Your time zone in Claude's context | Set `claudeCodePlus.tellClaudeYourTimeZone` to off. |
+| Everything added to Claude's context | Choose Interface features in Agent Plus's token mode entry in the status bar. |
+| Your time zone in Claude's context | Choose a token mode without it, or in Custom set `claudeCodePlus.tellClaudeYourTimeZone` to off. |
 | Work plan plugin, skill description included | Run `Claude Code Plus: Stop Loading the Work Plan Plugin`. |
 | Reopening Claude Code tabs VS Code did not restore | Set `claudeCodePlus.reopenDroppedTabs` to off. |
 | Pins on the session list | Set `claudeCodePlus.sessionPins` to off. Pinned conversations are then cleaned up and archived as usual. |

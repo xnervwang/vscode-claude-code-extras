@@ -299,6 +299,51 @@ async function disable(dirs) {
 }
 
 
+/* What `claude plugin enable` and `disable` say when the plugin is already in the state asked for. */
+const ALREADY = /not enabled|already disabled|is disabled|already enabled|is enabled/i;
+
+async function enable(dirs) {
+  const claudeBin = findClaude(dirs);
+  if (!claudeBin) return { ok: false, said: 'the claude binary is not where this extension can see it' };
+  const r = await run(claudeBin, ['plugin', 'enable', REF]);
+  if (r.ok || ALREADY.test(r.said)) return { ok: true, said: 'told Claude Code to load ' + REF + ' again' };
+  return { ok: false, said: r.said };
+}
+
+/** Whether the plugin is enabled in Claude Code's settings.json, where it counts as enabled unless set to false. */
+function enabledIn(dir = configDir()) {
+  let d = null;
+  try { d = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')); } catch (_) { return true; }
+  const on = d && typeof d === 'object' && d.enabledPlugins && typeof d.enabledPlugins === 'object' ? d.enabledPlugins[REF] : undefined;
+  return on !== false;
+}
+
+/*
+ * In Interface features the plugin is disabled in Claude Code, and the next mode enables it again. The marker in the
+ * plan directory records that the mode disabled it, so a plugin the user disabled is left alone in every mode.
+ * `call(args)` runs Claude Code's command line. Resolves to 'unloaded', 'loaded', 'left' or 'failed'.
+ */
+const UNLOADED_MARKER = 'unloaded-by-token-mode';
+async function followTokenMode({ unload, dirs = [], dir = dataPath(), config = configDir(), call }) {
+  const marker = path.join(dir, UNLOADED_MARKER);
+  const claude = call || (async (args) => {
+    const bin = findClaude(dirs);
+    return bin ? run(bin, args) : { ok: false, said: 'the claude binary is not where this extension can see it' };
+  });
+  if (unload) {
+    if (!listed(config) || !enabledIn(config)) return fs.existsSync(marker) ? 'unloaded' : 'left';
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(marker, new Date().toISOString() + '\n');
+    const r = await claude(['plugin', 'disable', REF]);
+    return r.ok || ALREADY.test(r.said) ? 'unloaded' : 'failed';
+  }
+  if (!fs.existsSync(marker)) return 'left';
+  const r = await claude(['plugin', 'enable', REF]);
+  if (!r.ok && !ALREADY.test(r.said)) return 'failed';
+  try { fs.unlinkSync(marker); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+  return 'loaded';
+}
+
 /** Whether Claude Code's own records list the plugin as installed. */
 function listed(dir = configDir()) {
   const plugins = readRecord(dir, 'installed_plugins.json');
@@ -307,7 +352,7 @@ function listed(dir = configDir()) {
 }
 
 module.exports = {
-  install, disable, removeSync, rescuePlans, listed, RESCUE_PREFIX, findClaude, findPython, fitHooks, digest, stage, registrationGone, MARKETPLACE,
+  install, disable, enable, enabledIn, followTokenMode, UNLOADED_MARKER, removeSync, rescuePlans, listed, RESCUE_PREFIX, findClaude, findPython, fitHooks, digest, stage, registrationGone, MARKETPLACE,
   PLUGIN, REF, BINARY, PYTHONS, SKILL_RUN,
   DATA_DIR,
 };

@@ -27,6 +27,7 @@ const efforts = require('./src/efforts');
 const { sweepOrphans, planDir, readPlan } = require('./src/workplan');
 const { transcriptOf } = require('./src/claude-files');
 const planInjections = require('./src/plan-injections');
+const tokenMode = require('./src/token-mode');
 const waiting = require('./src/waiting');
 const { createClaudeSource } = require('./src/claude-source');
 const coreLink = require('./src/core-link');
@@ -74,6 +75,10 @@ const RECENT_SETTING = PREFIX + 'recentClosedSessions';
 const HIDE_BG_SETTING = PREFIX + 'hideBackgroundSessions';
 const WORK_PLAN_SETTING = PREFIX + 'workPlan';
 const BRIEF_SETTING = PREFIX + 'conversationBrief';
+const TIME_ZONE_SETTING = PREFIX + 'tellClaudeYourTimeZone';
+/* The three settings that agentPlus.tokenMode overrides outside Custom (src/token-mode.js); each is read through runs(). */
+const MODE_SWITCHES = tokenMode.SWITCHES.filter((s) => s.key.startsWith(PREFIX)).map((s) => s.key);
+const runs = (key) => tokenMode.effective(vscode, key);
 /* Read by the plugin's hooks, which are separate processes and cannot see editor settings. Keys match plan_path.py.
    package.json makes them application settings, since they go into one file that every conversation on the machine
    reads. */
@@ -82,7 +87,7 @@ const HOOK_SETTINGS = {
   offerMinTurns: PREFIX + 'workPlanOfferMinTurns',
   offerMinToolCalls: PREFIX + 'workPlanOfferMinToolCalls',
   quietWhenReplyMatches: PREFIX + 'workPlanQuietWhenReplyMatches',
-  tellTimeZone: PREFIX + 'tellClaudeYourTimeZone',
+  tellTimeZone: TIME_ZONE_SETTING,
   brief: BRIEF_SETTING,
 };
 
@@ -489,7 +494,8 @@ function start(context, log, renamed, handing = false) {
     registerCommand('status', () => {
       const lines = [];
       for (const adapter of ADAPTERS) for (const d of installs(adapter, true)) lines.push(`${adapter.name} ${path.basename(d)}: ${adapter.status(d)}`);
-      vscode.window.showInformationMessage('Claude Code Plus — ' + (lines.join(' | ') || 'Claude Code is not installed') + (removed() ? ' (removed)' : ''));
+      vscode.window.showInformationMessage('Claude Code Plus — ' + (lines.join(' | ') || 'Claude Code is not installed') + (removed() ? ' (removed)' : '')
+        + ' | ' + tokenModeLine());
     }),
     /* Every setting this extension has, in the editor's own settings UI: search, per-workspace values, sync and a JSON
        view come with it, and none of it is ours to maintain. */
@@ -597,7 +603,7 @@ function start(context, log, renamed, handing = false) {
   function writeHookSettings() {
     const values = {};
     for (const [key, setting] of Object.entries(HOOK_SETTINGS)) {
-      const v = cfg().get(setting);
+      const v = MODE_SWITCHES.includes(setting) ? runs(setting) : cfg().get(setting);
       if (typeof v === 'boolean') values[key] = v;
       else if (typeof v === 'number' && v >= 1) values[key] = Math.floor(v);
       else if (typeof v === 'string' && v) values[key] = v;
@@ -677,13 +683,12 @@ function start(context, log, renamed, handing = false) {
      half a minute old. The Work plan line is sent separately, without waiting for `claude agents`. */
   globalThis.__cceProcessHook = (sessionId) => {
     if (removed() || !enabled() || switchedOff().includes('footerInfo')) return;
-    const transcript = cfg().get(WORK_PLAN_SETTING, true) !== false ? transcriptOf(sessionId) : '';
-    if (transcript) {
-      planInjections.measure(transcript).then((m) => {
-        const reply = { type: 'cce_plan', sessionId, text: planInjections.describe(m) };
-        if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
-      }).catch((e) => log.appendLine('work plan line for the info box: ' + (e && e.message)));
-    }
+    const transcript = runs(WORK_PLAN_SETTING) ? transcriptOf(sessionId) : '';
+    const mode = tokenMode.labelOf(tokenMode.modeNow(vscode));
+    (transcript ? planInjections.measure(transcript) : Promise.resolve(null)).then((m) => {
+      const reply = { type: 'cce_plan', sessionId, text: planInjections.describe(m), mode };
+      if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
+    }).catch((e) => log.appendLine('work plan line for the info box: ' + (e && e.message)));
     claude.freshAgents().then((r) => {
       const reply = { type: 'cce_process', sessionId, pids: r.records ? waiting.pidsOf(r.records, sessionId) : null };
       if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
@@ -698,8 +703,8 @@ function start(context, log, renamed, handing = false) {
   /* Created here because it reads globals the patched host sets in this process. */
   const claude = createClaudeSource({
     planDir,
-    enabled: () => cfg().get(WORK_PLAN_SETTING, true) !== false,
-    brief: () => cfg().get(BRIEF_SETTING, true) !== false,
+    enabled: () => runs(WORK_PLAN_SETTING),
+    brief: () => runs(BRIEF_SETTING),
     timeZone: () => clientZone(),
     listAgents: () => waiting.listAgents(pluginInstall.findClaude(claudeFolders())),
     folders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
@@ -1267,7 +1272,27 @@ function start(context, log, renamed, handing = false) {
     if (r.waitMs && !rescueTimer) rescueTimer = setTimeout(() => { rescueTimer = 0; restorePlans(); }, r.waitMs + 1000);
   };
   context.subscriptions.push({ dispose: () => { if (rescueTimer) clearTimeout(rescueTimer); } });
-  syncPlugin(false).then(restorePlans, (e) => log.appendLine('work plan plugin: ' + ((e && e.message) || e)));
+  /*
+   * In Interface features Claude Code is told to stop loading the work plan plugin, and in the next mode to load it again
+   * (followTokenMode in src/plugin-install.js). One change at a time in this window, so that a quick change of mode and
+   * back cannot interleave them. Claude Code reads which plugins to load when a conversation starts, so either applies
+   * to conversations started afterwards.
+   */
+  let following = Promise.resolve('left');
+  const followTokenMode = () => {
+    following = following.then(async () => {
+      if (removed() || uninstalling() || replaced()) return 'left';
+      const label = tokenMode.labelOf(tokenMode.modeNow(vscode));
+      const r = await pluginInstall.followTokenMode({ unload: tokenMode.unloadsPlugin(tokenMode.modeNow(vscode)), dirs: claudeFolders() });
+      if (r === 'unloaded') log.appendLine(`work plan plugin: the token mode is ${label}, so Claude Code stops loading it in conversations started from now on`);
+      else if (r === 'loaded') log.appendLine(`work plan plugin: the token mode is ${label}, so Claude Code loads it again in conversations started from now on`);
+      else if (r === 'failed') log.appendLine(`work plan plugin: could not follow the token mode ${label}; it is tried again at the next change or start`);
+      return r;
+    }).catch((e) => { log.appendLine('work plan plugin under the token mode: ' + ((e && e.message) || e)); return 'failed'; });
+    return following;
+  };
+  syncPlugin(false).then((unregistered) => { restorePlans(unregistered); return followTokenMode(); },
+    (e) => log.appendLine('work plan plugin: ' + ((e && e.message) || e)));
   /*
    * The old extension's uninstall hook takes the patch out of Claude Code and unregisters the plugin, and the editor
    * runs it at its next start, when it deletes that extension's folder, which can happen after this extension is
@@ -1324,6 +1349,7 @@ function start(context, log, renamed, handing = false) {
     .concat(webview.SWITCHES.map((k) => PREFIX + 'show.' + k));
   const listAgain = () => { claude.invalidate(); claude.changed(); };
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(listAgain));
+  context.subscriptions.push(tokenMode.warnOutsideCustom(vscode, MODE_SWITCHES, { who: 'Claude Code Plus', log: (m) => log.appendLine(m) }));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     settings = null;
     if (Object.values(HOOK_SETTINGS).some((k) => e.affectsConfiguration(k))) writeHookSettings();
@@ -1333,8 +1359,11 @@ function start(context, log, renamed, handing = false) {
     if (e.affectsConfiguration(RECENT_SETTING) || e.affectsConfiguration(SETTING)) {
       try { if (typeof globalThis.__cceSendSessionStates === 'function') globalThis.__cceSendSessionStates(); } catch (_) { /* next update */ }
     }
-    if (e.affectsConfiguration(WORK_PLAN_SETTING)) listAgain();
+    const modeChanged = e.affectsConfiguration(tokenMode.SETTING);
+    if (modeChanged) writeHookSettings();
+    if (modeChanged || e.affectsConfiguration(WORK_PLAN_SETTING)) listAgain();
     else if (e.affectsConfiguration(BRIEF_SETTING)) claude.changed();
+    if (modeChanged) followTokenMode();
     if (e.affectsConfiguration(HIDE_BG_SETTING)) {
       try { if (typeof globalThis.__cceSessionsChanged === 'function') globalThis.__cceSessionsChanged(); } catch (_) { /* the list catches up on its next read */ }
     }
@@ -1367,4 +1396,12 @@ function deactivate() {
   try { removal.finishLater(selfPath); } catch (_) { /* likewise */ }
 }
 
-module.exports = { activate, deactivate, renameSettings };
+/* The token mode line of Show Status: the mode, and which of the three features it runs. */
+function tokenModeLine() {
+  const what = tokenMode.SWITCHES.filter((s) => MODE_SWITCHES.includes(s.key))
+    .map((s) => `${tokenMode.featureOf(s.feature).name} ${runs(s.key) ? 'on' : 'off'}`);
+  return `Token mode: ${tokenMode.labelOf(tokenMode.modeNow(vscode))} (${tokenMode.SETTING}); in Claude Code: ${what.join(', ')}`;
+}
+
+/* `_tokenModeLine` is for the tests. */
+module.exports = { activate, deactivate, renameSettings, _tokenModeLine: tokenModeLine };
