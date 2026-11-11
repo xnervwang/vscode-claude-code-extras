@@ -120,6 +120,9 @@ function writeSettings(user, model, key) {
     'http.proxy': NO_PROXY_TO, 'http.proxySupport': 'override', 'http.noProxy': ['127.0.0.1', 'localhost'],
     /* A modal dialog drawn in the page rather than by the system, so ui.js can read it and answer it on every platform. */
     'window.dialogStyle': 'custom',
+    /* Tabs wrap instead of scrolling. On macOS and Windows the window opens at VS Code's default 1024 px, and a tab bar
+       that narrow can scroll the Claude Code tab's dot out of view. */
+    'workbench.editor.wrapTabs': true,
     /* Manual, so that a tool call stops for permission: that is the turn whose tab carries the blue dot. */
     'claudeCode.initialPermissionMode': 'default',
     /* No account: the login prompt is off, and the CLI sends each turn to fake-model.js with a fake API key

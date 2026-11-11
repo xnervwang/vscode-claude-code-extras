@@ -501,8 +501,10 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         const b = document.getElementById('cce-info');
         return b && b.style.display === 'block' && Object.fromEntries([...b.children].map((r) => [r.children[0].textContent, r.children[1].textContent]));
       }), 5000, 200);
-      check(!!info && info.Session === tab0.id && info.Project === profile.folder
-        && info.Transcripts === `~/.claude/projects/${folderName(profile.folder)}` && /^\d/.test(info['On disk'] || ''),
+      /* Windows paths are compared without case: VS Code hands the folder over with its drive letter in lower case. */
+      const samePath = (a, b) => (process.platform === 'win32' ? String(a).toLowerCase() === String(b).toLowerCase() : a === b);
+      check(!!info && info.Session === tab0.id && samePath(info.Project, profile.folder)
+        && samePath(info.Transcripts, `~/.claude/projects/${folderName(profile.folder)}`) && /^\d/.test(info['On disk'] || ''),
       'the information button opens the conversation\'s session id, folder, transcripts and their size', info);
       const fits = await conv.evaluate(() => { const r = document.getElementById('cce-info').getBoundingClientRect(); return { left: r.left, right: r.right, page: innerWidth }; });
       check(fits.left >= 0 && fits.right <= fits.page, 'and the box lies inside the page', fits);
