@@ -497,7 +497,14 @@
         s.padding = '4px 10px'; s.cursor = 'pointer';
         s.whiteSpace = 'nowrap'; s.overflow = 'hidden'; s.textOverflow = 'ellipsis';
         s.color = 'var(--vscode-foreground, #ccc)';
-        row.textContent = (when ? when + '  ' : '') + (text.length > 44 ? text.slice(0, 44) + String.fromCharCode(8230) : text);
+        // Digits of one width, so the times line up and each question starts where the one above it does.
+        if (when) {
+          var at = document.createElement('span');
+          at.style.fontVariantNumeric = 'tabular-nums'; at.style.fontKerning = 'none';
+          at.textContent = when;
+          row.appendChild(at);
+        }
+        row.appendChild(document.createTextNode((when ? '  ' : '') + (text.length > 44 ? text.slice(0, 44) + String.fromCharCode(8230) : text)));
         row.addEventListener('mouseenter', function(){
           row.style.background = 'var(--vscode-list-hoverBackground, rgba(255,255,255,0.08))';
           showTip(row, (when ? when + String.fromCharCode(10) : '') + text.slice(0, 220));

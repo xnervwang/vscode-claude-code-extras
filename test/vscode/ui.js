@@ -460,17 +460,17 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         const rows = [...(p.children[1] || { children: [] }).children];
         return { filter: !!p.querySelector('input[placeholder="Filter your messages"]'), rows: rows.map((r) => r.textContent),
           times: rows.map((r) => {
-            const n = r.firstChild;
-            if (!n || n.nodeType !== 3) return null;
-            const range = document.createRange();
-            range.setStart(n, 0); range.setEnd(n, Math.min(8, n.length));
-            const b = range.getBoundingClientRect();
-            return { x: b.left, y: b.top, width: b.width, height: b.height };
+            const t = r.firstElementChild;
+            if (!t) return null;
+            const b = t.getBoundingClientRect();
+            return { x: b.left, y: b.top, width: b.width, height: b.height, end: Math.round(b.right) };
           }) };
       }), 5000, 200);
       const asked = tab0.turns.map(([q]) => (q.length > 44 ? q.slice(0, 44) + '\u2026' : q));
       check(!!toc && toc.filter && toc.rows.length === asked.length && toc.rows.every((r, i) => /^\d\d:\d\d:\d\d {2}/.test(r) && r.endsWith(asked[i])),
         'the handle opens the list of your messages, each with its time, under a filter box', toc && toc.rows);
+      const ends = toc ? toc.times.map((b) => b && b.end) : [];
+      check(ends.length > 1 && ends.every((x) => x && x === ends[0]), 'and the times are all one width, so every question starts at the same place', ends);
       await page.mouse.move(5, 5);
       await sleep(300);
       await shot('conversation-rail-list');
