@@ -708,7 +708,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       await sleep(300);
       await shot('archived-menu');
       if (menu) await compareAt('row-menu-delete', item('Delete session…'));
-      await item('Delete session…').click();
+      retried(await pick(t1, ['Delete session…']), 'Delete session…');
       const d = await until(dialog, 15000, 300);
       check(!!d && d.text.includes(`Delete "${t1.title}" from disk?`) && d.text.includes('This cannot be undone.') && d.buttons.includes('Delete') && d.buttons.includes('Cancel'),
         'Delete session… asks first, in a dialog naming the conversation, saying it cannot be undone, with Delete and Cancel', d);
