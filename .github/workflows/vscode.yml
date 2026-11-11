@@ -2,11 +2,17 @@
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
 
-# This extension patches files of another extension and of VS Code itself, and where those files are, and whether they
-# can be written, differs between Linux, macOS and Windows. The tests workflow runs on Linux only and without either
-# install. This one installs the newest VS Code and the newest Claude Code on each of the three and runs the extension
-# there (test/vscode/run.js). It runs once a day as well as on each push, since either upstream can change without a
-# commit here.
+# This extension patches files of another extension and of VS Code itself, and draws inside Claude Code's panel. Where
+# those files are, whether they can be written, and how the window draws differ between Linux, macOS and Windows. The
+# tests workflow runs on Linux only and without either install. This one installs the newest VS Code and the newest
+# Claude Code on each of the three and runs the extension in a real window (test/vscode/run.js): it drives the window,
+# checks what it shows, compares crops of this extension's elements with the approved copies for that platform, and then
+# checks the patched files from inside VS Code. It runs once a day as well as on each push, since either upstream can
+# change without a commit here.
+#
+# The results folder of each platform is kept as an artifact whether the run passed or not: the screenshots of every
+# step, the crops, a diff image of each crop that failed, and VS Code's logs. A platform with no approved copies yet
+# only saves its crops there, with a note in the log.
 name: vscode
 
 on:
@@ -15,6 +21,7 @@ on:
     branches: [main, 'ci/**']
   pull_request:
   schedule:
+    # 09:43 UTC. Not on the hour or the half hour, when the scheduler is busiest, and apart from upstream-check.yml's.
     - cron: '43 9 * * *'
   workflow_dispatch:
 
@@ -69,14 +76,35 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: vsix
+      # playwright-core rather than playwright: the run connects to VS Code's own Electron and needs no browser of its own.
       - name: Install the test runner
         shell: bash
-        run: npm install --no-save --no-package-lock @vscode/test-electron@3
+        run: npm install --no-save --no-package-lock @vscode/test-electron@3 playwright-core@1
+      # run.js puts the test stage in a user and network namespace of its own, with loopback only. Ubuntu's AppArmor
+      # forbids an unprivileged user namespace unless this is 0, and CLAUDE_CODE_PLUS_UI_OFFLINE=require below fails the
+      # run when the stage cannot be cut off from the network.
+      - name: Allow unprivileged user namespaces
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      # The screen is given the size and depth the approved Linux crops were made at.
       - name: Run in VS Code
         if: runner.os == 'Linux'
         shell: bash
-        run: xvfb-run -a node test/vscode/run.js extension.vsix core.vsix
+        env:
+          CLAUDE_CODE_PLUS_UI_OFFLINE: require
+        run: xvfb-run -a -s '-screen 0 1600x1000x24' node test/vscode/run.js extension.vsix core.vsix --out vscode-results
+      # macOS and Windows have no namespace to put it in: there the test stage only gets a proxy that does not exist.
       - name: Run in VS Code
         if: runner.os != 'Linux'
         shell: bash
-        run: node test/vscode/run.js extension.vsix core.vsix
+        run: node test/vscode/run.js extension.vsix core.vsix --out vscode-results
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vscode-${{ runner.os }}
+          path: vscode-results
+          if-no-files-found: warn

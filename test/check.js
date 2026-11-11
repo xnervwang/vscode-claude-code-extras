@@ -8106,6 +8106,113 @@ console.log('\nthe workflows');
   else bad(`a step condition that skips after a failure: ${bare.join(', ')}`);
 }
 
+/* ── the workflow that runs the extension in a real VS Code window ──
+   Read from the YAML rather than run. A test stage left on the network, a screen of another size than the approved Linux
+   crops were made at, or a results folder kept only when the run passed, all still let the run go green, so each is a
+   check of its own. */
+console.log('\nthe workflow in a real VS Code window');
+{
+  const dir = path.join(__dirname, '..', '.github', 'workflows');
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (_) { return ''; } };
+  const ui = read(path.join(dir, 'vscode.yml'));
+  const runner = read(path.join(__dirname, 'vscode', 'run.js'));
+  const contributing = read(path.join(__dirname, '..', 'CONTRIBUTING.md'));
+  const expect = (cond, msg, detail) => (cond ? ok(msg) : bad(detail === undefined ? msg : `${msg}: ${detail}`));
+  if (!ui) bad('.github/workflows/vscode.yml is missing');
+  else {
+    expect(/^\s+push:\s*\n(\s*#.*\n)*\s+branches:\s*\[main,\s*'ci\/\*\*'\]/m.test(ui) && /^\s+pull_request:/m.test(ui) && /^\s+workflow_dispatch:/m.test(ui),
+      'vscode.yml runs on a push to main or to a ci/ branch, on a pull request, and by hand');
+    const cron = (text) => ((/cron:\s*'([^']+)'/.exec(text) || [])[1] || '').trim().split(/\s+/);
+    const [minute, hour, ...days] = cron(ui);
+    const others = fs.readdirSync(dir).filter((n) => n.endsWith('.yml') && n !== 'vscode.yml').map((n) => cron(read(path.join(dir, n))))
+      .filter((c) => c[0]);
+    expect(days.join(' ') === '* * *' && /^\d+$/.test(minute) && /^\d+$/.test(hour) && !['0', '30'].includes(minute)
+      && !others.some(([m, h]) => m === minute && h.split(',').includes(hour)),
+    'and once a day, neither on the hour nor on the half hour, and not at the time of another workflow', [minute, hour, ...days].join(' '));
+    expect(/os:\s*\[ubuntu-latest,\s*macos-latest,\s*windows-latest\]/.test(ui), 'on Linux, macOS and Windows');
+    expect(/npm install --no-save --no-package-lock @vscode\/test-electron@3 playwright-core@1\s*$/m.test(ui) && !/(^|\s)playwright@/m.test(ui),
+      'with @vscode/test-electron and playwright-core installed, and not playwright, which would download browsers it does not use');
+    expect(/if \[ -e \/proc\/sys\/kernel\/apparmor_restrict_unprivileged_userns \]; then\s*\n\s*sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0/.test(ui),
+      'on Linux unprivileged user namespaces are allowed first, where AppArmor restricts them');
+    const linux = (/if: runner\.os == 'Linux'\s*\n(?:\s+.*\n)*?\s+run: (xvfb-run[^\n]*)/.exec(ui) || [])[0] || '';
+    expect(/env:\s*\n\s+CLAUDE_CODE_PLUS_UI_OFFLINE: require/.test(linux) && /run: xvfb-run -a -s '-screen 0 1600x1000x24' node test\/vscode\/run\.js extension\.vsix core\.vsix --out vscode-results$/m.test(linux),
+      'on Linux under a 1600x1000 virtual screen of 24 bits, failing if the test stage cannot be cut off from the network', linux || 'no Linux run step');
+    expect(/if: runner\.os != 'Linux'\s*\n(?:\s+.*\n)*?\s+run: node test\/vscode\/run\.js extension\.vsix core\.vsix --out vscode-results\s*$/m.test(ui),
+      'on macOS and Windows with the results going to the same folder');
+    expect(/uses: actions\/upload-artifact@v\d+\s*\n\s+if: always\(\)\s*\n\s+with:\s*\n\s+name: vscode-\$\{\{ runner\.os \}\}\s*\n\s+path: vscode-results\b/.test(ui),
+      'and that folder is kept as an artifact whether the run passed or not');
+    expect(runner.includes("process.env.CLAUDE_CODE_PLUS_UI_OFFLINE === 'require'"), 'run.js reads the variable the workflow sets to require the network cut off');
+    const screens = (text) => [...new Set((text.match(/-screen 0 \d+x\d+x\d+/g) || []))];
+    expect(JSON.stringify(screens(contributing)) === JSON.stringify(screens(ui)) && screens(ui).length === 1,
+      'CONTRIBUTING.md starts Xvfb with the screen the workflow uses', JSON.stringify([screens(ui), screens(contributing)]));
+  }
+}
+
+/* ── the window test's own parts ──
+   The parts of test/vscode/ that keep a run off the machine it runs on, and the made-up conversations it opens. A window
+   run happens only on CI and when someone runs it on purpose, so these are checked with every commit instead. */
+console.log('\nthe window test\'s own parts');
+{
+  const expect = (cond, msg, detail) => (cond ? ok(msg) : bad(detail === undefined ? msg : `${msg}: ${detail}`));
+  const env = Object.assign({}, process.env);
+  delete env.CI;
+  const refused = cp.spawnSync(process.execPath, [path.join(__dirname, 'vscode', 'run.js'), 'none.vsix'], { env, encoding: 'utf8', timeout: 30000 });
+  expect(refused.status !== 0 && /runs only where CI=true, or with --local/.test(`${refused.stdout}${refused.stderr}`),
+    'test/vscode/run.js refuses to run outside CI unless told --local', `exit ${refused.status}: ${(refused.stderr || '').slice(0, 200)}`);
+
+  const { cleanEnv } = require('./vscode/lib/env');
+  const from = { PATH: '/usr/bin', HOME: '/home/someone', VSCODE_IPC_HOOK_CLI: '/run/user/1/vscode-ipc.sock', ELECTRON_RUN_AS_NODE: '1',
+    LD_LIBRARY_PATH: '/opt/lib', CLAUDECODE: '1', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CONFIG_DIR: '/home/someone/.claude',
+    CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc.sock', ANTHROPIC_API_KEY: 'a key', AWS_PROFILE: 'work', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel',
+    XDG_RUNTIME_DIR: '/run/user/1', CLAUDE_CODE_PLUS_UI_KEEP: '1' };
+  const root = path.join(os.tmpdir(), 'cce-env-root');
+  const lin = cleanEnv(root, { EXTRA: 'x' }, { env: from, platform: 'linux' });
+  const winEnv = cleanEnv(root, {}, { env: from, platform: 'win32' });
+  const gone = ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'LD_LIBRARY_PATH', 'CLAUDECODE', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CONFIG_DIR',
+    'CLAUDE_CODE_MESSAGING_SOCKET', 'ANTHROPIC_API_KEY', 'AWS_PROFILE', 'OTEL_EXPORTER_OTLP_ENDPOINT'];
+  expect(gone.every((k) => !(k in lin) && !(k in winEnv)) && lin.PATH === '/usr/bin' && lin.CLAUDE_CODE_PLUS_UI_KEEP === '1' && lin.EXTRA === 'x',
+    'the window\'s environment leaves out the other VS Code\'s variables, LD_LIBRARY_PATH and everything that steers Claude Code\'s CLI',
+    JSON.stringify(Object.keys(lin)));
+  const under = (v) => typeof v === 'string' && v.startsWith(root + path.sep);
+  expect(['HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR'].every((k) => under(lin[k]))
+    && ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'].every((k) => under(winEnv[k])),
+  'and puts every home folder in the run\'s temporary root, on Linux and on Windows', JSON.stringify([lin.HOME, lin.XDG_RUNTIME_DIR, winEnv.APPDATA]));
+
+  const fakeHome = require('./vscode/lib/fake-home');
+  const bg = require('../src/bgsessions');
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cce-fake-home-')));
+  try {
+    const folder = path.join(home, 'my work', 'ws');
+    /* Five past midnight, local time: today's conversation must not reach back into yesterday. */
+    const now = new Date(2026, 10, 11, 0, 5, 0).getTime();
+    const made = fakeHome.write(home, { folder, now });
+    expect(made.dir === path.join(home, '.claude', 'projects', bg.folderName(folder)) && made.files.every((f) => fs.existsSync(f)),
+      'the made-up conversations go where Claude Code looks for those started in the window\'s folder', made.dir);
+    expect(made.files.every((f) => bg.kindOf(f) === ''), 'and none of them reads as a background session, which the list would leave out',
+      JSON.stringify(made.files.map((f) => bg.kindOf(f))));
+    const records = (f) => fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const today = records(made.files[made.threads.findIndex((t) => t.days === 0)]).filter((r) => r.timestamp).map((r) => Date.parse(r.timestamp));
+    const midnight = new Date(2026, 10, 11).getTime();
+    expect(today.length && today.every((t, i) => t >= midnight && t < now && (i === 0 || t > today[i - 1])),
+      'today\'s conversation stays within today, in order, even just after midnight', JSON.stringify(today.map((t) => new Date(t).toISOString())));
+    const titles = made.files.map((f) => require('../src/waiting').transcriptTitles(f).ai);
+    expect(JSON.stringify(titles) === JSON.stringify(made.threads.map((t) => t.title)), 'each one carries its title where this extension reads it', JSON.stringify(titles));
+    const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
+    expect(JSON.stringify(settings.customApiKeyResponses) === JSON.stringify({ approved: [fakeHome.KEY.trim().slice(-20)], rejected: [] }),
+      'and the made-up key is approved the way Claude Code\'s CLI records an accepted key', JSON.stringify(settings));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+
+  const pixels = require('./vscode/lib/pixels');
+  const { diff, TOLERANCE } = require('./vscode/lib/baseline');
+  const img = { width: 3, height: 2, data: Buffer.from([0, 0, 0, 255, 10, 20, 30, 255, 255, 255, 255, 255, 1, 2, 3, 255, 200, 100, 50, 255, 9, 9, 9, 255]) };
+  const back = pixels.decode(pixels.encode(img));
+  expect(back.width === 3 && back.height === 2 && back.data.equals(img.data), 'a crop written as a PNG reads back the same');
+  const other = { ...img, data: Buffer.from(img.data) };
+  other.data[0] = TOLERANCE.channel; other.data[4] = 10 + TOLERANCE.channel + 1;
+  const d = diff(img, other, [{ x: 2, y: 0, w: 1, h: 2 }]);
+  expect(d.differ === 1 && d.compared === 4, 'the comparison counts a pixel as different only past the tolerance, and skips the masks', JSON.stringify([d.differ, d.compared]));
+}
+
 console.log('\nplan rows in unknown states');
 {
   const plan = require('../src/workplan');
@@ -8496,6 +8603,44 @@ const repo = path.join(__dirname, '..');
   await require('./shared-copies.js')(t, repo);
   console.log('\nthe package');
   await require('./pack-check.js')(t, repo);
+
+  /* The stand-in for the model that the window test sends its turns to: the streamed events Claude Code's CLI reads, a
+     Bash tool call for a message that asks for one, and text again once the tool's result comes back. */
+  console.log('\nthe made-up model the window test talks to');
+  const fakeModel = require('./vscode/lib/fake-model');
+  const http = require('http');
+  const m = await fakeModel.start({ reply: 'Hello.' });
+  const post = (url, body) => new Promise((resolve, reject) => {
+    const req = http.request(`${m.url}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
+      let text = '';
+      res.on('data', (d) => { text += d; });
+      res.on('end', () => resolve({ status: res.statusCode, text }));
+    });
+    req.on('error', reject);
+    req.end(JSON.stringify(body));
+  });
+  const events = (text) => text.split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)));
+  try {
+    const plain = events((await post('/v1/messages?beta=true', { model: 'claude-sonnet-5-5', stream: true,
+      messages: [{ role: 'user', content: 'hi' }, { role: 'system', content: 'environment' }] })).text);
+    eq(plain.map((e) => e.type), ['message_start', 'content_block_start', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop'],
+      'a streamed turn gets the Messages API\'s events, in order');
+    eq([plain[2].delta.text, plain[4].delta.stop_reason, plain[0].message.model], ['Hello.', 'end_turn', 'claude-sonnet-5-5'],
+      'with the reply as text, and the model the request named');
+    const asked = events((await post('/v1/messages', { stream: true, messages: [{ role: 'user', content: [{ type: 'text', text: `Please ${fakeModel.ASK_TO_RUN}.` }] }] })).text);
+    eq([asked[1].content_block.type, asked[1].content_block.name, JSON.parse(asked[2].delta.partial_json).command, asked[4].delta.stop_reason],
+      ['tool_use', 'Bash', fakeModel.RUN, 'tool_use'], 'a message asking to run the tests gets a Bash tool call');
+    const after = events((await post('/v1/messages', { stream: true, messages: [{ role: 'user', content: `Please ${fakeModel.ASK_TO_RUN}.` },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'denied', is_error: true }] }] })).text);
+    eq(after[1].content_block.type, 'text', 'and the turn that brings the tool\'s result back gets text');
+    const counted = await post('/v1/messages/count_tokens', { messages: [] });
+    const other = await post('/v1/models', {});
+    eq([counted.status, JSON.parse(counted.text).input_tokens > 0, other.status], [200, true, 404], 'it counts tokens, and answers nothing else');
+    eq(m.turns(), 3, 'and counts only the streamed turns');
+  } catch (e) {
+    bad(`the made-up model: ${(e && e.stack) || e}`);
+  } finally { await m.close(); }
 })().catch((e) => bad(`a check copied from Agent Plus threw: ${(e && e.stack) || e}`)).finally(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
   fs.rmSync(SHARED_HOME, { recursive: true, force: true });
