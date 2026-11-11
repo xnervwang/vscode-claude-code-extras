@@ -48,12 +48,15 @@ const ID_ALONE = /^(?:\x1b\[[0-9;]*m)*[ \t]*claude (?:attach|logs|stop) ([0-9a-f
 const ALONE_NEEDLES = ['claude attach ', 'claude logs ', 'claude stop '].map((s) => Buffer.from(s, 'utf8'));
 /* Leeway on both sides of the call: the rows and the record are stamped by different processes. */
 const DURING_SLACK_MS = 5000;
+/* How much of a session's first prompt the launching command must contain, and the shortest prompt that is matched. */
+const INTENT_CHARS = 80;
+const MIN_INTENT = 12;
 /* The flag that starts one, found in the command a tool result answers. */
 const BG_FLAG = Buffer.from('--bg', 'utf8');
 const NEEDLES = [BG_FLAG, MARK, ...HINT_NEEDLES, ...ALONE_NEEDLES];
 /* Bump this when the scan starts recognising a launch it used to miss: link files written by an older version are then
    read again from the start, once. */
-const READER = 2;
+const READER = 3;
 /* The stylesheet carries all of this to every panel on every change, so the caps are about its size, not about how
    many sessions anyone starts. */
 const MAX_SESSIONS = 10;
@@ -91,23 +94,50 @@ function readLine(line, ran, jobs, seen) {
   for (const b of blocks) {
     if (!b) continue;
     if (b.type === 'tool_use' && b.input && typeof b.input.command === 'string' && b.input.command.includes('--bg')) {
-      ran.set(b.id, at);
+      ran.set(b.id, { at, command: b.input.command });
       if (ran.size > 500) ran.delete(ran.keys().next().value);
       continue;
     }
     if (b.type !== 'tool_result' || !ran.has(b.tool_use_id)) continue;
+    const call = ran.get(b.tool_use_id);
     const text = textOf(b);
-    let m;
+    let m, named = false;
     for (const re of [ID_AFTER, ID_IN_HINT]) {
       re.lastIndex = 0;
       while ((m = re.exec(text))) {
+        named = true;
         if (!seen.has(m[1]) && fs.existsSync(path.join(jobs, m[1], 'state.json'))) seen.add(m[1]);
       }
     }
     ID_ALONE.lastIndex = 0;
     while ((m = ID_ALONE.exec(text))) {
-      if (!seen.has(m[1]) && createdBetween(path.join(jobs, m[1], 'state.json'), ran.get(b.tool_use_id), at)) seen.add(m[1]);
+      named = true;
+      if (!seen.has(m[1]) && createdBetween(path.join(jobs, m[1], 'state.json'), call.at, at)) seen.add(m[1]);
     }
+    if (!named) launchedBy(jobs, call, at, seen);
+  }
+}
+
+const squash = (s) => (typeof s === 'string' ? s.replace(/[\\"'`]/g, '').replace(/\s+/g, ' ').trim() : '');
+
+/*
+ * When `| head -1` leaves only "Starting background service…", the output names no session, so the launch is matched by
+ * its prompt: a session created while the call ran, whose first prompt appears in the command. Quotes and backslashes
+ * are left out of both, since the shell takes them off the prompt it passes on.
+ */
+function launchedBy(jobs, call, to, seen) {
+  if (!isFinite(call.at) || !isFinite(to)) return;
+  const command = squash(call.command);
+  let names;
+  try { names = fs.readdirSync(jobs); } catch (_) { return; }
+  for (const id of names) {
+    if (!SHORT_ID.test(id) || seen.has(id)) continue;
+    let d;
+    try { d = JSON.parse(fs.readFileSync(path.join(jobs, id, 'state.json'), 'utf8')); } catch (_) { continue; }
+    const t = Date.parse(d && d.createdAt);
+    if (!isFinite(t) || t < call.at - DURING_SLACK_MS || t > to + DURING_SLACK_MS) continue;
+    const intent = squash(d.intent).slice(0, INTENT_CHARS);
+    if (intent.length >= MIN_INTENT && command.includes(intent)) seen.add(id);
   }
 }
 
@@ -184,10 +214,15 @@ const commands = new Map();
 /* How far this host has read each transcript, ahead of the file, which is written only every PERSIST_EVERY bytes. */
 const readTo = new Map();
 
-/* Only lines containing a needle are parsed, in file order, so a call is seen before the result that answers it. */
+/*
+ * Only lines containing a needle are parsed, in file order, so a call is seen before the result that answers it. Any
+ * other tool result is parsed only when its tool_use_id belongs to a call that ran `--bg`: `head -1` can leave none of
+ * the CLI's words in it.
+ */
+const RESULT_ID = Buffer.from('"tool_use_id":"', 'utf8');
 function readChunk(data, ran, jobs, seen) {
   const last = data.length - 1;
-  const starts = new Set();
+  const starts = new Set(), results = new Map();
   for (const needle of NEEDLES) {
     let at = 0;
     while ((at = data.indexOf(needle, at)) !== -1 && at < last) {
@@ -195,7 +230,14 @@ function readChunk(data, ran, jobs, seen) {
       at = data.indexOf(0x0a, at) + 1;
     }
   }
-  for (const ls of [...starts].sort((a, b) => a - b)) {
+  for (let at = 0; (at = data.indexOf(RESULT_ID, at)) !== -1 && at < last;) {
+    const ls = data.lastIndexOf(0x0a, at) + 1, from = at + RESULT_ID.length;
+    if (!starts.has(ls) && !results.has(ls)) results.set(ls, data.toString('utf8', from, data.indexOf(0x22, from)));
+    at = data.indexOf(0x0a, at) + 1;
+    if (at === 0) break;
+  }
+  for (const ls of [...starts, ...results.keys()].sort((a, b) => a - b)) {
+    if (results.has(ls) && !ran.has(results.get(ls))) continue;
     readLine(data.subarray(ls, data.indexOf(0x0a, ls)).toString('utf8'), ran, jobs, seen);
   }
 }

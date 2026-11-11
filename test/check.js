@@ -1793,6 +1793,39 @@ console.log('\nbackground sessions');
     } else bad(`a hint that was not a launch was recorded: ${JSON.stringify(ids)}`);
   }
 
+  {
+    const SID7 = '77777777-1111-2222-3333-444444444444';
+    const t7 = path.join(proj, SID7 + '.jsonl');
+    const plans7 = path.join(root, 'plans7');
+    const at = (s) => new Date(Date.parse('2026-11-11T21:01:33.000Z') + s * 1000).toISOString();
+    const prompt = 'Do everything in the task spec /x/TASKSPEC-modes.md, reading "MODES-CONTRACT.md" first.';
+    job('a1b2c3d4', { createdAt: at(1.6), intent: prompt });                        // this launch
+    job('a1b2c3d5', { createdAt: at(1.8), intent: 'Something else entirely, from another conversation' });
+    job('a1b2c3d6', { createdAt: at(-3600), intent: prompt });                      // the same prompt, an hour earlier
+    const timed = (command, text, from, to) => {
+      const id = 'toolu_' + (++callNo);
+      return JSON.stringify({ type: 'assistant', timestamp: at(from), message: { role: 'assistant', content: [
+        { type: 'tool_use', id, name: 'Bash', input: { command } }] } }) + '\n'
+        + JSON.stringify({ type: 'user', timestamp: at(to), message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: id, content: text }] } }) + '\n';
+    };
+    fs.writeFileSync(t7, timed(`claude --bg "Do everything in the task spec /x/TASKSPEC-modes.md, reading \"MODES-CONTRACT.md\" first." --add-dir /x < /dev/null 2>&1 | head -1`,
+      'Starting background service…', 0, 2.4));
+    const script = `
+      const bg = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'background.js'))});
+      const fs = require('fs');
+      const opts = ${JSON.stringify({ dir: plans7, jobs, transcript: t7 })};
+      bg.scan(${JSON.stringify(SID7)}, opts).then(() => {
+        let ids = [];
+        try { ids = JSON.parse(fs.readFileSync(opts.dir + '/' + ${JSON.stringify(SID7)} + '.background', 'utf8')).ids; } catch (_) {}
+        process.stdout.write(JSON.stringify(ids));
+      }).catch((e) => { process.stdout.write(JSON.stringify({ error: e.message })); });`;
+    const ids = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8' }));
+    if (Array.isArray(ids) && ids.join() === 'a1b2c3d4') {
+      ok('a launch whose output names no session is matched by its prompt, and only to a session created while it ran');
+    } else bad(`a launch cut to its first line recorded ${JSON.stringify(ids)}`);
+  }
+
   // A launch cut down to `claude attach <id>` by `grep -o`: the bare line counts for a session created while the call
   // ran, and not for an older one echoed the same way.
   {
