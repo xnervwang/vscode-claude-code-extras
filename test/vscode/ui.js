@@ -445,8 +445,14 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       if (open) await compareAt('open-sessions-head', list.locator('[data-cce-open-sessions] [data-cce-section-head]').first());
 
       /* The rail and its list. */
-      const rail = await conv.evaluate(() => { const r = document.getElementById('cce-toc-rail'); return r && { display: r.style.display, parts: r.children.length }; });
+      const rail = await conv.evaluate(() => {
+        const r = document.getElementById('cce-toc-rail');
+        if (!r) return null;
+        const b = r.getBoundingClientRect();
+        return { display: r.style.display, parts: r.children.length, top: b.top, off: Math.abs(b.top + b.height / 2 - innerHeight / 2) };
+      });
       check(!!rail && rail.display === 'flex' && rail.parts === 5, 'the rail is drawn at the right edge: to the top, up, the handle, down, to the bottom', rail);
+      check(!!rail && Number.isInteger(rail.top) && rail.off <= 1, 'centred on a whole pixel, so its arrows are drawn sharp', rail);
       await page.mouse.move(5, 5);
       await sleep(300);
       if (rail) await compareAt('rail', conv.locator('#cce-toc-rail'));

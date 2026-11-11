@@ -12,6 +12,12 @@
   // What the list was last built from, compared entry by entry on the next sweep instead of folded into one string.
   var SIG_NODES = [], SIG_TEXTS = [], SIG_WHENS = [];
   var outsideWired = false, MUTE = null, RAILBOX = null, PROMPT_EL = [];
+  // Not top: 50% with translateY(-50%): that leaves the rail half a pixel off whenever the page and the rail differ in
+  // height by an odd number, which blurs its arrows.
+  var railResizeWired = false;
+  var placeRail = function(){
+    if (RAILBOX && RAILBOX.isConnected) RAILBOX.style.top = Math.max(0, Math.round((window.innerHeight - RAILBOX.offsetHeight) / 2)) + 'px';
+  };
   var ROWS = [];  // {row, hay} for the filter box
   /* The rail's sizes, and the gap the open list keeps from the right edge so that it never covers the rail. The glyph
      colour is the one the bar beside your own messages uses, so the two read as one feature and follow the theme
@@ -327,8 +333,7 @@
     RAILBOX = document.createElement('div');
     RAILBOX.id = 'cce-toc-rail';
     var rb = RAILBOX.style;
-    rb.position = 'fixed'; rb.right = '0'; rb.top = '50%';
-    rb.transform = 'translateY(-50%)'; rb.zIndex = '29';
+    rb.position = 'fixed'; rb.right = '0'; rb.zIndex = '29';
     rb.display = 'flex'; rb.flexDirection = 'column'; rb.alignItems = 'flex-end';
     RAILBOX.appendChild(edgeButton(false, 'Top of the conversation'));
     RAILBOX.appendChild(navButton(String.fromCharCode(9652), -1, 'Previous message'));
@@ -336,6 +341,9 @@
     RAILBOX.appendChild(navButton(String.fromCharCode(9662), 1, 'Next message'));
     RAILBOX.appendChild(edgeButton(true, 'Bottom of the conversation'));
     document.body.appendChild(RAILBOX);
+    placeRail();
+    if (typeof ResizeObserver === 'function') new ResizeObserver(placeRail).observe(RAILBOX);
+    if (!railResizeWired) { railResizeWired = true; window.addEventListener('resize', placeRail); }
     wireKeys();
 
     PANEL = document.createElement('div');
