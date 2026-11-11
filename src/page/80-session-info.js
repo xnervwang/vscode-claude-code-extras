@@ -199,8 +199,8 @@
       renderInfo();
       var r = INFO.getBoundingClientRect();
       INFOBOX.style.bottom = Math.max(8, window.innerHeight - r.top + 6) + 'px';
-      INFOBOX.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 416)) + 'px';
       INFOBOX.style.display = 'block';
+      INFOBOX.style.left = Math.max(8, Math.min(r.left, window.innerWidth - INFOBOX.offsetWidth - 8)) + 'px';
     });
     // Leftmost of the controls this extension adds, so it sits as far as possible from the send button.
     var before = (VIEWBTN && VIEWBTN.isConnected && VIEWBTN.parentElement === mode.parentElement) ? VIEWBTN

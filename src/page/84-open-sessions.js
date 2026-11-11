@@ -45,7 +45,7 @@
   // The state the list's own rows give an open conversation: waiting outranks running, and an idle one that finished
   // unseen is unread.
   var openState = function(reported, unread){
-    if (reported === 'waiting') return 'waiting';
+    if (reported === 'waiting' || reported === 'waiting_input') return 'waiting';
     if (reported === 'running') return 'running';
     return unread ? 'unread' : 'idle';
   };

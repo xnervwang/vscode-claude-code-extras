@@ -14,7 +14,7 @@
  *                  and the hover text of a row
  *   a tab          a conversation resumed in a tab: its title, the times on every message and reply, the bar on your
  *                  messages, the rail and its list, the footer's buttons, their hover text and the information box,
- *                  OPEN SESSIONS, and the times going and coming back as the extension is turned off and on
+ *                  OPEN SESSIONS, and which times show while the extension is off and once it is on again
  *   the dots       the dot on the tab's logo while a turn sent through fake-model.js runs, once its reply lands with the
  *                  tab in the background, and while Claude Code waits for permission to run a command
  *   closed, sidebar, archived, commands
@@ -222,7 +222,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
    * closes its menu when its page loses the focus, and another webview of the window (a Claude Code page that has just
    * opened) can take the focus at any moment; a click then lands on whatever was under the menu, with no error. So the
    * page records where each click lands, and a click that missed its item while the page lost the focus is tried again,
-   * at most twice. One that missed with the focus kept is a failure.
+   * at most twice. A click that missed while the page kept the focus fails the check.
    */
   const pick = async (t, labels) => {
     await list.evaluate(() => {
@@ -347,7 +347,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         const got = await list.evaluate(() => [...document.querySelectorAll('[class*="sessionItem_"] span[class*="sessionName_"]')].map((e) => e.textContent.trim()));
         return threads.every((t) => got.includes(t.title)) && got;
       }, 30000, 500);
-      check(!!listed, `it lists the ${threads.length} made-up conversations by their titles`, listed || undefined);
+      check(!!listed, `it lists the ${threads.length} fake conversations by their titles`, listed || undefined);
       const pins = await until(async () => {
         const p = await list.evaluate((ids) => ids.map((id) => {
           const e = [...document.querySelectorAll(`[data-cce-pin="${id}"]`)].find((x) => !x.closest('[data-cce-section]'));
@@ -502,11 +502,8 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(!!info && info.Session === tab0.id && info.Project === profile.folder
         && info.Transcripts === `~/.claude/projects/${folderName(profile.folder)}` && /^\d/.test(info['On disk'] || ''),
       'the information button opens the conversation\'s session id, folder, transcripts and their size', info);
-      /* Known not to hold yet: the box is placed for 416 px but is 422 px wide with its padding and border, so near the right
-         edge it runs past the page. The note becomes a pass once it is fixed. */
       const fits = await conv.evaluate(() => { const r = document.getElementById('cce-info').getBoundingClientRect(); return { left: r.left, right: r.right, page: innerWidth }; });
-      if (fits.left >= 0 && fits.right <= fits.page) check(true, 'and the box lies inside the page');
-      else note(`known defect: the information box spans ${Math.round(fits.left)} to ${Math.round(fits.right)} px of a page ${fits.page} px wide`);
+      check(fits.left >= 0 && fits.right <= fits.page, 'and the box lies inside the page', fits);
       await page.mouse.move(5, 5);
       await shot('conversation-info');
       if (info) await compareAt('info-session-row', conv.locator('#cce-info > div').first());
@@ -562,7 +559,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       await conv.locator('[contenteditable][role="textbox"]').first().click();
       await page.keyboard.type('Run the tests again.');
       await page.keyboard.press('Enter');
-      check(!!await until(() => model.turns() > turns, 30000, 300), 'a message sent from the tab reaches the made-up model', model.seen.slice(-3));
+      check(!!await until(() => model.turns() > turns, 30000, 300), 'a message sent from the tab reaches the fake model', model.seen.slice(-3));
       const running = await until(async () => { const d = await dotsOn(t.label); return d && d.running >= 6 && d.unread === 0 && d.waiting === 0 && d; }, 20000, 500);
       check(!!running, 'while the turn runs the tab\'s logo carries the green dot', await dotsOn(t.label));
       const listRunning = await until(async () => { const d = await listDot(tab0); return d && d.running >= 4 && d; }, 10000, 500);
@@ -598,20 +595,13 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       await conv.locator('[contenteditable][role="textbox"]').first().click();
       await page.keyboard.type(`Please ${ASK_TO_RUN}.`);
       await page.keyboard.press('Enter');
-      check(!!await until(() => model.seen.slice(before).some((x) => x.tool), 30000, 300), 'a message asking to run the tests gets a Bash tool call from the made-up model', model.seen.slice(before));
+      check(!!await until(() => model.seen.slice(before).some((x) => x.tool), 30000, 300), 'a message asking to run the tests gets a Bash tool call from the fake model', model.seen.slice(before));
       const asking = await until(() => conv.evaluate((cmd) => /Allow this bash command\?/.test(document.body.innerText) && document.body.innerText.includes(cmd), RUN), 20000, 500);
       check(!!asking, `Claude Code asks for permission to run ${RUN}`);
       const waiting = await until(async () => { const d = await dotsOn(t.label); return d && d.waiting >= 6 && d.running === 0 && d.unread === 0 && d; }, 20000, 500);
       check(!!waiting, 'and while it waits the tab\'s logo carries the blue dot', await dotsOn(t.label));
-      /* Known not to hold yet: OPEN SESSIONS keeps the grey dot of an idle conversation here. The note becomes a pass once
-         it is fixed. */
       const listWaiting = await until(async () => { const d = await listDot(tab0); return d && d.waiting >= 4 && d; }, 10000, 500);
-      if (listWaiting) check(true, 'and so does its row in OPEN SESSIONS');
-      else {
-        note(`known defect: the row in OPEN SESSIONS keeps a grey dot while Claude Code waits for permission: ${JSON.stringify({ dots: await listDot(tab0),
-          states: await list.evaluate(() => { const c = window.__cceSessionList && window.__cceSessionList.comms; const v = c && c.sessionStates && c.sessionStates.value;
-            return (Array.isArray(v) ? v : v ? Array.from(v) : []).map((x) => x && [x.sessionId, x.state]); }) })}`);
-      }
+      check(!!listWaiting, 'and so does its row in OPEN SESSIONS', await listDot(tab0));
       await shot('tab-dot-waiting');
       const blue = await tabLogo(t.label);
       if (waiting && blue) base.compare('tab-dot-waiting', blue.png);
