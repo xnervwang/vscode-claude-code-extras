@@ -4,7 +4,9 @@
 
 'use strict';
 /*
- * Checks, from inside the VS Code that run.js started, what the extension did to fresh installs on this platform.
+ * Checks, from inside the VS Code that run.js started, what the extension did to fresh installs on this platform: that
+ * Claude Code's two patched files carry the patch with the originals kept beside them, and that the work plan plugin
+ * was registered in the temporary home run.js set rather than in anyone's ~/.claude.
  */
 const fs = require('fs');
 const os = require('os');
@@ -51,12 +53,14 @@ async function run() {
     const file = a.targetFile(claude.extensionPath);
     const patched = await until(() => read(file).includes(a.ANY_MARK), 120000);
     ok(patched, `${a.name}: patched`, file);
-    ok(fs.existsSync(file + a.BACKUP_SUFFIX), `${a.name}: the unpatched file is kept beside it`);
+    const backup = read(file + a.BACKUP_SUFFIX);
+    ok(!!backup && !backup.includes(a.ANY_MARK), `${a.name}: Claude Code's own file is kept beside it, unpatched`, file + a.BACKUP_SUFFIX);
   }
   const live = path.join(claude.extensionPath, 'webview', 'claude-code-extras.css');
   ok(await until(() => fs.existsSync(live), 30000), 'the live stylesheet is written', live);
   ok(ADAPTERS[0].status(claude.extensionPath) === 'patched', 'the panel bundle carries this version of the patch');
 
+  ok(/[\\/]cce-[^\\/]+[\\/]home$/.test(os.homedir()), 'the home folder is the temporary one run.js made', os.homedir());
   const records = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
   ok(await until(() => read(records).includes(plugin.REF), 180000), `${plugin.REF} is registered with Claude Code`,
     read(records).slice(0, 400) || 'no ' + records);

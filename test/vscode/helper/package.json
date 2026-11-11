@@ -1,0 +1,9 @@
+{
+  "name": "claude-code-plus-ui-helper",
+  "publisher": "cce-tests",
+  "version": "0.0.0",
+  "private": true,
+  "engines": { "vscode": "^1.96.0" },
+  "activationEvents": ["*"],
+  "main": "./extension.js"
+}
