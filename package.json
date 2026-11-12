@@ -2,7 +2,7 @@
   "name": "claude-code-plus",
   "displayName": "Claude Code Plus",
   "description": "Help Claude track open work across topics and compaction. Claude starts and updates a plan as you talk; Agent Plus installs with this extension and shows the plan beside the Claude Code panel, and you can answer by row number, even for several rows in one message: \"2.1: not now\". Rows Claude proposes stay \"discussing\" until you agree to make them \"todo\". The Claude Code panel also gets a line under each reply for time, context use, cost, model and effort, plus sound alerts.",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "publisher": "xnervwang",
   "license": "BSD-3-Clause",
   "icon": "images/icon.png",
