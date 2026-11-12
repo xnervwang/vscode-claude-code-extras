@@ -1160,6 +1160,24 @@ console.log('\nthe context breakdown on the usage meter');
     ok('the breakdown carries a Work plan section with its share of the window, and the line over the tooltip gives way to it');
   } else bad(`the breakdown read ${JSON.stringify(shown)}`);
   leave();
+  /* With the panel's own tooltip beside the button, its text and the work plan's line are one box, in its place. */
+  const tip = el();
+  tip.textContent = '13% of context remaining until auto-compact.';
+  tip.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 120, right: 300 });
+  btn.parentElement.children.push(tip);
+  env.out.keep(null, '');
+  btn.on.mouseenter();
+  const together = note() && note().style.display === 'block' ? note().textContent : '';
+  const hiddenWhileShown = tip.style.visibility;
+  const placed = [note().style.bottom, note().style.maxWidth, note().style.whiteSpace];
+  leave();
+  if (together === '13% of context remaining until auto-compact.\nWork plan: ' + line && hiddenWhileShown === 'hidden'
+      && tip.style.visibility === '' && note().style.display === 'none' && placed[0] === '304px' && placed[2] === 'pre-wrap'
+      && placed[1] === '384px') {
+    ok('the panel\'s tooltip and the work plan\'s line are one box where the tooltip was, wrapped to the page, and the tooltip comes back when the pointer leaves');
+  } else bad(`one box read ${JSON.stringify(together)}, tooltip ${JSON.stringify([hiddenWhileShown, tip.style.visibility])}, placed ${JSON.stringify(placed)}`);
+  btn.parentElement.children.pop();
+
   delete env.PLANS.S1;
   env.out.keep(wide, '5');
   hover();

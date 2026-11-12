@@ -154,10 +154,10 @@
     CTX.addEventListener('mouseleave', function(){ ctxOver = false; hideCtx(); });
     document.body.appendChild(CTX);
   };
-  // The panel puts its own tooltip on this button, carrying the summary figure. Nothing of ours is written into it or
-  // onto it - a node the panel owns is only ever read here, for its position. A node of ours placed inside one can
-  // collide with the panel's own rendering, and when that throws, every click and key in the page stops working. So
-  // ours stacks above it rather than replacing it.
+  // The panel puts its own tooltip on this button, carrying the summary figure. No node is ever added inside it: one
+  // added inside a node the panel renders can break that rendering, and then the page stops taking clicks and keys.
+  // To add a line, the tooltip's text is copied into a separate box placed where it is, and the tooltip is hidden with
+  // an inline style, which the panel's rendering leaves alone.
   var nativeTip = function(){
     if (!ctxBtn || !ctxBtn.parentElement) return null;
     var kids = ctxBtn.parentElement.children;
@@ -182,35 +182,55 @@
     PLAN_ASKED[sid] = now;
     askPlan(sid);
   };
-  /* The work plan's line, then the breakdown's loading or error note, in a box of our own above the panel's tooltip.
-     It is hidden while the breakdown is open, since the breakdown has a Work plan section. */
-  var NOTEBOX = null, noteStatus = '';
+  /* The tooltip's text, one line per child element. */
+  var tipText = function(el){
+    var kids = el.children || [];
+    if (!kids.length) return String(el.textContent || '').trim();
+    var out = [];
+    for (var i = 0; i < kids.length; i++) { var t = String(kids[i].textContent || '').trim(); if (t) out.push(t); }
+    return out.join('\n');
+  };
+  /* One box in the tooltip's place: the tooltip's text, the work plan's line, and the breakdown's loading or error note.
+     Hidden while the breakdown is open, which has its own Work plan section. */
+  var NOTEBOX = null, noteStatus = '', hiddenTip = null;
+  var showTip = function(){
+    if (hiddenTip) { try { hiddenTip.style.visibility = ''; } catch (e) {} hiddenTip = null; }
+  };
   var noteLine = function(text){
     noteStatus = text || '';
     paintNote();
   };
   var paintNote = function(){
     var p = planNow();
-    var lines = ctxOver && !(CTX && CTX.style.display === 'block') ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus] : [];
-    var text = lines.filter(Boolean).join('\n');
-    if (!text) { if (NOTEBOX) NOTEBOX.style.display = 'none'; return; }
+    var ours = ctxOver && !(CTX && CTX.style.display === 'block') ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus].filter(Boolean) : [];
+    if (!ours.length) { if (NOTEBOX) NOTEBOX.style.display = 'none'; showTip(); return; }
+    var tip = nativeTip(), r = (tip || ctxBtn) ? (tip || ctxBtn).getBoundingClientRect() : null;
+    var text = (tip ? [tip === hiddenTip && NOTEBOX && NOTEBOX.dataset ? NOTEBOX.dataset.tip || '' : tipText(tip)] : []).concat(ours).filter(Boolean).join('\n');
     if (!NOTEBOX || !NOTEBOX.isConnected) {
       NOTEBOX = document.createElement('div');
       NOTEBOX.id = 'cce-ctx-note';
       var s = NOTEBOX.style;
       s.position = 'fixed'; s.zIndex = '32'; s.display = 'none';
       s.padding = '4px 8px'; s.borderRadius = '4px';
-      s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'pre';
+      s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'pre-wrap'; s.boxSizing = 'border-box';
       s.background = 'var(--vscode-editorHoverWidget-background, rgba(30,30,30,0.99))';
-      s.color = 'var(--vscode-descriptionForeground, #aaa)';
+      s.color = 'var(--vscode-editorHoverWidget-foreground, #ddd)';
       s.border = '1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.18))';
       s.pointerEvents = 'none';
       document.body.appendChild(NOTEBOX);
     }
+    if (tip && tip !== hiddenTip) {
+      if (NOTEBOX.dataset) NOTEBOX.dataset.tip = tipText(tip);
+      showTip();
+      try { tip.style.visibility = 'hidden'; hiddenTip = tip; } catch (e) {}
+    }
     if (NOTEBOX.textContent !== text) NOTEBOX.textContent = text;
-    var r = anchorRect(), b = ctxBtn && ctxBtn.getBoundingClientRect();
-    if (r) NOTEBOX.style.bottom = Math.max(8, window.innerHeight - r.top + 6) + 'px';
+    var b = ctxBtn && ctxBtn.getBoundingClientRect();
+    // Where the tooltip was: its bottom edge when there is one, else just above the button. Wrapped, never wider than
+    // the page, so a long line cannot run off its left edge.
+    if (r) NOTEBOX.style.bottom = Math.max(8, window.innerHeight - (tip ? r.bottom : r.top - 6)) + 'px';
     if (b) NOTEBOX.style.right = Math.max(8, window.innerWidth - b.right) + 'px';
+    NOTEBOX.style.maxWidth = Math.max(160, Math.min(420, window.innerWidth - 16)) + 'px';
     NOTEBOX.style.display = 'block';
   };
   var placeCtx = function(btn){
@@ -287,6 +307,8 @@
       askPlanSoon();
       if (ctxFresh()) showCtx(ctxCache);
       else paintNote();
+      // The panel's tooltip may render after mouseenter; one more paint folds it in.
+      setTimeout(function(){ if (ctxOver) paintNote(); }, 150);
       if (ctxOpenTimer) clearTimeout(ctxOpenTimer);
       // Two seconds resting on the button before anything happens: reading the panel's own summary, or passing over
       // on the way somewhere else, then costs nothing at all.
