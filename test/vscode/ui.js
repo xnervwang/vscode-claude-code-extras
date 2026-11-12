@@ -726,8 +726,8 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       await exec('notifications.clearAll');
       await exec('claudeCodePlus.status');
       const status = await until(async () => (await toasts()).find((x) => x.startsWith('Claude Code Plus — ')) || '', 10000, 300);
-      check(/^Claude Code Plus — Claude Code panel anthropic\.claude-code-\S+: patched \| Claude Code host anthropic\.claude-code-\S+: patched$/.test(status),
-        'Show Status says both of Claude Code\'s files are patched', status);
+      check(/^Claude Code Plus — Claude Code panel anthropic\.claude-code-\S+: patched \| Claude Code host anthropic\.claude-code-\S+: patched \| Token mode: All features \(agentPlus\.tokenMode\); in Claude Code: work plan on, time-zone note on, conversation brief on$/.test(status),
+        'Show Status says both of Claude Code\'s files are patched, and the token mode', status);
       await shot('command-status');
       await exec('notifications.clearAll');
 
