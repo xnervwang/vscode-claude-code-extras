@@ -5,13 +5,14 @@
 'use strict';
 /*
  * The Steward panel, in VS Code's bottom panel. It is about the conversation in the active Claude Code panel: it lists
- * every other Claude Code conversation on this machine, from every window, and the ticked rows are what that
- * conversation manages (src/stewards.js).
+ * every other Claude Code conversation open in a VS Code window on this machine, grouped by window, and the ticked rows
+ * are what that conversation manages (src/stewards.js). A conversation open in no window is not listed, since a
+ * steward has no way to reach it; ticked ones among them are counted, with a button to untick them.
  *
- * It lists the conversations `claude agents --json` reports, wherever they were started, less `claude --bg` sessions
- * and `claude -p` workers, which belong to the conversation that started them; and the stopped conversations whose
- * plans still have open rows, as Agent Plus's Conversations view shows them. The managed ones come first, with what
- * each is doing, how many questions it has for the user, and when it was last active.
+ * The candidates are the conversations `claude agents --json` reports, less `claude --bg` sessions and `claude -p`
+ * workers, which belong to the conversation that started them; and the stopped conversations whose plans still have
+ * open rows, as Agent Plus's Conversations view shows them. The managed ones come first, with what each is doing, how
+ * many questions it has for the user, and when it was last active.
  *
  * The same pass tells a steward when one of its conversations stops (src/stewards.js changes), by a line posted to the
  * steward's inbox socket. Only the window that has the steward conversation open sends it.
@@ -98,23 +99,20 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
 }
 
-/* One group per window, the one in front first; a conversation open in no window goes under the folder it started in. */
+/* The window name without the " [SSH: host]" suffix VS Code adds for a remote window. */
+const windowLabel = (w) => String(w.name || '').replace(/\s*\[[^\]]*\]\s*$/, '')
+  || (w.folders[0] ? path.basename(w.folders[0]) : 'Window with no folder');
+
+/* One group per window, the one in front first. `rows` are all open in one of `wins`. */
 function grouped(rows, wins, front) {
   const groups = new Map();
-  const at = (key, name, rank) => {
-    if (!groups.has(key)) groups.set(key, { key, name, rank, rows: [] });
-    return groups.get(key);
-  };
   const frontWin = wins.find((w) => w.sessions.includes(front));
   for (const c of rows) {
     const w = wins.find((x) => x.sessions.includes(c.sessionId));
-    if (w) {
-      const name = w.name || (w.folders[0] ? path.basename(w.folders[0]) : 'Window with no folder');
-      at('w:' + w.pid, name, w === frontWin ? 0 : 1).rows.push(c);
-    } else {
-      const dir = c.cwd || '';
-      at('d:' + dir, (path.basename(dir) || dir || 'Unknown folder') + ' (not open in a window)', 2).rows.push(c);
-    }
+    if (!w) continue;
+    const key = 'w:' + w.pid;
+    if (!groups.has(key)) groups.set(key, { key, name: windowLabel(w), rank: w === frontWin ? 0 : 1, rows: [] });
+    groups.get(key).rows.push(c);
   }
   return [...groups.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
 }
@@ -141,11 +139,14 @@ function body(model) {
       <ul>${g.rows.map(row).join('')}</ul>
     </div>`;
   };
+  const away = model.hidden ? `<p class="away">${model.hidden} ticked conversation${model.hidden === 1 ? ' is' : 's are'} not open in any
+      VS Code window, so the steward cannot send ${model.hidden === 1 ? 'it' : 'them'} anything; not listed.
+      <button data-act="drop-hidden">Untick ${model.hidden === 1 ? 'it' : 'them'}</button></p>` : '';
   return !model.front
     ? '<p class="empty">Open a Claude Code conversation. The conversations ticked here are the ones it manages.</p>'
     : `<div class="head"><span>Managed by <b>${esc(model.front.title)}</b>: ${model.managed}</span>
-         <button data-act="all">Select all</button><button data-act="none">Clear</button></div>
-       ${model.groups.length ? model.groups.map(group).join('') : '<p class="empty">No other Claude Code conversation is open.</p>'}`;
+         <button data-act="all">Select all</button><button data-act="none">Clear</button></div>${away}
+       ${model.groups.length ? model.groups.map(group).join('') : '<p class="empty">No other Claude Code conversation is open in a VS Code window.</p>'}`;
 }
 
 /*
@@ -170,7 +171,8 @@ function shell(list, nonce) {
   .when { opacity: 0.6; margin-left: auto; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--vscode-disabledForeground, #888); }
   .dot.working { background: #22c55e; } .dot.unread { background: #ef4444; } .dot.prompt { background: #3b82f6; }
-  .empty { opacity: 0.7; }
+  .empty, .away { opacity: 0.7; }
+  .away button { margin-left: 6px; }
   .group { margin-bottom: 6px; }
   .ghead { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-weight: 600; }
   .ghead .count { opacity: 0.6; font-weight: normal; }
@@ -201,26 +203,30 @@ function shell(list, nonce) {
  * shownHere(id) -> whether this window shows that conversation's panel, canWrite() -> whether this window may write
  * shared files, enabled(), log(message), home, dir (the plan directory), windowName(), windowFolders() and shownList()
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
- * the live session records, alive(pid), and post(address, text) in place of stewards.post.
+ * the live session records, alive(pid), post(address, text) in place of stewards.post, and changed(), called once the
+ * table of stewards has been rewritten here.
  */
 function create(vscode, deps) {
   deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
-    windowName: () => '', windowFolders: () => [], shownList: () => [] }, deps);
+    windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {} }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
 
   const model = (all, front) => {
     const table = stewards.read(deps.dir);
     const mine = new Set(front && table[front] ? table[front].manages : []);
-    const rows = [...all.values()].filter((c) => c.sessionId !== front)
+    const wins = windows();
+    const open = (id) => wins.some((w) => w.sessions.includes(id));
+    const rows = [...all.values()].filter((c) => c.sessionId !== front && open(c.sessionId))
       .map((c) => Object.assign({ managed: mine.has(c.sessionId) }, c));
     rows.sort((a, b) => (b.managed - a.managed) || (b.lastActiveAt - a.lastActiveAt));
-    const groups = grouped(rows, windows(), front);
+    const groups = grouped(rows, wins, front);
+    const hidden = [...mine].filter((id) => !open(id));
     const self = front && all.get(front);
     // The conversation in front may not be in the list yet: `claude agents --json` is read at most every half minute.
     const title = self ? self.title : front ? conversations.claudeTitle({ sessionId: front, name: '', cwd: '' },
       deps.titles({ sessionId: front }), () => deps.readPlan(front)) : '';
-    return { front: front ? { id: front, title } : null, rows, groups, managed: mine.size };
+    return { front: front ? { id: front, title } : null, rows, groups, managed: mine.size, hidden: hidden.length, hiddenIds: hidden };
   };
 
   /* This window's entry in the windows folder, written when what it shows changes and once a minute besides. */
@@ -329,8 +335,9 @@ function create(vscode, deps) {
       const g = model(last, front).groups.find((x) => x.key === m.key);
       for (const c of g ? g.rows : []) { if (m.on) mine.add(c.sessionId); else mine.delete(c.sessionId); }
     }
-    else if (m.type === 'all') for (const id of last.keys()) { if (id !== front) mine.add(id); }
+    else if (m.type === 'all') for (const c of model(last, front).rows) mine.add(c.sessionId);
     else if (m.type === 'none') mine.clear();
+    else if (m.type === 'drop-hidden') for (const id of model(last, front).hiddenIds) mine.delete(id);
     else if (m.type === 'open' && typeof m.id === 'string') {
       const shown = await deps.reveal(m.id);
       if (!shown) vscode.window.showInformationMessage('That conversation is not open in this window. Open it from the session list of the window it runs in.');
@@ -340,6 +347,7 @@ function create(vscode, deps) {
     for (const id of mine) if (last.get(id)) names[id] = last.get(id).title;
     stewards.setManaged(front, [...mine], names, { dir: deps.dir });
     render();
+    deps.changed();
   };
 
   const provider = {

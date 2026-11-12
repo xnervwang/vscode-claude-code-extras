@@ -25,6 +25,8 @@ const { safeColor } = webview;
 const { readTasks, rememberDirs } = require('./src/tasks');
 const background = require('./src/background');
 const stewardView = require('./src/steward-view');
+const stewardMarks = require('./src/steward-marks');
+const stewards = require('./src/stewards');
 const efforts = require('./src/efforts');
 const { sweepOrphans, planDir, readPlan } = require('./src/workplan');
 const { transcriptOf } = require('./src/claude-files');
@@ -758,9 +760,34 @@ function start(context, log, renamed, handing = false) {
     live: () => liveStates, unread: () => unreadKeys, reveal: (sessionId) => claude.source.reveal(sessionId), shownHere,
     canWrite: () => !removed() && !replaced() && !uninstalling(), enabled: () => enabled() && !removed(),
     log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(), shownList,
+    changed: () => redrawStewards(),
     windowName: () => vscode.workspace.name || '', windowFolders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push(steward);
+  /* Tab titles and the session list are redrawn when stewards.json changes, whichever window changed it
+     (src/steward-marks.js). The file is replaced by a rename, which a watch on the file itself would miss, so the
+     folder is watched. The folder may not exist yet at startup; the ten-second timer below retries the watch. */
+  const redrawStewards = () => {
+    try { if (typeof globalThis.__cceRefreshTabIcons === 'function') globalThis.__cceRefreshTabIcons(); } catch (_) { /* next change */ }
+    try { if (typeof globalThis.__cceSessionsChanged === 'function') globalThis.__cceSessionsChanged(); } catch (_) { /* next change */ }
+  };
+  let stewardWatch = null, stewardSettle = 0;
+  const watchStewards = () => {
+    if (stewardWatch) return;
+    try {
+      stewardWatch = fs.watch(planDir(), { persistent: false }, (event, name) => {
+        if (name && name !== stewards.FILE) return;
+        if (stewardSettle) clearTimeout(stewardSettle);
+        stewardSettle = setTimeout(() => { stewardSettle = 0; redrawStewards(); }, 300);
+      });
+      stewardWatch.on('error', () => { try { stewardWatch.close(); } catch (_) { /* closed */ } stewardWatch = null; });
+    } catch (_) { stewardWatch = null; }
+  };
+  watchStewards();
+  context.subscriptions.push({ dispose: () => {
+    if (stewardSettle) clearTimeout(stewardSettle);
+    if (stewardWatch) { try { stewardWatch.close(); } catch (_) { /* closed */ } }
+  } });
 
   globalThis.__cceAnswerHook = (key, sent, reason) => claude.answered(key, sent, reason);
   context.subscriptions.push({ dispose: () => { if (globalThis.__cceAnswerHook) delete globalThis.__cceAnswerHook; } });
@@ -884,6 +911,7 @@ function start(context, log, renamed, handing = false) {
     ? infos.map((i) => (i && i.state === 'idle' && bgWorking.has(i.sessionId) ? Object.assign({}, i, { state: 'running' }) : i))
     : infos);
   const bgTimer = setInterval(() => {
+    watchStewards();
     readBgWorking().catch((e) => log.appendLine('work running after a turn: ' + (e && e.message)));
   }, 10000);
   context.subscriptions.push({ dispose: () => {
@@ -891,11 +919,20 @@ function start(context, log, renamed, handing = false) {
     if (globalThis.__cceWithBackground) delete globalThis.__cceWithBackground;
   } });
   const tabIcons = new Map(), tabIconUris = new Map();
+  const stewardTable = stewardMarks.tableReader(planDir()), stewardTabs = new WeakMap(), stewardListed = new Map();
   globalThis.__cceTabIcon = (panel, state, run, home, sessionId) => {
     try {
       claude.track(panel, sessionId);
       const title = tabdot.withoutMark(panel.title);
       if (panel.title !== title) panel.title = title;
+      if (typeof sessionId === 'string' && sessionId) {
+        const t = enabled() && !removed() ? stewardTable()[sessionId.toLowerCase()] : null;
+        const named = t || stewardMarks.withoutBell(panel.title) !== panel.title ? readTitles.titles({ sessionId }) || {} : {};
+        const next = stewardMarks.tabTitle(panel.title, stewardTabs.get(panel) || null, named.custom, t ? t.manages.length : 0,
+          named.custom || named.ai);
+        if (next.kept) stewardTabs.set(panel, next.kept); else stewardTabs.delete(panel);
+        if (panel.title !== next.title) panel.title = next.title;
+      }
       if (!enabled() || removed() || typeof home !== 'string') return undefined;
       if (run !== 'running' && bgWorking.has(sessionId)) run = 'running';
       const icons = tabdot.iconsFor(path.join(home, 'resources'), path.join(context.globalStorageUri.fsPath, 'tab-icons'),
@@ -991,8 +1028,10 @@ function start(context, log, renamed, handing = false) {
   } catch (_) { /* the periodic refresh still carries a change across */ }
   /* Read by the patched host each time it builds the session list (src/bgsessions.js). */
   globalThis.__cceListedSessions = (entries, cwd) => {
-    if (removed() || cfg().get(HIDE_BG_SETTING, true) === false) return entries;
-    return bgSessions.withoutBackground(entries, cwd);
+    if (removed()) return entries;
+    const listed = cfg().get(HIDE_BG_SETTING, true) === false ? entries : bgSessions.withoutBackground(entries, cwd);
+    return enabled() ? stewardMarks.marked(listed, stewardTable(), stewardListed, Date.now(),
+      (id) => (readTitles.titles({ sessionId: id }) || {}).custom || '') : listed;
   };
   /* Read by the patched host each time it works out which conversations are in use and so not to be archived. */
   globalThis.__ccePinnedIds = () => {

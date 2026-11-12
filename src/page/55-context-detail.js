@@ -85,6 +85,14 @@
   };
   var renderCtx = function(u){
     CTX.textContent = '';
+    // The tooltip is hidden while the breakdown is open, so its text goes at the top.
+    var said = tipLines();
+    if (said) {
+      var top = document.createElement('div');
+      top.textContent = said;
+      top.style.whiteSpace = 'pre-wrap'; top.style.opacity = '0.8'; top.style.marginBottom = '6px';
+      CTX.appendChild(top);
+    }
     var cats = (u.categories || []).filter(function(c){ return c && c.tokens > 0 && !c.isDeferred; });
     var head = document.createElement('div');
     head.style.display = 'flex'; head.style.justifyContent = 'space-between';
@@ -140,7 +148,7 @@
     CTX.id = 'cce-ctx';
     var s = CTX.style;
     s.position = 'fixed'; s.zIndex = '32'; s.display = 'none';
-    s.width = '330px'; s.maxHeight = '60vh'; s.overflowY = 'auto';
+    s.width = '352px'; s.boxSizing = 'border-box'; s.maxHeight = '60vh'; s.overflowY = 'auto';
     s.padding = '8px 10px'; s.borderRadius = '5px';
     s.fontSize = '11px'; s.lineHeight = '1.5';
     s.background = 'var(--vscode-editorHoverWidget-background, rgba(30,30,30,0.99))';
@@ -156,17 +164,13 @@
   };
   // The panel puts its own tooltip on this button, carrying the summary figure. No node is ever added inside it: one
   // added inside a node the panel renders can break that rendering, and then the page stops taking clicks and keys.
-  // To add a line, the tooltip's text is copied into a separate box placed where it is, and the tooltip is hidden with
-  // an inline style, which the panel's rendering leaves alone.
+  // To add lines, the script hides the tooltip with an inline style (the panel's rendering keeps inline styles) and
+  // shows a copy of it, with the lines appended, at the same spot.
   var nativeTip = function(){
     if (!ctxBtn || !ctxBtn.parentElement) return null;
     var kids = ctxBtn.parentElement.children;
     for (var i = 0; i < kids.length; i++) if (kids[i] !== ctxBtn) return kids[i];
     return null;
-  };
-  var anchorRect = function(){
-    var ref = nativeTip() || ctxBtn;
-    return ref ? ref.getBoundingClientRect() : null;
   };
   /* The work plan's figures for this panel's conversation, as last received (src/page/80-session-info.js). */
   var planNow = function(){
@@ -185,59 +189,121 @@
   /* The tooltip's text, one line per child element. */
   var tipText = function(el){
     var kids = el.children || [];
+    if (kids.length === 1 && kids[0].children && kids[0].children.length) return tipText(kids[0]);
     if (!kids.length) return String(el.textContent || '').trim();
     var out = [];
     for (var i = 0; i < kids.length; i++) { var t = String(kids[i].textContent || '').trim(); if (t) out.push(t); }
     return out.join('\n');
   };
-  /* One box in the tooltip's place: the tooltip's text, the work plan's line, and the breakdown's loading or error note.
-     Hidden while the breakdown is open, which has its own Work plan section. */
-  var NOTEBOX = null, noteStatus = '', hiddenTip = null;
+  var NOTEBOX = null, noteKey = '', noteFrom = null, noteStatus = '', hiddenTip = null, hiddenText = '';
   var showTip = function(){
     if (hiddenTip) { try { hiddenTip.style.visibility = ''; } catch (e) {} hiddenTip = null; }
+  };
+  var hideTip = function(tip){
+    if (tip === hiddenTip) return;
+    showTip();
+    hiddenText = tipText(tip);
+    try { tip.style.visibility = 'hidden'; hiddenTip = tip; } catch (e) {}
+  };
+  /* The tooltip's text, or the copy saved when it was hidden, since the panel may have removed it by now. */
+  var tipLines = function(){
+    var tip = nativeTip();
+    return tip && tip !== hiddenTip ? tipText(tip) : hiddenTip ? hiddenText : '';
+  };
+  var dropNote = function(){
+    if (NOTEBOX) NOTEBOX.style.display = 'none';
   };
   var noteLine = function(text){
     noteStatus = text || '';
     paintNote();
   };
-  var paintNote = function(){
-    var p = planNow();
-    var ours = ctxOver && !(CTX && CTX.style.display === 'block') ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus].filter(Boolean) : [];
-    if (!ours.length) { if (NOTEBOX) NOTEBOX.style.display = 'none'; showTip(); return; }
-    var tip = nativeTip(), r = (tip || ctxBtn) ? (tip || ctxBtn).getBoundingClientRect() : null;
-    var text = (tip ? [tip === hiddenTip && NOTEBOX && NOTEBOX.dataset ? NOTEBOX.dataset.tip || '' : tipText(tip)] : []).concat(ours).filter(Boolean).join('\n');
-    if (!NOTEBOX || !NOTEBOX.isConnected) {
-      NOTEBOX = document.createElement('div');
-      NOTEBOX.id = 'cce-ctx-note';
-      var s = NOTEBOX.style;
-      s.position = 'fixed'; s.zIndex = '32'; s.display = 'none';
+  /*
+   * Builds the replacement box: a clone of the tooltip, so the panel's CSS styles it, with each extra line given the
+   * class of the tooltip's last line. With no tooltip to clone, it builds a plain box in the hover widget colors.
+   */
+  var makeNote = function(tip, base, lines, fresh){
+    var box = null;
+    if (tip && typeof tip.cloneNode === 'function') {
+      try {
+        box = tip.cloneNode(true);
+        var inner = box.firstElementChild || box, last = inner.lastElementChild;
+        for (var i = 0; i < lines.length; i++) {
+          var d = document.createElement('div');
+          if (last && last.className) d.className = last.className;
+          d.textContent = lines[i];
+          inner.appendChild(d);
+        }
+        if (box.removeAttribute) box.removeAttribute('data-footer-overlay');
+        // Taking over a tooltip already on screen must not replay its fade-in.
+        if (!fresh) box.style.animation = 'none';
+        box.style.whiteSpace = 'normal'; box.style.overflowWrap = 'anywhere';
+      } catch (e) { box = null; }
+    }
+    if (!box) {
+      box = document.createElement('div');
+      var s = box.style;
       s.padding = '4px 8px'; s.borderRadius = '4px';
       s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'pre-wrap'; s.boxSizing = 'border-box';
       s.background = 'var(--vscode-editorHoverWidget-background, rgba(30,30,30,0.99))';
       s.color = 'var(--vscode-editorHoverWidget-foreground, #ddd)';
       s.border = '1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.18))';
-      s.pointerEvents = 'none';
-      document.body.appendChild(NOTEBOX);
+      box.textContent = [base].concat(lines).filter(Boolean).join('\n');
     }
-    if (tip && tip !== hiddenTip) {
-      if (NOTEBOX.dataset) NOTEBOX.dataset.tip = tipText(tip);
-      showTip();
-      try { tip.style.visibility = 'hidden'; hiddenTip = tip; } catch (e) {}
-    }
-    if (NOTEBOX.textContent !== text) NOTEBOX.textContent = text;
-    var b = ctxBtn && ctxBtn.getBoundingClientRect();
-    // Where the tooltip was: its bottom edge when there is one, else just above the button. Wrapped, never wider than
-    // the page, so a long line cannot run off its left edge.
-    if (r) NOTEBOX.style.bottom = Math.max(8, window.innerHeight - (tip ? r.bottom : r.top - 6)) + 'px';
-    if (b) NOTEBOX.style.right = Math.max(8, window.innerWidth - b.right) + 'px';
-    NOTEBOX.style.maxWidth = Math.max(160, Math.min(420, window.innerWidth - 16)) + 'px';
-    NOTEBOX.style.display = 'block';
+    box.id = 'cce-ctx-note';
+    box.style.position = 'fixed'; box.style.zIndex = '32'; box.style.margin = '0';
+    box.style.visibility = 'visible'; box.style.pointerEvents = 'none';
+    box.style.left = 'auto'; box.style.top = 'auto';
+    return box;
   };
+  /* fresh: the tooltip was just added to the page and has not been painted yet, so the clone keeps its fade-in. */
+  var paintNote = function(fresh){
+    var open = !!(CTX && CTX.style.display === 'block');
+    var p = planNow();
+    var ours = ctxOver && !open ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus].filter(Boolean) : [];
+    var tip = nativeTip();
+    if (!ours.length) {
+      dropNote();
+      // A tooltip that appears after the breakdown opened is hidden too, and the breakdown redrawn with its text.
+      if (open && ctxOver && tip) {
+        var was = hiddenTip;
+        hideTip(tip);
+        if (was !== tip && ctxCache && ctxBtn) { renderCtx(ctxCache); placeCtx(ctxBtn); }
+      } else if (!open) showTip();
+      return;
+    }
+    var r = tip ? tip.getBoundingClientRect() : null;
+    if (tip) hideTip(tip);
+    var base = tip ? hiddenText : '';
+    var key = base + '\n' + ours.join('\n');
+    if (!NOTEBOX || !NOTEBOX.isConnected || noteKey !== key || noteFrom !== tip) {
+      var box = makeNote(tip, base, ours, fresh === true);
+      if (NOTEBOX && NOTEBOX.parentNode) NOTEBOX.parentNode.removeChild(NOTEBOX);
+      document.body.appendChild(box);
+      NOTEBOX = box; noteKey = key; noteFrom = tip;
+    }
+    var b = ctxBtn && ctxBtn.getBoundingClientRect();
+    var ref = r || b;
+    if (!ref) return;
+    NOTEBOX.style.maxWidth = Math.max(160, Math.min(420, window.innerWidth - 16)) + 'px';
+    if (r && b && r.top >= b.bottom) { NOTEBOX.style.top = r.top + 'px'; NOTEBOX.style.bottom = 'auto'; }
+    else NOTEBOX.style.bottom = Math.max(8, window.innerHeight - (r ? r.bottom : ref.top - 6)) + 'px';
+    NOTEBOX.style.display = 'block';
+    inPage(NOTEBOX, ref.right);
+  };
+  /* Aligns the box's right edge with `right`, then shifts it right if its left edge would be less than 8 px from the page edge. */
+  var inPage = function(el, right){
+    var at = Math.max(8, window.innerWidth - right);
+    el.style.right = at + 'px';
+    var bb = el.getBoundingClientRect();
+    if (bb && bb.left < 8) el.style.right = Math.max(8, at - (8 - bb.left)) + 'px';
+  };
+  /* The breakdown's bottom goes where the tooltip's bottom is, or just above the button when there is no tooltip. */
   var placeCtx = function(btn){
-    var r = anchorRect() || btn.getBoundingClientRect();
+    var tip = nativeTip(), r = tip ? tip.getBoundingClientRect() : null;
     var b = btn.getBoundingClientRect();
-    CTX.style.bottom = Math.max(8, window.innerHeight - r.top + 6) + 'px';
-    CTX.style.right = Math.max(8, window.innerWidth - b.right) + 'px';
+    CTX.style.bottom = Math.max(8, window.innerHeight - (r ? r.bottom : b.top - 6)) + 'px';
+    CTX.style.width = Math.max(160, Math.min(352, window.innerWidth - 16)) + 'px';
+    inPage(CTX, (r || b).right);
   };
   var hideCtx = function(){
     if (ctxHideTimer) clearTimeout(ctxHideTimer);
@@ -257,9 +323,10 @@
   var showCtx = function(usage){
     if (!ctxOver || !ctxBtn) return;
     ensureCtx();
-    placeCtx(ctxBtn);
     renderCtx(usage);
     CTX.style.display = 'block';
+    // Positioned after showing it: a box with display:none has no width to measure.
+    placeCtx(ctxBtn);
     noteLine('');
   };
   // The breakdown crosses into the command-line side and is recomputed there, so it is requested only after the
@@ -306,8 +373,8 @@
       if (ctxHideTimer) { clearTimeout(ctxHideTimer); ctxHideTimer = null; }
       askPlanSoon();
       if (ctxFresh()) showCtx(ctxCache);
-      else paintNote();
-      // The panel's tooltip may render after mouseenter; one more paint folds it in.
+      // The panel adds its tooltip after this event, and ctxTipWatch handles it then. This delayed paint covers a
+      // build that has no such tooltip.
       setTimeout(function(){ if (ctxOver) paintNote(); }, 150);
       if (ctxOpenTimer) clearTimeout(ctxOpenTimer);
       // Two seconds resting on the button before anything happens: reading the panel's own summary, or passing over
@@ -325,6 +392,20 @@
     btn.addEventListener('mouseleave', function(){
       ctxOver = false;
       if (ctxOpenTimer) { clearTimeout(ctxOpenTimer); ctxOpenTimer = null; }
+      // The panel removes its tooltip on mouseleave, so the replacement goes too.
+      dropNote();
+      showTip();
       hideCtx();
     });
+  };
+  /* Called with each batch of records from the document observer (src/page/99-sweep.js). Mutation callbacks run before
+     the next paint, so the tooltip is hidden before it is ever drawn. */
+  var ctxTipWatch = function(records){
+    if (!ctxOver || !ctxBtn || !ctxBtn.parentElement) return;
+    for (var i = 0; i < records.length; i++) {
+      if (records[i].target === ctxBtn.parentElement && records[i].addedNodes && records[i].addedNodes.length) {
+        paintNote(true);
+        return;
+      }
+    }
   };

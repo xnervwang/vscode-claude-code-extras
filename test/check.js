@@ -1090,31 +1090,48 @@ console.log('\nthe context breakdown on the usage meter');
   const made = [], timers = [];
   const el = () => {
     let text = '';
-    const e = { style: {}, children: [], isConnected: true, parentElement: null,
+    const e = { style: {}, children: [], isConnected: false, parentElement: null, parentNode: null,
       // As in a page: setting the text replaces what the element held.
       get textContent() { return text; }, set textContent(v) { text = String(v); this.children = []; },
+      get firstElementChild() { return this.children[0] || null; },
+      get lastElementChild() { return this.children[this.children.length - 1] || null; },
       appendChild(c) { this.children.push(c); c.parentElement = this; return c; },
       addEventListener(t, f) { (this.on = this.on || {})[t] = f; },
-      getBoundingClientRect: () => ({ top: 500, bottom: 520, left: 280, right: 300 }) };
+      removeAttribute(n) { delete (this.attrs || {})[n]; },
+      // Stand-in layout for the two boxes: right edge from style.right, width from style.width or 200 px.
+      getBoundingClientRect() {
+        if (this.id !== 'cce-ctx-note' && this.id !== 'cce-ctx') return { top: 500, bottom: 520, left: 280, right: 300 };
+        const right = 400 - parseFloat(this.style.right || '0'), width = parseFloat(this.style.width || '200');
+        return { top: 0, bottom: 0, left: right - width, right };
+      } };
     made.push(e);
     return e;
   };
+  const body = { appendChild(c) { c.parentNode = body; c.isConnected = true; return c; },
+    removeChild(c) { c.parentNode = null; c.isConnected = false; return c; } };
   const btn = el();
   btn.parentElement = { children: [btn] };
   const asked = [];
+  // Simulates the panel adding its tooltip next to the button and the document observer reporting it.
+  const mount = (tip) => {
+    btn.parentElement.children.push(tip);
+    tip.parentElement = btn.parentElement;
+    env.out.watch([{ type: 'childList', target: btn.parentElement, addedNodes: [tip], removedNodes: [] }]);
+  };
+  const unmount = () => { btn.parentElement.children.splice(1); };
   const env = { out: {}, sessionRef: null, WeakSet, Date, window: { innerHeight: 800, innerWidth: 400 },
     setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout: () => {},
-    document: { querySelector: () => btn, createElement: el, body: { appendChild() {} } },
+    document: { querySelector: () => btn, createElement: el, body },
     // From src/page/80-session-info.js, which this fragment is assembled with.
     PLANS: {}, sigValue: (k) => (k === 'sessionId' ? 'S1' : undefined), askPlan: (sid) => asked.push(sid) };
-  new vm.Script(`(function(){${KIT}\n${fragment}\n;out.wire = wireCtxButton; out.arrived = planArrived;`
+  new vm.Script(`(function(){${KIT}\n${fragment}\n;out.wire = wireCtxButton; out.arrived = planArrived; out.watch = ctxTipWatch;`
     + 'out.keep = function(u, k){ ctxCache = u; ctxKey = k; ctxAt = Date.now(); };})()', { filename: '55-context-detail.js' })
     .runInNewContext(env);
   env.out.wire();
   const run = () => { const due = timers.splice(0); due.forEach((f) => f()); };
   const hover = () => { btn.on.mouseenter(); run(); };
   const leave = () => { btn.on.mouseleave(); run(); };
-  const loading = () => made.some((e) => e.id === 'cce-ctx-note' && e.style.display === 'block' && e.textContent === 'Loading breakdown...');
+  const loading = () => made.some((e) => e.id === 'cce-ctx-note' && e.isConnected && e.style.display === 'block' && e.textContent === 'Loading breakdown...');
   const usage = { totalTokens: 5 };
   const usageFigures = { categories: [], totalTokens: 5, rawMaxTokens: 100, percentage: 5, model: 'opus' };
 
@@ -1137,7 +1154,7 @@ console.log('\nthe context breakdown on the usage meter');
 
   /* The work plan's part of the context: asked for as the pointer arrives, shown at once above the panel's own tooltip,
      and as a section of the breakdown once that opens. */
-  const note = () => made.find((e) => e.id === 'cce-ctx-note');
+  const note = () => made.filter((e) => e.id === 'cce-ctx-note' && e.isConnected).pop();
   const box = () => made.find((e) => e.id === 'cce-ctx');
   const askedOnce = asked.length === 1 && asked[0] === 'S1';
   btn.on.mouseenter();
@@ -1160,23 +1177,80 @@ console.log('\nthe context breakdown on the usage meter');
     ok('the breakdown carries a Work plan section with its share of the window, and the line over the tooltip gives way to it');
   } else bad(`the breakdown read ${JSON.stringify(shown)}`);
   leave();
-  /* With the panel's own tooltip beside the button, its text and the work plan's line are one box, in its place. */
+  /* With the tooltip present, its text and the work plan line form one box in its place. The tooltip is hidden in the
+     same task that adds it, so the two are never drawn together. */
   const tip = el();
   tip.textContent = '13% of context remaining until auto-compact.';
   tip.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 120, right: 300 });
-  btn.parentElement.children.push(tip);
   env.out.keep(null, '');
   btn.on.mouseenter();
+  mount(tip);
   const together = note() && note().style.display === 'block' ? note().textContent : '';
   const hiddenWhileShown = tip.style.visibility;
-  const placed = [note().style.bottom, note().style.maxWidth, note().style.whiteSpace];
-  leave();
+  const placed = [note().style.bottom, note().style.right, note().style.maxWidth, note().style.whiteSpace];
+  btn.on.mouseleave();
+  unmount();
+  const gone = [tip.style.visibility, note() ? note().style.display : 'none'];
+  run();
   if (together === '13% of context remaining until auto-compact.\nWork plan: ' + line && hiddenWhileShown === 'hidden'
-      && tip.style.visibility === '' && note().style.display === 'none' && placed[0] === '304px' && placed[2] === 'pre-wrap'
-      && placed[1] === '384px') {
-    ok('the panel\'s tooltip and the work plan\'s line are one box where the tooltip was, wrapped to the page, and the tooltip comes back when the pointer leaves');
-  } else bad(`one box read ${JSON.stringify(together)}, tooltip ${JSON.stringify([hiddenWhileShown, tip.style.visibility])}, placed ${JSON.stringify(placed)}`);
-  btn.parentElement.children.pop();
+      && gone[0] === '' && gone[1] === 'none' && placed.join() === '304px,100px,384px,pre-wrap') {
+    ok('the panel\'s tooltip and the work plan\'s line are one box where the tooltip was, no wider than the page, gone with the tooltip');
+  } else bad(`one box read ${JSON.stringify(together)}, tooltip ${JSON.stringify([hiddenWhileShown, gone])}, placed ${JSON.stringify(placed)}`);
+
+  /* Tooltip at the page's left edge: the box is shifted right to start 8 px inside. */
+  const nearLeft = el();
+  nearLeft.textContent = '13% of context remaining until auto-compact.';
+  nearLeft.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 0, right: 60 });
+  btn.on.mouseenter();
+  mount(nearLeft);
+  const shifted = note() ? [note().style.right, note().getBoundingClientRect().left] : [];
+  btn.on.mouseleave();
+  unmount();
+  run();
+  if (shifted.join() === '192px,8') ok('with the tooltip at the page\'s left edge, the box is moved right to start 8 px inside the page');
+  else bad(`near the left edge the box was placed at ${JSON.stringify(shifted)}`);
+
+  /* The box is a clone of the tooltip, and the added line gets the class of the tooltip's last line. */
+  const piece = (cls, text) => { const e = el(); e.className = cls; if (text) e.textContent = text; return e; };
+  const copyOf = (src) => {
+    const c = piece(src.className, src.children.length ? '' : src.textContent);
+    c.style = Object.assign({}, src.style);
+    c.cloneNode = () => copyOf(c);
+    src.children.forEach((k) => c.appendChild(copyOf(k)));
+    return c;
+  };
+  const real = piece('popup_x');
+  const inner = real.appendChild(piece('content_x'));
+  inner.appendChild(piece('text_x', '13% of context remaining until auto-compact.'));
+  inner.appendChild(piece('hint_x', 'Click to compact now.'));
+  real.cloneNode = () => copyOf(real);
+  real.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 120, right: 300 });
+  btn.on.mouseenter();
+  mount(real);
+  const copy = note();
+  const lines = copy && copy.children[0] ? copy.children[0].children.map((k) => `${k.className}:${k.textContent}`) : [];
+  const copied = [copy && copy.className, copy && copy.style.position, copy && copy.style.visibility, copy && copy.style.animation, real.style.visibility];
+  btn.on.mouseleave();
+  unmount();
+  run();
+  if (JSON.stringify(lines) === JSON.stringify(['text_x:13% of context remaining until auto-compact.', 'hint_x:Click to compact now.', 'hint_x:Work plan: ' + line])
+      && copied.join() === 'popup_x,fixed,visible,,hidden') {
+    ok('the box is a copy of the panel\'s tooltip with the work plan\'s line in the style of its last line, keeping its fade-in when taken over on arrival');
+  } else bad(`the copy held ${JSON.stringify(lines)}, ${JSON.stringify(copied)}`);
+
+  /* With the breakdown open, it sits where the tooltip was and starts with the tooltip's text; the tooltip stays hidden,
+     even if it is added after the breakdown. */
+  env.out.keep(Object.assign({}, usageFigures, { rawMaxTokens: 100000 }), '5');
+  btn.on.mouseenter();
+  mount(tip);
+  const opening = box() && box().children[0] ? box().children[0].textContent : '';
+  const under = [tip.style.visibility, box().style.bottom, box().style.display, note() ? note().style.display : 'none'];
+  btn.on.mouseleave();
+  unmount();
+  run();
+  if (opening === '13% of context remaining until auto-compact.' && under.join() === 'hidden,304px,block,none' && tip.style.visibility === '') {
+    ok('the open breakdown stands in the tooltip\'s place, begins with its text, and keeps it hidden until the pointer leaves');
+  } else bad(`the breakdown began ${JSON.stringify(opening)}, with ${JSON.stringify(under)}, tooltip after ${JSON.stringify(tip.style.visibility)}`);
 
   delete env.PLANS.S1;
   env.out.keep(wide, '5');
@@ -7926,7 +8000,7 @@ console.log('\nbackground sessions left out of the session list');
   }
   const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   const setting = require('../package.json').contributes.configuration.properties['claudeCodePlus.hideBackgroundSessions'];
-  if (/globalThis\.__cceListedSessions = \(entries, cwd\) => \{\s*if \(removed\(\) \|\| cfg\(\)\.get\(HIDE_BG_SETTING, true\) === false\) return entries;/.test(extSrc)
+  if (/globalThis\.__cceListedSessions = \(entries, cwd\) => \{\s*if \(removed\(\)\) return entries;\s*const listed = cfg\(\)\.get\(HIDE_BG_SETTING, true\) === false \? entries : bgSessions\.withoutBackground\(entries, cwd\);/.test(extSrc)
       && /if \(e\.affectsConfiguration\(HIDE_BG_SETTING\)\) \{\s*try \{ if \(typeof globalThis\.__cceSessionsChanged === 'function'\) globalThis\.__cceSessionsChanged\(\);/.test(extSrc)
       && setting && setting.default === true) {
     ok('background sessions are left out by default, a setting turns that off, and flipping it makes every panel read the list again');
@@ -8141,6 +8215,7 @@ console.log('\nthe Steward panel');
       { sessionId: S(4), kind: 'background', cwd: '/w/d', name: 'bg', status: 'busy' },
       { sessionId: S(5), kind: 'interactive', cwd: '/w/e', name: 'Five', status: 'idle' },
       { sessionId: S(6), kind: 'interactive', cwd: '/w/f', name: 'Six', status: 'idle' },
+      { sessionId: S(7), kind: 'interactive', cwd: '/w/g', name: 'Seven', status: 'idle' },
     ];
     const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] } };
     const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
@@ -8200,15 +8275,22 @@ console.log('\nthe Steward panel');
         writable = true;
         await v._onMessage({ type: 'none' });
         const cleared = st.read(${JSON.stringify(path.join(root, 'plans2'))});
+        st.setManaged(${JSON.stringify(S(1))}, [${JSON.stringify(S(3))}, ${JSON.stringify(S(7))}], {}, { dir: ${JSON.stringify(path.join(root, 'plans2'))} });
+        await v._pass();
+        const away = latest();
+        await v._onMessage({ type: 'drop-hidden' });
+        const dropped = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
+        await v._onMessage({ type: 'all' });
+        const everyShown = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked }));
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
     if (out.error) bad('the panel threw: ' + out.error);
     else {
       const names = (h) => [...h.matchAll(/data-open="([^"]+)"/g)].map((m) => m[1]);
       if (JSON.stringify(names(out.first).sort()) === JSON.stringify([S(2), S(3), S(6)].sort()) && !/type="checkbox"[^>]*\bchecked\b/.test(out.first)
           && out.first.includes('Managed by <b>steward-ab</b>: 0')) {
-        ok('the panel lists the other conversations, none ticked, leaving out the one in front, bg sessions and claude -p workers');
+        ok('the panel lists the other conversations open in a window, none ticked, leaving out the one in front, bg sessions, claude -p workers and any open in no window');
       } else bad(`the first panel listed ${JSON.stringify(names(out.first))}: ${out.first.slice(0, 300)}`);
       const mine = out.ticked[S(1)];
       if (mine && JSON.stringify(mine.manages) === JSON.stringify([S(2), S(3)]) && mine.names[S(2)] === 'Two'
@@ -8237,6 +8319,41 @@ console.log('\nthe Steward panel');
       else bad(`a hidden panel with no steward still listed conversations ${out.idle} time(s)`);
       if (out.stillTicked[S(1)] && out.cleared[S(1)] === undefined) ok('a window that may not write shared files changes nothing; Clear empties the list');
       else bad(`clearing gave ${JSON.stringify([out.stillTicked, out.cleared])}`);
+      if (/1 ticked conversation is not open in any\s+VS Code window/.test(out.away) && !names(out.away).includes(S(7))
+          && JSON.stringify(out.dropped) === JSON.stringify([S(3)]) && JSON.stringify(out.everyShown) === JSON.stringify([S(2), S(3), S(6)].sort())) {
+        ok('a ticked conversation open in no window is counted, not listed, and can be unticked; Select all ticks only the listed ones');
+      } else bad(`with one ticked outside every window: ${JSON.stringify([out.away.slice(0, 400), out.dropped, out.everyShown])}`);
+    }
+
+    /* A steward's title in its tab and in the session list (src/steward-marks.js). */
+    {
+      const sm = require('../src/steward-marks');
+      const table = { [S(1)]: { manages: [S(2), S(3)], names: {}, at: 0 } };
+      const marks = new Map();
+      const entries = [{ id: S(1).toUpperCase(), summary: 'Claude Code hover box', customTitle: 'Claude Code hover box' }, { id: S(2), summary: 'Two' },
+        { sessionId: S(4), customTitle: 'Night watch ' + sm.BELL }];
+      const listed = sm.marked(entries, Object.assign({ [S(4)]: { manages: [S(2)], names: {}, at: 0 } }, table), marks, 1000,
+        (id) => (id === S(4) ? 'Night watch' : ''));
+      const auto = listed[0].customTitle, named = listed[2].customTitle;
+      const after = sm.marked(entries, {}, marks, 2000);
+      const later = sm.marked(entries, {}, marks, 2000 + 11 * 60000);
+      if (auto === 'Steward of 2 conversations ' + sm.BELL && listed[0].summary === 'Claude Code hover box' && listed[1] === entries[1]
+          && named === 'Night watch ' + sm.BELL && after[0].customTitle === 'Claude Code hover box' && later[0] === entries[0]
+          && sm.marked(entries, {}, new Map()) === entries) {
+        ok('in the session list a steward is "Steward of N conversations" and a bell, or keeps the name you gave it with one bell, '
+          + 'and gets its own title back for a while once it manages nothing; others are left alone');
+      } else bad(`the list showed ${JSON.stringify([auto, named, after[0], later[0]])}`);
+      const a = sm.tabTitle('Claude Code hover box', null, '', 2);
+      const b = sm.tabTitle(a.title, a.kept, '', 3);
+      const c = sm.tabTitle(b.title, b.kept, '', 0);
+      const d = sm.tabTitle('Renamed by Claude Code', b.kept, 'Mine', 3);
+      const e = sm.tabTitle('Steward of 2 conversations ' + sm.BELL, null, '', 0, 'Claude Code hover box');
+      if (a.title === 'Steward of 2 conversations ' + sm.BELL && b.title === 'Steward of 3 conversations ' + sm.BELL
+          && c.title === 'Claude Code hover box' && c.kept === null && d.title === 'Mine ' + sm.BELL && d.kept.original === 'Renamed by Claude Code'
+          && e.title === 'Claude Code hover box') {
+        ok('a steward\'s tab says so, follows the count, goes back to its own title when nothing is ticked, also when the panel '
+          + 'put the steward\'s title there, and a new title from Claude Code is the one it goes back to');
+      } else bad(`the tab titles were ${JSON.stringify([a, b, c, d, e])}`);
     }
 
     /* The plugin's two scripts. */

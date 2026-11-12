@@ -511,6 +511,28 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(Object.entries(hovers).every(([k, v]) => v === LABELS[k]), 'resting on each of them shows what it does', hovers);
       await shot('conversation-footer-hover');
 
+      /* Hovering the usage meter, exactly one box is visible at a time: the panel's tooltip, its copy with extra lines,
+         or the breakdown. */
+      const meter = conv.locator('button[class*="usageButtonV2"]').first();
+      if (await meter.count()) {
+        const boxesNow = () => conv.evaluate(() => [...document.querySelectorAll('[data-footer-overlay], #cce-ctx-note, #cce-ctx')]
+          .filter((e) => { const st = getComputedStyle(e), r = e.getBoundingClientRect(); return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0 && r.width > 0; })
+          .map((e) => `${e.id || 'panel tooltip'}: ${String(e.textContent).slice(0, 80)}`));
+        await meter.hover();
+        await sleep(500);
+        const soon = await boxesNow();
+        await shot('conversation-meter-hover');
+        await sleep(2600);
+        const later = await boxesNow();
+        await shot('conversation-meter-hover-later');
+        check(soon.length === 1 && later.length === 1, 'resting on the usage meter shows one box, before and after the breakdown is due', { soon, later });
+        const inside = await conv.evaluate(() => ['cce-ctx-note', 'cce-ctx'].map((id) => document.getElementById(id))
+          .filter((e) => e && e.style.display === 'block').map((e) => { const r = e.getBoundingClientRect(); return { id: e.id, left: r.left, right: r.right, page: innerWidth }; }));
+        check(inside.every((b) => b.left >= 0 && b.right <= b.page), 'and that box lies inside the page', inside);
+        await page.mouse.move(5, 5);
+        await sleep(300);
+      } else note('no usage meter in this conversation\'s footer, so its hover was not looked at');
+
       await conv.locator('[data-cce-info]').first().click();
       const info = await until(() => conv.evaluate(() => {
         const b = document.getElementById('cce-info');
@@ -727,16 +749,24 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
 
     await step('the steward panel', async () => {
       const front = threads[0];
+      /* The Steward panel lists only conversations open in a window, so the others are opened in tabs first. */
+      for (const t of threads.slice(1)) { await exec('claude-vscode.editor.open', t.id); await sleep(800); }
       await exec('claude-vscode.editor.open', front.id);
       await sleep(1500);
       await exec('workbench.view.extension.claudeCodePlusSteward');
       const frame = await frameWhere(() => /Managed by/.test(document.body ? document.body.innerText : ''), 30000);
       const text = frame ? await frame.evaluate(() => document.body.innerText.slice(0, 300)) : '';
       check(!!frame, 'the Steward panel opens at the bottom of the window for the conversation in front', text);
-      const boxes = frame ? await frame.evaluate(() => [...document.querySelectorAll('input[data-id]')].map((b) => [b.dataset.id, b.checked])) : [];
+      /* Running conversations come from `claude agents --json`, which is polled at most every 30 s. */
+      const listed = () => frame.evaluate(() => [...document.querySelectorAll('input[data-id]')].map((b) => [b.dataset.id, b.checked]));
+      const boxes = frame ? (await until(async () => { const b = await listed(); return b.length ? b : null; }, 40000, 1000)) || [] : [];
       const groups = frame ? await frame.evaluate(() => document.querySelectorAll('input[data-group]').length) : 0;
+      const dataDir = path.join(profile.home, '.claude', 'plugins', 'data', 'agent-work-plan-claude-code-extras');
+      const readAll = (dir) => { try { return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'))); } catch (_) { return []; } };
       check(boxes.length >= 1 && boxes.every(([id, on]) => id !== front.id && !on) && groups >= 1,
-        'it lists the other conversations in groups by window, none ticked, and not the one in front', [boxes, groups]);
+        'it lists the other conversations open in a window, in groups by window, none ticked, and not the one in front',
+        { boxes, groups, windows: readAll(path.join(dataDir, 'windows')).map((w) => w.sessions),
+          running: readAll(path.join(profile.home, '.claude', 'sessions')).map((r) => [r.sessionId, r.kind, r.status]) });
       await shot('steward-panel');
       if (frame && boxes.length) {
         await frame.locator('input[data-id]').first().click();
@@ -745,8 +775,14 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
           try { const t = JSON.parse(fs.readFileSync(file, 'utf8')); return t.stewards && t.stewards[front.id] ? t : null; } catch (_) { return null; }
         }, 10000, 300);
         check(!!table && table.stewards[front.id].manages.includes(boxes[0][0]), 'ticking one makes the conversation in front its steward', table);
+        const marked = await until(async () => (await claudeTabs()).find((x) => x.label === 'Steward of 1 conversation \u{1F6CE}\uFE0F'), 10000, 300);
+        check(!!marked, 'and its tab is titled as a steward, with a bell', await claudeTabs());
+        const row = list ? await until(() => list.evaluate(() => (document.body.innerText.match(/Steward of 1 conversation/g) || []).length), 15000, 500) : 0;
+        check(row >= 1, 'and its row in the session list too', row);
         await shot('steward-ticked');
         await frame.locator('button[data-act="none"]').click();
+        const back = await until(async () => (await claudeTabs()).find((x) => x.active && titled(x.label, front.title)), 10000, 300);
+        check(!!back, 'and clearing gives the tab its own title back', await claudeTabs());
       }
       await exec('workbench.action.closePanel');
     });
