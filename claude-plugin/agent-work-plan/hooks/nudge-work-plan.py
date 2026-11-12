@@ -63,9 +63,9 @@ from changes import changes
 from changes import shell_command  # noqa: F401  (kept beside changes so both read a call the same way)
 from plan_path import (AFTER_OFFER, BRIEF_WIDTH, BRIEFED_SUFFIX, CLOSED_STATES, COMPACTED_SUFFIX, MAYBE_CALL, MAYBE_USER,
                        NOTE_WORD, NUDGED_SUFFIX, OFFERED_SUFFIX, QUESTION_WORD, SETTLED_SUFFIX, STOP_REENTERS,
-                       WAITING_ON_WORD, ask_how, brief_how, brief_of, children, epoch, listed, offer_how, open_tail,
-                       plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output, tool_calls,
-                       turn_began, write_quietly)
+                       WAITING_ON_WORD, ask_how, brief_how, brief_of, children, epoch, listed, notice_turn, offer_how,
+                       open_tail, plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output,
+                       tool_calls, turn_began, write_quietly)
 
 # Every threshold this uses is in plan_path.DEFAULTS, where the editor's settings can override it.
 
@@ -316,6 +316,9 @@ def main():
         return 0
     limits = settings()
     if not limits["enabled"]:
+        return 0
+    # Anything asked of a steward at the end of a notice's turn costs it one more reply to the user, about nothing.
+    if notice_turn(path, payload):
         return 0
     tail = open_tail(payload.get("transcript_path"))
     if tail is None:

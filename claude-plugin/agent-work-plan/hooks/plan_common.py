@@ -623,12 +623,35 @@ def write_turn(plan, turn):
     return write_quietly(turn_file(plan), json.dumps(turn))
 
 
+def this_turn(plan, payload):
+    """The mark beside `plan` if it is for this event's turn, else None."""
+    prompt = payload.get(A.TURN_FIELD)
+    turn = read_turn(plan) if isinstance(prompt, str) and prompt else None
+    return turn if turn and turn.get("prompt") == prompt else None
+
+
 def turn_began(plan, payload):
     """Start time (epoch seconds) of this event's turn, from the mark beside `plan`; None if the mark is missing or is
     for another turn."""
-    prompt = payload.get(A.TURN_FIELD)
-    turn = read_turn(plan) if isinstance(prompt, str) and prompt else None
-    if not turn or turn.get("prompt") != prompt:
-        return None
-    began = turn.get("began")
+    turn = this_turn(plan, payload)
+    began = turn.get("began") if turn else None
     return float(began) if isinstance(began, (int, float)) and not isinstance(began, bool) else None
+
+
+# What Claude Code Plus sends a steward conversation. Claude Code puts one of its lines for a message from another session
+# before it, with or without a cross-session-message tag.
+STEWARD_NOTICE = "Steward notice from Claude Code Plus"
+PEER_WRAPPER = re.compile(r"\s*(?:(?:Another Claude session sent a message(?: while you were working)?"
+                          r"|A peer session sent a message while you were working):\s*)?"
+                          r"(?:<cross-session-message\b[^>]*>\s*)?")
+
+
+def steward_notice(prompt):
+    """Whether the text a turn began with starts with STEWARD_NOTICE, wrapped or not; quoting one does not count."""
+    return isinstance(prompt, str) and prompt.startswith(STEWARD_NOTICE, PEER_WRAPPER.match(prompt).end())
+
+
+def notice_turn(plan, payload):
+    """Whether this event's turn was begun by a steward notice, as the injection marked it."""
+    turn = this_turn(plan, payload)
+    return bool(turn and turn.get("notice") is True)

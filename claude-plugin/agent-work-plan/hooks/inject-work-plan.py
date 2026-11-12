@@ -54,7 +54,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from plan_path import (COMPACTED_SUFFIX, INJECTED_SUFFIX, OPEN_STATES, QUESTION_WORD, STATUS_PARTS, TURN_FIELD,
                        WAITING_ON, WAITING_ON_WORD, any_in, brief_of, children, epoch, launcher_quoted, listed, plan_file,
-                       read_payload, row_command, row_gist, row_help, settings, side_file, write_quietly, write_turn)
+                       read_payload, row_command, row_gist, row_help, settings, side_file, steward_notice, write_quietly,
+                       write_turn)
 
 GLYPH = {"discussing": "?", "todo": "o", "doing": ">", "waiting": "~", "parked": "=", "done": "+", "dropped": "x"}
 LEGEND = "> doing, ? discussing, o todo, ~ waiting, = parked"
@@ -312,7 +313,8 @@ def main():
     now = time.time()
     prompt = payload.get(TURN_FIELD)
     if isinstance(prompt, str) and prompt:
-        write_turn(path, {"prompt": prompt, "began": now, "changes": 0, "reminded": False})
+        write_turn(path, {"prompt": prompt, "began": now, "changes": 0, "reminded": False,
+                          "notice": steward_notice(payload.get("prompt"))})
     nodes = listed(plan.get("nodes"))
     out, left = rows(nodes, now)
     if not out:

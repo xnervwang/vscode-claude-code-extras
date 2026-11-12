@@ -59,7 +59,9 @@ def main():
     if not isinstance(prompt, str) or not prompt:
         return 0
     turn = read_turn(path)
-    if not turn or turn.get("prompt") != prompt or turn.get("reminded") or turn.get("settled"):
+    # A steward looking into a notice has no row of its own to mark doing.
+    if (not turn or turn.get("prompt") != prompt or turn.get("reminded") or turn.get("settled")
+            or turn.get("notice") is True):
         return 0
     limits = settings()
     if not limits["enabled"]:
