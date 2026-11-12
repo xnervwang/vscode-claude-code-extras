@@ -208,9 +208,11 @@ const SETUP = String.raw`
       var row = document.createElement('div');
       row.className = 'timelineMessage_ab12';
       row.innerHTML = '<div class="markdown_m1"><p><span>a</span><code>b</code><span>c</span></p><p><span>d</span></p></div>';
+      // With quietReply, the newest reply's text is a lone dash, which the page does not show.
+      var quiet = CFG.quietReply && replies === CFG.turns * 3 && KINDS[r] === 'text';
       var block = KINDS[r] === 'tool_use'
         ? { content: { type: 'tool_use', name: 'Bash', input: { command: 'ls' } } }
-        : { content: { type: KINDS[r], text: 'x' } };
+        : { content: { type: KINDS[r], text: quiet ? '\u2014' : 'x' } };
       hang(row, block, message);
       m.appendChild(row);
       lastRow = row.firstChild;
@@ -323,6 +325,7 @@ const PHASES = String.raw`
       R.clockText = clock && clock.style.display === 'block' ? clock.innerText : '';
       R.clockWrites = CLOCK.writes; R.clockLayouts = CLOCK.layouts;
       /* For each reply, which child carries the figures - the reply's duration is the one figure every reply has. */
+      R.quietRows = Array.prototype.map.call(document.querySelectorAll('[data-cce-quiet="1"]'), function(e){ return e.style.display; });
       R.figuresAt = [];
       var replyEls = document.querySelectorAll('[data-testid="assistant-message"]');
       for (var fi = 0; fi < replyEls.length; fi++) {

@@ -784,6 +784,33 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         const back = await until(async () => (await claudeTabs()).find((x) => x.active && titled(x.label, front.title)), 10000, 300);
         check(!!back, 'and clearing gives the tab its own title back', await claudeTabs());
       }
+      /* The link a steward writes for a conversation: clicked in a panel, it reaches this extension, which brings that
+         conversation's tab to the front. */
+      const other = threads[1], frontPanel = await conversation(front);
+      if (frontPanel) {
+        await frontPanel.evaluate((id) => {
+          const a = document.createElement('a');
+          a.href = 'vscode://xnervwang.claude-code-plus/open?session=' + id;
+          a.id = 'cce-test-link';
+          a.textContent = 'go there';
+          a.style.cssText = 'position:fixed;top:40px;left:40px;z-index:100000;padding:6px;background:#fff;color:#000';
+          document.body.appendChild(a);
+        }, other.id);
+        await frontPanel.locator('#cce-test-link').click();
+        // VS Code may first ask whether this extension may open the link.
+        await sleep(1500);
+        await shot('steward-link-click');
+        const dialogText = await page.evaluate(() => [...document.querySelectorAll('.monaco-dialog-box')].map((d) => d.innerText).join(' | '));
+        const allow = await until(async () => {
+          const b = page.locator('.monaco-dialog-box .monaco-button', { hasText: /^(Open|Yes|Allow)$/ });
+          return (await b.count()) ? b : null;
+        }, 3000, 300);
+        if (allow) await allow.first().click();
+        const jumped = await until(async () => (await claudeTabs()).find((x) => x.active && titled(x.label, other.title)), 15000, 300);
+        check(!!jumped, 'a steward\'s link to a conversation, clicked in a panel, brings that conversation\'s tab to the front',
+          { asked: !!allow, dialogText, toasts: await toasts(), tabs: await claudeTabs() });
+        await shot('steward-link-jump');
+      }
       await exec('workbench.action.closePanel');
     });
 

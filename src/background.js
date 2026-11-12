@@ -289,8 +289,9 @@ async function scanOnce(session, opts) {
   const found = [...workers].slice(-MAX_WORKERS);
   knownWorkers.set(session, found);
   const freshWorkers = found.filter((id) => !link.workers.includes(id));
-  /* Written even when nothing was launched (see the top of this file); collect() skips such files. */
-  if (fresh.length || freshWorkers.length || !link.exists || consumed - link.scannedTo >= PERSIST_EVERY) {
+  /* Written even when nothing was launched (see the top of this file); collect() skips such files. With write: false
+     nothing is written, and working() reads what was found from memory. */
+  if (opts.write !== false && (fresh.length || freshWorkers.length || !link.exists || consumed - link.scannedTo >= PERSIST_EVERY)) {
     const launched = Math.max(link.launched, launchOf(link.launched ? fresh : ids, jobs));
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -475,6 +476,7 @@ function working(opts = {}) {
       out.add(n.slice(0, -SUFFIX.length));
     }
   }
+  for (const [session, ids] of known) if (ids.some((id) => busy.has(id))) out.add(session);
   return out;
 }
 

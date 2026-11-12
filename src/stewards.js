@@ -113,7 +113,7 @@ function noticeText(list, names) {
   };
   return 'Steward notice from Claude Code Plus, not a message from the user. Conversations you manage changed:\n'
     + list.map(line).join('\n')
-    + '\nLook at them with the steward skill\'s steward-peek.py. If none of it needs the user, reply with a single "-" and nothing else.';
+    + '\nLook at them with the steward skill\'s steward-peek.py. If none of it needs the user, reply with exactly [[quiet]].';
 }
 
 /*

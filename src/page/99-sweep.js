@@ -157,6 +157,8 @@
       blocks += rows.length;
       for (var r = 0; r < rows.length; r++) {
         var row = rows[r], cx = ctxOf(row), v = '';
+        var blk = cx.block && cx.block.content;
+        quietRow(row, !!(blk && blk.type === 'text' && QUIET_REPLY.test(String(blk.text || ''))));
         if (!ownerDone && cx.message) {
           own = agentOf(cx.message) || 'main';
           applyOwner(msgs[j], own);
@@ -369,6 +371,15 @@
     for (var d = 0; d < rec.removedNodes.length; d++) if (!ours(rec.removedNodes[d])) return false;
     return true;
   };
+  /* Replies that are empty, a single dash, or [[quiet]] (what a steward writes for a notice that needed nothing from
+     the user) are hidden. Rows are checked again on every sweep, so a reply still streaming shows once it has text. */
+  var QUIET_REPLY = /^\s*(?:[-\u2013\u2014\u00b7\u2022]|\[\[quiet\]\])?\s*$/;
+  var quietRow = function(row, quiet){
+    if (quiet) {
+      if (row.getAttribute('data-cce-quiet') !== '1') { row.setAttribute('data-cce-quiet', '1'); row.style.display = 'none'; }
+    } else if (row.getAttribute('data-cce-quiet') === '1') { row.removeAttribute('data-cce-quiet'); row.style.display = ''; }
+  };
+
   var onMutations = function(records){
     try { if (typeof ctxTipWatch === 'function') ctxTipWatch(records); } catch (e) {}
     /* Changes inside the document's head are stylesheets coming and going - this script's own reloads among them - and

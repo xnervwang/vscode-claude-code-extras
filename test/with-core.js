@@ -78,6 +78,8 @@ async function run() {
   const fake = require(path.join(core, 'test', 'fake-vscode.js'));
   const { vscode, control } = fake.create();
   vscode.window.withProgress = async (o, fn) => fn({ report() {} });
+  // Agent Plus's stand-in editor has no URI handlers; this extension registers one for its steward links.
+  if (typeof vscode.window.registerUriHandler !== 'function') vscode.window.registerUriHandler = () => ({ dispose() {} });
   const undo = fake.install(vscode);
   for (const dir of [root, core]) fake.fresh(dir);
   vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(ws), name: 'ws' }];

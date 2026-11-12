@@ -310,6 +310,10 @@ console.log('\nwhat the page costs, in a browser');
         `${what}: ${r.idleSweeps} sweeps and ${r.idleChild + r.idleAttr + r.idleChars} changes in ${harness.DEFAULTS.idleMs}ms`).join('; '));
       /* Reloading a stylesheet puts a link into the head and takes the old one out. A page that answered that with a
          sweep would sweep every time any conversation's efforts changed, in every panel open. */
+      /* A reply that is only a dash, as a steward writes when a notice needed nothing, is not shown; the others are. */
+      const hush = harness.run(browser, { turns: SHORT, focus: true, quietReply: true });
+      if (!hush.error && JSON.stringify(hush.quietRows) === JSON.stringify(['none'])) ok('a dash-only reply is hidden; the other replies stay visible');
+      else bad('a reply that is only a dash: ' + (hush.error || JSON.stringify(hush.quietRows)));
       const churn = harness.run(browser, { turns: SHORT, focus: true, headChurn: true });
       if (!churn.error && churn.idleSweeps === 0 && churn.idleChild > 0) {
         ok(`stylesheets coming and going in the head start no sweep (${churn.idleChild} changes, 0 sweeps)`);
@@ -1889,6 +1893,28 @@ console.log('\nbackground sessions');
     if (whole.r.added === 1 && whole.link.ids.includes('77777777') && whole.link.scannedTo === size1 + Buffer.byteLength(half)) {
       ok('once the line is whole it is read, from where the last pass stopped');
     } else bad(`after the line was finished: ${JSON.stringify(whole)}`);
+  }
+
+  // Scan with write: false: no link file is written, but working() still counts the running job.
+  {
+    const SID4 = 'dddddddd-1111-2222-3333-444444444444';
+    const t4 = path.join(proj, SID4 + '.jsonl');
+    const plans4 = path.join(root, 'plans4');
+    fs.mkdirSync(plans4, { recursive: true });
+    fs.writeFileSync(t4, ran('claude --bg "task one"', launched('1a2b3c4d')));
+    const script = `
+      const bg = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'background.js'))});
+      (async () => {
+        const r = await bg.scan(${JSON.stringify(SID4)}, ${JSON.stringify({ dir: plans4, jobs, transcript: t4, write: false })});
+        const written = require('fs').existsSync(${JSON.stringify(path.join(plans4, SID4 + '.background'))});
+        const w = bg.working({ dir: ${JSON.stringify(plans4)}, write: false,
+          records: [{ kind: 'bg', jobId: '1a2b3c4d', status: 'busy', sessionId: 'eeeeeeee-1111-2222-3333-444444444444' }] });
+        process.stdout.write(JSON.stringify({ added: r.added, written, working: w.has(${JSON.stringify(SID4)}) }));
+      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.message })));`;
+    const got = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8' }));
+    if (got.added === 1 && got.written === false && got.working === true) {
+      ok('a scan with write: false writes no link file, and the conversation still counts as working while the job runs');
+    } else bad(`a scan that may not write gave ${JSON.stringify(got)}`);
   }
 
   // A launch whose output kept only the hints: `| tail -3` drops the first line, and that is how a live one went unseen.
@@ -4670,7 +4696,7 @@ console.log('\nan uninstall puts Claude Code back at once');
         /const restoring = removed\(\) \|\| leaving;/.test(ext) && /if \(restoring\) \{\s*const r = adapter\.restore\(dir\);/.test(ext)],
       ['and writes no stylesheet back',
         /const writeLiveNow = \(\) => \{\s*if \(removed\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) return;/.test(ext)
-        && /if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) \{ unwatchEffort\(\); return; \}/.test(ext)],
+        && /if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) \{\s*if \(replaced\(\)\) scanBackground\(\);\s*unwatchEffort\(\);\s*return;\s*\}/.test(ext)],
       ['the uninstall hook restores through the same code, in the folders uninstallPlan gives',
         /removal\.uninstallPlan\(path\.dirname\(__dirname\), id\)/.test(un) && /removal\.restoreAll\(plan\.restore\)/.test(un)
         && !/adapter\.restore\(/.test(un) && !/roots\(/.test(un)],
@@ -5238,6 +5264,7 @@ const activateStub = (opts = {}) => {
           onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable, onDidGrantWorkspaceTrust: () => disposable },
         window: { createOutputChannel: () => ({ appendLine(l) { rec.logs.push(l); }, show() {}, dispose() {} }), createTreeView: () => ({ dispose() {} }),
           createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }), registerWebviewViewProvider: () => disposable,
+          registerUriHandler: () => disposable,
           showInformationMessage: say, showWarningMessage: say, showErrorMessage: say, setStatusBarMessage() {},
           tabGroups: { all: [], activeTabGroup: null }, showTextDocument: async () => {} },
         commands: {
@@ -5932,9 +5959,9 @@ console.log('\na window whose install was replaced by a rebuild of the same vers
   const guarded = [
     ['writing the live stylesheet', /const writeLiveNow = \(\) => \{\s*if \(removed\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) return;/],
     ['patching or restoring', /async function sync\([^)]*\) \{\s*if \(replaced\(\)\) \{/],
-    ['the timed refresh', /if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) \{ unwatchEffort\(\); return; \}\s*scanBackground\(\);/],
+    ['the timed refresh', /if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) \{\s*if \(replaced\(\)\) scanBackground\(\);\s*unwatchEffort\(\);\s*return;\s*\}\s*scanBackground\(\);/],
     ['the efforts beside the panel', /if \(!r \|\| !r\.css \|\| removed\(\) \|\| uninstalling\(\) \|\| replaced\(\)\) return;\s*for \(const dir of installs\(webview\)\) webview\.writeEffort/],
-    ['the record of background sessions', /const scanBackground = \(\) => \{\s*if \(removed\(\) \|\| !enabled\(\) \|\| uninstalling\(\) \|\| replaced\(\) \|\|/],
+    ['the record of background sessions', /const write = !replaced\(\);\s*background\.scan\(id, \{ write \}\)\s*\.then\(\(r\) => \{ if \(r && r\.added && write\) writeLiveNow\(\); \}\)/],
   ];
   const missing = guarded.filter(([, re]) => !re.test(ext)).map(([what]) => what);
   if (!missing.length) ok('a replaced window writes nothing shared: ' + guarded.map(([what]) => what).join(', '));
@@ -6056,6 +6083,7 @@ console.log('\nwhat a tick and a change of setting cost');
           onDidChangeWorkspaceFolders: () => disposable },
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }), createTreeView: () => ({ dispose() {} }),
           createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }), registerWebviewViewProvider: () => disposable,
+          registerUriHandler: () => disposable,
           showInformationMessage: async () => undefined, showWarningMessage: async () => undefined, setStatusBarMessage() {},
           tabGroups: { all: [], activeTabGroup: null }, showTextDocument: async () => {} },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
@@ -8220,11 +8248,12 @@ console.log('\nthe Steward panel');
     const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] },
       // The steward waits on Two, so Two's turn ending is worth a notice; nothing in its plan names Three.
       [S(1)]: { nodes: [{ title: 'Two: wait for its CR', state: 'waiting', waitingOn: 'session' }, { title: 'Old, done', state: 'done' }] } };
-    const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+    const PANEL_SCRIPT = `
       const sv = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'steward-view.js'))});
       const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
       let records = ${JSON.stringify(records)};
-      const plans = ${JSON.stringify(plans)}, posts = [], logs = [];
+      const plans = ${JSON.stringify(plans)}, posts = [], logs = [], revealed = [];
+      let focused = 0;
       let provider, front = ${JSON.stringify(S(1))}, writable = true;
       const vscode = { window: { registerWebviewViewProvider: (id, p) => { provider = p; return { dispose() {} }; },
         showInformationMessage() {} } };
@@ -8234,7 +8263,8 @@ console.log('\nthe Steward panel');
       require('fs').writeFileSync(wdir + '/4242.json', JSON.stringify({ pid: 4242, at: Date.now(), name: 'proj-b', folders: ['/w/c'], sessions: [${JSON.stringify(S(3))}] }));
       require('fs').writeFileSync(wdir + '/4343.json', JSON.stringify({ pid: 4343, at: Date.now(), name: 'gone', folders: [], sessions: [${JSON.stringify(S(6))}] }));
       const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => { asked++; return { records }; }, readPlan: (id) => plans[id] || null,
-        titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(), reveal: async () => true,
+        titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
+        reveal: async (id) => { revealed.push(id); return true; }, focusWindow: () => { focused++; },
         shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, enabled: () => true, log: (m) => logs.push(m),
         home: '/', dir: ${JSON.stringify(path.join(root, 'plans2'))}, isBackground: (id) => id === ${JSON.stringify(S(5))},
         records: () => [{ sessionId: ${JSON.stringify(S(1))}, messagingSocketPath: 'uds:/x' }], post: async (a, t) => { posts.push([a, t]); return true; },
@@ -8284,9 +8314,19 @@ console.log('\nthe Steward panel');
         const dropped = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
         await v._onMessage({ type: 'all' });
         const everyShown = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
+        const opened = [await v.open(${JSON.stringify(S(1))}), await v.open(${JSON.stringify(S(3))}), await v.open(${JSON.stringify(S(7))}), await v.open('not an id')];
+        const askedFor = JSON.parse(require('fs').readFileSync(wdir + '/4242.open.json', 'utf8'));
+        const mine = wdir + '/' + process.pid + '.open.json';
+        require('fs').writeFileSync(mine, JSON.stringify({ session: ${JSON.stringify(S(2))}, at: Date.now() }));
+        const took = await v._takeRequest();
+        require('fs').writeFileSync(mine, JSON.stringify({ session: ${JSON.stringify(S(2))}, at: Date.now() - 60000 }));
+        const stale = await v._takeRequest();
+        const jump = { opened, asked: askedFor.session, took, stale, left: require('fs').existsSync(mine), focused, revealed };
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown }));
-      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump }));
+      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`;
+    if (process.env.CCE_DUMP_PANEL) fs.writeFileSync(process.env.CCE_DUMP_PANEL, PANEL_SCRIPT);
+    const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', PANEL_SCRIPT], { encoding: 'utf8', timeout: 30000 }));
     if (out.error) bad('the panel threw: ' + out.error);
     else {
       const names = (h) => [...h.matchAll(/data-open="([^"]+)"/g)].map((m) => m[1]);
@@ -8325,6 +8365,11 @@ console.log('\nthe Steward panel');
           && JSON.stringify(out.dropped) === JSON.stringify([S(3)]) && JSON.stringify(out.everyShown) === JSON.stringify([S(2), S(3), S(6)].sort())) {
         ok('a ticked conversation open in no window is counted, not listed, and can be unticked; Select all ticks only the listed ones');
       } else bad(`with one ticked outside every window: ${JSON.stringify([out.away.slice(0, 400), out.dropped, out.everyShown])}`);
+      const j = out.jump;
+      if (j.opened.join() === 'here,sent,nowhere,nowhere' && j.asked === S(3) && j.took === true && j.stale === false && !j.left
+          && j.focused === 1 && j.revealed.join() === [S(1), S(2)].join()) {
+        ok('opening a conversation shows it here when this window has it, else asks the window that has it, which brings it up and comes to the front; a stale request is dropped');
+      } else bad(`opening conversations gave ${JSON.stringify(j)}`);
     }
 
     /* Which managed conversations a steward's plan is waiting on: named in an open row, by title or by id. */
@@ -9233,7 +9278,7 @@ console.log('\nthe token mode');
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
           showInformationMessage: async (text, ...buttons) => { told.push([text, buttons]); return undefined; },
           showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null },
-          registerWebviewViewProvider: () => disposable },
+          registerWebviewViewProvider: () => disposable, registerUriHandler: () => disposable },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
         extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');
@@ -9391,7 +9436,7 @@ console.log('\nRestricted Mode');
           onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable },
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }), showInformationMessage: async () => undefined,
           showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null },
-          registerWebviewViewProvider: () => disposable },
+          registerWebviewViewProvider: () => disposable, registerUriHandler: () => disposable },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
         extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');

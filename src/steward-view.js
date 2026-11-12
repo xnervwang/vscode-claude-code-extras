@@ -24,7 +24,7 @@ const waiting = require('./waiting');
 const conversations = require('./conversations');
 const bgSessions = require('./bgsessions');
 const { planQuestions } = require('./folders');
-const { writeAtomic } = require('./claude-files');
+const { writeAtomic, SESSION } = require('./claude-files');
 const { liveRecords } = require('./background');
 const { OPEN_STATES } = require('./workplan');
 
@@ -36,6 +36,10 @@ const NOTICE_GAP_MS = 60000;
 /* <plan dir>/windows/<pid>.json: what each window shows, ignored once older than this or once its process is gone. */
 const WINDOWS_DIR = 'windows';
 const WINDOW_STALE_MS = 120000;
+/* <plan dir>/windows/<pid>.open.json asks window <pid> to show a conversation. Requests older than OPEN_FRESH_MS are
+   ignored, so a window that was busy or closing does not act on one much later. */
+const OPEN_SUFFIX = '.open.json';
+const OPEN_FRESH_MS = 30000;
 const MAX_DOING = 2;
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -221,12 +225,12 @@ function shell(list, nonce) {
  * shownHere(id) -> whether this window shows that conversation's panel, canWrite() -> whether this window may write
  * shared files, enabled(), log(message), home, dir (the plan directory), windowName(), windowFolders() and shownList()
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
- * the live session records, alive(pid), post(address, text) in place of stewards.post, and changed(), called once the
- * table of stewards has been rewritten here.
+ * the live session records, alive(pid), post(address, text) in place of stewards.post, changed(), called once the
+ * table of stewards has been rewritten here, and focusWindow(), which brings this window to the front.
  */
 function create(vscode, deps) {
   deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
-    windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {} }, deps);
+    windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {} }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
 
@@ -328,10 +332,51 @@ function create(vscode, deps) {
     }
   };
 
+  /* Shows a conversation: here if this window has its tab, otherwise by writing a request file for the window that
+     has it. Returns 'here', 'sent' or 'nowhere'. */
+  const open = async (id) => {
+    if (typeof id !== 'string' || !SESSION.test(id)) return 'nowhere';
+    if (deps.shownHere(id) && await deps.reveal(id)) return 'here';
+    const w = windows().find((x) => x.pid !== process.pid && x.sessions.includes(id));
+    if (!w) return 'nowhere';
+    try {
+      writeAtomic(path.join(deps.dir, WINDOWS_DIR, w.pid + OPEN_SUFFIX), JSON.stringify({ session: id, at: Date.now() }) + '\n');
+      return 'sent';
+    } catch (e) {
+      deps.log('steward panel: ' + ((e && e.message) || e));
+      return 'nowhere';
+    }
+  };
+  /* Requests from other windows to show one of this window's conversations. The watch handles them at once; each pass
+     also checks, in case the watch missed one. */
+  const request = path.join(deps.dir, WINDOWS_DIR, process.pid + OPEN_SUFFIX);
+  let requestWatch = null;
+  const takeRequest = async (now = Date.now()) => {
+    let d = null;
+    try { d = JSON.parse(fs.readFileSync(request, 'utf8')); } catch (_) { return false; }
+    try { fs.unlinkSync(request); } catch (_) { /* taken already */ }
+    if (!d || typeof d.session !== 'string' || !(now - d.at < OPEN_FRESH_MS)) return false;
+    if (!await deps.reveal(d.session)) return false;
+    deps.focusWindow();
+    return true;
+  };
+  const watchRequests = () => {
+    if (requestWatch) return;
+    try {
+      requestWatch = fs.watch(path.join(deps.dir, WINDOWS_DIR), { persistent: false }, (event, name) => {
+        if (name && name !== process.pid + OPEN_SUFFIX) return;
+        takeRequest().catch((e) => deps.log('steward panel: ' + ((e && e.message) || e)));
+      });
+      requestWatch.on('error', () => { try { requestWatch.close(); } catch (_) { /* closed */ } requestWatch = null; });
+    } catch (_) { requestWatch = null; }
+  };
+
   /* Skipped while the panel is hidden and no steward here needs notices: a pass reads every plan and transcript end. */
   const pass = async () => {
     if (busy || !deps.enabled()) return;
     publish();
+    watchRequests();
+    await takeRequest();
     if (!(view && view.visible) && !Object.keys(stewards.read(deps.dir)).some((id) => deps.shownHere(id))) return;
     busy = true;
     try {
@@ -352,6 +397,10 @@ function create(vscode, deps) {
   const onMessage = async (m) => {
     const front = deps.activeChat();
     if (m && m.type === 'ready') { if (view) view.webview.postMessage({ type: 'body', html: shown || '' }); return; }
+    if (m && m.type === 'open' && typeof m.id === 'string') {
+      if (await open(m.id) === 'nowhere') vscode.window.showInformationMessage('That conversation is not open in any VS Code window on this machine.');
+      return;
+    }
     if (!m || !front || !deps.canWrite()) return;
     const table = stewards.read(deps.dir);
     const mine = new Set(table[front] ? table[front].manages : []);
@@ -363,11 +412,7 @@ function create(vscode, deps) {
     else if (m.type === 'all') for (const c of model(last, front).rows) mine.add(c.sessionId);
     else if (m.type === 'none') mine.clear();
     else if (m.type === 'drop-hidden') for (const id of model(last, front).hiddenIds) mine.delete(id);
-    else if (m.type === 'open' && typeof m.id === 'string') {
-      const shown = await deps.reveal(m.id);
-      if (!shown) vscode.window.showInformationMessage('That conversation is not open in this window. Open it from the session list of the window it runs in.');
-      return;
-    } else return;
+    else return;
     const names = {};
     for (const id of mine) if (last.get(id)) names[id] = last.get(id).title;
     stewards.setManaged(front, [...mine], names, { dir: deps.dir });
@@ -396,10 +441,12 @@ function create(vscode, deps) {
     dispose() {
       clearInterval(timer);
       reg.dispose();
+      if (requestWatch) { try { requestWatch.close(); } catch (_) { /* closed */ } }
       if (published) { try { fs.unlinkSync(own); } catch (_) { /* gone already */ } }
     },
     refresh() { render(); },
-    _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage,
+    open,
+    _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage, _takeRequest: takeRequest,
   };
 }
 

@@ -16,6 +16,7 @@
  * next to the panel (see src/live.js).
  */
 const vscode = require('vscode');
+const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -415,12 +416,15 @@ function start(context, log, renamed, handing = false) {
   };
   /* Where Claude Code's own command line can be found: its binary ships inside each install. */
   const claudeFolders = () => Array.from(new Set(ADAPTERS.flatMap((adapter) => installs(adapter))));
+  /* A replaced window (running an older build than the installed one) still scans, without writing, so its own tabs
+     keep their green dots. */
   const scanBackground = () => {
-    if (removed() || !enabled() || uninstalling() || replaced() || switchedOff().includes('backgroundSessions')) return;
+    if (removed() || !enabled() || uninstalling() || switchedOff().includes('backgroundSessions')) return;
     const id = activeChat();
     if (!id) return;
-    background.scan(id)
-      .then((r) => { if (r && r.added) writeLiveNow(); })
+    const write = !replaced();
+    background.scan(id, { write })
+      .then((r) => { if (r && r.added && write) writeLiveNow(); })
       .catch((e) => log.appendLine('background sessions: ' + e.message));
   };
 
@@ -761,9 +765,37 @@ function start(context, log, renamed, handing = false) {
     canWrite: () => !removed() && !replaced() && !uninstalling(), enabled: () => enabled() && !removed(),
     log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(), shownList,
     changed: () => redrawStewards(),
+    focusWindow: () => focusThisWindow(),
     windowName: () => vscode.workspace.name || '', windowFolders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push(steward);
+  /*
+   * Brings this window to the front. The API has no call for this, so this window's own `code` CLI opens the folder or
+   * workspace file the window already has open, and VS Code focuses the window rather than opening another. Untitled
+   * workspaces have no path, so they are not focused.
+   */
+  const focusThisWindow = () => {
+    const ws = vscode.workspace.workspaceFile;
+    const folder = (vscode.workspace.workspaceFolders || [])[0];
+    const target = ws && ws.scheme !== 'untitled' ? ws : (!ws && folder ? folder.uri : null);
+    if (!target) return;
+    const name = process.platform === 'win32' ? 'code.cmd' : 'code';
+    const cli = [path.join(vscode.env.appRoot, 'bin', 'remote-cli', name), path.join(vscode.env.appRoot, 'bin', name)]
+      .find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } });
+    if (!cli) { log.appendLine('steward panel: no command line found to bring this window to the front'); return; }
+    cp.execFile(cli, [target.fsPath], { timeout: 15000, shell: process.platform === 'win32', windowsHide: true },
+      (e) => { if (e) log.appendLine('steward panel: bringing this window to the front: ' + e.message); });
+  };
+  /* vscode://xnervwang.claude-code-plus/open?session=<id>, the link a steward gives for a conversation it names. */
+  context.subscriptions.push(vscode.window.registerUriHandler({
+    handleUri(uri) {
+      if (uri.path !== '/open') return;
+      const id = new URLSearchParams(uri.query).get('session') || '';
+      steward.open(id).then((r) => {
+        if (r === 'nowhere') vscode.window.showInformationMessage('That conversation is not open in any VS Code window on this machine.');
+      }, (e) => log.appendLine('steward panel: ' + ((e && e.message) || e)));
+    },
+  }));
   /* Tab titles and the session list are redrawn when stewards.json changes, whichever window changed it
      (src/steward-marks.js). The file is replaced by a rename, which a watch on the file itself would miss, so the
      folder is watched. The folder may not exist yet at startup; the ten-second timer below retries the watch. */
@@ -1383,7 +1415,11 @@ function start(context, log, renamed, handing = false) {
     claude.invalidate();
     sweepPlans().catch((e) => log.appendLine('orphan work plans: ' + e.message));
     recover();
-    if (removed() || !enabled() || uninstalling() || replaced()) { unwatchEffort(); return; }
+    if (removed() || !enabled() || uninstalling() || replaced()) {
+      if (replaced()) scanBackground();
+      unwatchEffort();
+      return;
+    }
     scanBackground();
     scanEffort();
     watchEffort();
