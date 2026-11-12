@@ -1,5 +1,5 @@
 {
-  "core": "3de2a83092df99ced0543f65f6a6fe13f8ca9492",
+  "core": "eb9351000abc7e1a86d79d623e01309778c82d34",
   "files": [
     {
       "path": "build/sync-shared.js",
@@ -79,7 +79,7 @@
     {
       "path": "claude-plugin/agent-work-plan/hooks/plan-row.py",
       "from": "shared/plugin/hooks/plan-row.py",
-      "sha256": "128db59da92dd0834810201d9b922fc612d2ab4bd10385904d7e49fed9c50e9c"
+      "sha256": "fc0f3fc02c4764fcf1254040ac5c0cf238ba5159e1ae51eb2d22aaa861764806"
     },
     {
       "path": "claude-plugin/agent-work-plan/hooks/changes.py",

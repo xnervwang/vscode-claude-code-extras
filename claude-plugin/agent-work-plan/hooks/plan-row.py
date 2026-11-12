@@ -306,8 +306,9 @@ def run(args):
     if not PLAN_NAME.match(os.path.basename(path)):
         raise Refused("%s is not a work plan: a plan is named by its conversation's session id." % path)
     if not settings(os.path.dirname(path))["enabled"]:
-        raise Refused("Work plans are switched off for this editor (%s.workPlan), so nothing reads this "
-                      "file. Track what is left in your reply instead." % SETTING_PREFIX)
+        raise Refused("Work plans are switched off for this editor (by the agentPlus.tokenMode token mode, or by "
+                      "%s.workPlan when that mode is Custom), so nothing reads this file. Track what is left in "
+                      "your reply instead." % SETTING_PREFIX)
     if args.action in CREATES:
         # The first row of a conversation can come before anything has made the plugin's data directory.
         try:
