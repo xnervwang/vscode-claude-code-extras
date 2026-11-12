@@ -8122,6 +8122,7 @@ console.log('\nthe Steward panel');
       { sessionId: S(3), kind: 'interactive', cwd: '/w/c', name: 'Three', status: 'idle' },
       { sessionId: S(4), kind: 'background', cwd: '/w/d', name: 'bg', status: 'busy' },
       { sessionId: S(5), kind: 'interactive', cwd: '/w/e', name: 'Five', status: 'idle' },
+      { sessionId: S(6), kind: 'interactive', cwd: '/w/f', name: 'Six', status: 'idle' },
     ];
     const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] } };
     const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
@@ -8133,11 +8134,17 @@ console.log('\nthe Steward panel');
       const vscode = { window: { registerWebviewViewProvider: (id, p) => { provider = p; return { dispose() {} }; },
         showInformationMessage() {} } };
       let asked = 0;
+      const wdir = ${JSON.stringify(path.join(root, 'plans2', 'windows'))};
+      require('fs').mkdirSync(wdir, { recursive: true });
+      require('fs').writeFileSync(wdir + '/4242.json', JSON.stringify({ pid: 4242, at: Date.now(), name: 'proj-b', folders: ['/w/c'], sessions: [${JSON.stringify(S(3))}] }));
+      require('fs').writeFileSync(wdir + '/4343.json', JSON.stringify({ pid: 4343, at: Date.now(), name: 'gone', folders: [], sessions: [${JSON.stringify(S(6))}] }));
       const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => { asked++; return { records }; }, readPlan: (id) => plans[id] || null,
         titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(), reveal: async () => true,
         shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, enabled: () => true, log: (m) => logs.push(m),
         home: '/', dir: ${JSON.stringify(path.join(root, 'plans2'))}, isBackground: (id) => id === ${JSON.stringify(S(5))},
-        records: () => [{ sessionId: ${JSON.stringify(S(1))}, messagingSocketPath: 'uds:/x' }], post: async (a, t) => { posts.push([a, t]); return true; } });
+        records: () => [{ sessionId: ${JSON.stringify(S(1))}, messagingSocketPath: 'uds:/x' }], post: async (a, t) => { posts.push([a, t]); return true; },
+        windowName: () => 'proj-a', windowFolders: () => ['/w'], shownList: () => [${JSON.stringify(S(1))}, ${JSON.stringify(S(2))}, ${JSON.stringify(S(6))}],
+        alive: (pid) => pid === 4242 });
       let onMsg;
       const sentToPage = [];
       const view = { visible: true, webview: { options: {}, html: '', onDidReceiveMessage: (f) => { onMsg = f; },
@@ -8163,6 +8170,12 @@ console.log('\nthe Steward panel');
         await v._pass();
         const held = posts.length;
         await v._notify(Date.now() + sv.NOTICE_GAP_MS + 1);
+        const ownWindow = JSON.parse(require('fs').readFileSync(wdir + '/' + process.pid + '.json', 'utf8'));
+        await v._onMessage({ type: 'group', key: 'w:' + process.pid, on: true });
+        const groupOn = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
+        const allTicked = latest();
+        await v._onMessage({ type: 'group', key: 'w:' + process.pid, on: false });
+        const groupOff = st.read(${JSON.stringify(path.join(root, 'plans2'))})[${JSON.stringify(S(1))}].manages.slice().sort();
         writable = false;
         await v._onMessage({ type: 'none' });
         const stillTicked = st.read(${JSON.stringify(path.join(root, 'plans2'))});
@@ -8170,12 +8183,12 @@ console.log('\nthe Steward panel');
         await v._onMessage({ type: 'none' });
         const cleared = st.read(${JSON.stringify(path.join(root, 'plans2'))});
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle }));
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
     if (out.error) bad('the panel threw: ' + out.error);
     else {
       const names = (h) => [...h.matchAll(/data-open="([^"]+)"/g)].map((m) => m[1]);
-      if (JSON.stringify(names(out.first).sort()) === JSON.stringify([S(2), S(3)].sort()) && !/type="checkbox"[^>]*\bchecked\b/.test(out.first)
+      if (JSON.stringify(names(out.first).sort()) === JSON.stringify([S(2), S(3), S(6)].sort()) && !/type="checkbox"[^>]*\bchecked\b/.test(out.first)
           && out.first.includes('Managed by <b>steward-ab</b>: 0')) {
         ok('the panel lists the other conversations, none ticked, leaving out the one in front, bg sessions and claude -p workers');
       } else bad(`the first panel listed ${JSON.stringify(names(out.first))}: ${out.first.slice(0, 300)}`);
@@ -8188,6 +8201,20 @@ console.log('\nthe Steward panel');
           && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')) {
         ok('a turn that ends is sent to the steward\'s inbox, and the next change waits for the minute between notices');
       } else bad(`the notices were ${JSON.stringify(out.posts)} (${out.afterDone}, ${out.held})`);
+      const order = (h) => [...h.matchAll(/class="gname">([^<]+)</g)].map((m) => m[1]);
+      const box = (h, key) => (new RegExp('<input type="checkbox" data-group="' + key + '"[^>]*>').exec(h) || [''])[0];
+      const own = 'w:' + out.ownWindow.pid;
+      if (JSON.stringify(order(out.first)) === JSON.stringify(['proj-a', 'proj-b']) && JSON.stringify(out.ownWindow.sessions) === JSON.stringify([S(1), S(2), S(6)])
+          && out.ownWindow.name === 'proj-a' && !/gone/.test(out.first)) {
+        ok('the list is grouped by the window each conversation is open in, the window in front first, and a window that has gone counts for nothing');
+      } else bad(`the groups were ${JSON.stringify(order(out.first))}, this window wrote ${JSON.stringify(out.ownWindow)}`);
+      if (/data-mixed="1"/.test(box(out.second, own)) && /\bchecked\b/.test(box(out.second, 'w:4242')) && !/data-mixed/.test(box(out.second, 'w:4242'))) {
+        ok('a group box is ticked when all of its conversations are, and part-ticked when only some are');
+      } else bad(`after ticking Two and Three the group boxes were ${JSON.stringify([box(out.second, own), box(out.second, 'w:4242')])}`);
+      if (JSON.stringify(out.groupOn) === JSON.stringify([S(2), S(3), S(6)].sort()) && JSON.stringify(out.groupOff) === JSON.stringify([S(3)])
+          && /\bchecked\b/.test(box(out.allTicked, own)) && !/data-mixed/.test(box(out.allTicked, own))) {
+        ok('ticking a group box ticks every conversation in it, and clearing it clears them, leaving other groups as they were');
+      } else bad(`the group box gave ${JSON.stringify([out.groupOn, out.groupOff])}`);
       if (out.idle === 0) ok('with the panel never shown and no steward in this window, nothing is read');
       else bad(`a hidden panel with no steward still listed conversations ${out.idle} time(s)`);
       if (out.stillTicked[S(1)] && out.cleared[S(1)] === undefined) ok('a window that may not write shared files changes nothing; Clear empties the list');

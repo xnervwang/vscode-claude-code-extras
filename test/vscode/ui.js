@@ -733,11 +733,13 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       const frame = await frameWhere(() => /Managed by/.test(document.body ? document.body.innerText : ''), 30000);
       const text = frame ? await frame.evaluate(() => document.body.innerText.slice(0, 300)) : '';
       check(!!frame, 'the Steward panel opens at the bottom of the window for the conversation in front', text);
-      const boxes = frame ? await frame.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].map((b) => [b.dataset.id, b.checked])) : [];
-      check(boxes.length >= 1 && boxes.every(([id, on]) => id !== front.id && !on), 'it lists the other conversations, none ticked, and not the one in front', boxes);
+      const boxes = frame ? await frame.evaluate(() => [...document.querySelectorAll('input[data-id]')].map((b) => [b.dataset.id, b.checked])) : [];
+      const groups = frame ? await frame.evaluate(() => document.querySelectorAll('input[data-group]').length) : 0;
+      check(boxes.length >= 1 && boxes.every(([id, on]) => id !== front.id && !on) && groups >= 1,
+        'it lists the other conversations in groups by window, none ticked, and not the one in front', [boxes, groups]);
       await shot('steward-panel');
       if (frame && boxes.length) {
-        await frame.locator('input[type=checkbox]').first().click();
+        await frame.locator('input[data-id]').first().click();
         const file = path.join(profile.home, '.claude', 'plugins', 'data', 'agent-work-plan-claude-code-extras', 'stewards.json');
         const table = await until(() => {
           try { const t = JSON.parse(fs.readFileSync(file, 'utf8')); return t.stewards && t.stewards[front.id] ? t : null; } catch (_) { return null; }

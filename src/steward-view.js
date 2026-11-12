@@ -16,12 +16,14 @@
  * The same pass tells a steward when one of its conversations stops (src/stewards.js changes), by a line posted to the
  * steward's inbox socket. Only the window that has the steward conversation open sends it.
  */
+const fs = require('fs');
 const path = require('path');
 const stewards = require('./stewards');
 const waiting = require('./waiting');
 const conversations = require('./conversations');
 const bgSessions = require('./bgsessions');
 const { planQuestions } = require('./folders');
+const { writeAtomic } = require('./claude-files');
 const { liveRecords } = require('./background');
 
 const VIEW = 'claudeCodePlus.steward';
@@ -29,6 +31,9 @@ const VIEW = 'claudeCodePlus.steward';
    (freshAgents in src/claude-source.js), so most passes only reread plans. */
 const REFRESH_MS = 5000;
 const NOTICE_GAP_MS = 60000;
+/* <plan dir>/windows/<pid>.json: what each window shows, ignored once older than this or once its process is gone. */
+const WINDOWS_DIR = 'windows';
+const WINDOW_STALE_MS = 120000;
 const MAX_DOING = 2;
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -88,6 +93,32 @@ function ago(ms, now) {
   return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
+/* Signal 0 only checks; EPERM still means the process exists. */
+function alive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
+}
+
+/* One group per window, the one in front first; a conversation open in no window goes under the folder it started in. */
+function grouped(rows, wins, front) {
+  const groups = new Map();
+  const at = (key, name, rank) => {
+    if (!groups.has(key)) groups.set(key, { key, name, rank, rows: [] });
+    return groups.get(key);
+  };
+  const frontWin = wins.find((w) => w.sessions.includes(front));
+  for (const c of rows) {
+    const w = wins.find((x) => x.sessions.includes(c.sessionId));
+    if (w) {
+      const name = w.name || (w.folders[0] ? path.basename(w.folders[0]) : 'Window with no folder');
+      at('w:' + w.pid, name, w === frontWin ? 0 : 1).rows.push(c);
+    } else {
+      const dir = c.cwd || '';
+      at('d:' + dir, (path.basename(dir) || dir || 'Unknown folder') + ' (not open in a window)', 2).rows.push(c);
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+}
+
 /* The panel's list, as HTML. */
 function body(model) {
   const now = Date.now();
@@ -100,11 +131,21 @@ function body(model) {
       ${c.questions ? `<span class="questions">${c.questions} question${c.questions === 1 ? '' : 's'} for you</span>` : ''}
       <span class="when">${esc(ago(c.lastActiveAt, now))}</span>` : `<span class="when">${esc(ago(c.lastActiveAt, now))}</span>`}
     </li>`;
+  const group = (g) => {
+    const on = g.rows.filter((c) => c.managed).length;
+    return `
+    <div class="group">
+      <label class="ghead"><input type="checkbox" data-group="${esc(g.key)}" ${on && on === g.rows.length ? 'checked' : ''}
+        ${on && on < g.rows.length ? 'data-mixed="1"' : ''} title="Every conversation in ${esc(g.name)}">
+        <span class="gname">${esc(g.name)}</span><span class="count">${on}/${g.rows.length}</span></label>
+      <ul>${g.rows.map(row).join('')}</ul>
+    </div>`;
+  };
   return !model.front
     ? '<p class="empty">Open a Claude Code conversation. The conversations ticked here are the ones it manages.</p>'
     : `<div class="head"><span>Managed by <b>${esc(model.front.title)}</b>: ${model.managed}</span>
          <button data-act="all">Select all</button><button data-act="none">Clear</button></div>
-       ${model.rows.length ? `<ul>${model.rows.map(row).join('')}</ul>` : '<p class="empty">No other Claude Code conversation is open.</p>'}`;
+       ${model.groups.length ? model.groups.map(group).join('') : '<p class="empty">No other Claude Code conversation is open.</p>'}`;
 }
 
 /*
@@ -130,17 +171,25 @@ function shell(list, nonce) {
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--vscode-disabledForeground, #888); }
   .dot.working { background: #22c55e; } .dot.unread { background: #ef4444; } .dot.prompt { background: #3b82f6; }
   .empty { opacity: 0.7; }
+  .group { margin-bottom: 6px; }
+  .ghead { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-weight: 600; }
+  .ghead .count { opacity: 0.6; font-weight: normal; }
+  .group ul { padding-left: 18px; }
 </style></head><body><div id="root">${list}</div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  // A group's box shows a part of its conversations ticked as neither ticked nor clear, which only a property can say.
+  const mixed = () => { for (const b of document.querySelectorAll('input[data-mixed]')) b.indeterminate = true; };
   window.addEventListener('message', (e) => {
     const m = e.data;
-    if (m && m.type === 'body' && typeof m.html === 'string') document.getElementById('root').innerHTML = m.html;
+    if (m && m.type === 'body' && typeof m.html === 'string') { document.getElementById('root').innerHTML = m.html; mixed(); }
   });
+  mixed();
   vscode.postMessage({ type: 'ready' });
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (t.matches('input[type=checkbox]')) vscode.postMessage({ type: 'toggle', id: t.dataset.id, on: t.checked });
+    if (t.matches('input[data-group]')) vscode.postMessage({ type: 'group', key: t.dataset.group, on: t.checked });
+    else if (t.matches('input[type=checkbox]')) vscode.postMessage({ type: 'toggle', id: t.dataset.id, on: t.checked });
     else if (t.dataset.open) { e.preventDefault(); vscode.postMessage({ type: 'open', id: t.dataset.open }); }
     else if (t.dataset.act) vscode.postMessage({ type: t.dataset.act });
   });
@@ -150,11 +199,13 @@ function shell(list, nonce) {
 /*
  * deps: activeChat(), freshAgents() -> { records }, readPlan(id), titles(s), since(s), live(), unread(), reveal(id),
  * shownHere(id) -> whether this window shows that conversation's panel, canWrite() -> whether this window may write
- * shared files, enabled(), log(message), home, dir (the plan directory), and optionally isBackground(id, cwd),
- * records() -> the live session records, and post(address, text) in place of stewards.post.
+ * shared files, enabled(), log(message), home, dir (the plan directory), windowName(), windowFolders() and shownList()
+ * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
+ * the live session records, alive(pid), and post(address, text) in place of stewards.post.
  */
 function create(vscode, deps) {
-  deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post }, deps);
+  deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
+    windowName: () => '', windowFolders: () => [], shownList: () => [] }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
 
@@ -164,11 +215,43 @@ function create(vscode, deps) {
     const rows = [...all.values()].filter((c) => c.sessionId !== front)
       .map((c) => Object.assign({ managed: mine.has(c.sessionId) }, c));
     rows.sort((a, b) => (b.managed - a.managed) || (b.lastActiveAt - a.lastActiveAt));
+    const groups = grouped(rows, windows(), front);
     const self = front && all.get(front);
     // The conversation in front may not be in the list yet: `claude agents --json` is read at most every half minute.
     const title = self ? self.title : front ? conversations.claudeTitle({ sessionId: front, name: '', cwd: '' },
       deps.titles({ sessionId: front }), () => deps.readPlan(front)) : '';
-    return { front: front ? { id: front, title } : null, rows, managed: mine.size };
+    return { front: front ? { id: front, title } : null, rows, groups, managed: mine.size };
+  };
+
+  /* This window's entry in the windows folder, written when what it shows changes and once a minute besides. */
+  const own = path.join(deps.dir, WINDOWS_DIR, process.pid + '.json');
+  let published = '', publishedAt = 0;
+  const publish = (now = Date.now()) => {
+    if (!deps.canWrite()) return;
+    const entry = { pid: process.pid, name: deps.windowName(), folders: deps.windowFolders(), sessions: deps.shownList() };
+    const text = JSON.stringify(entry);
+    if (text === published && now - publishedAt < WINDOW_STALE_MS / 2) return;
+    try {
+      fs.mkdirSync(path.dirname(own), { recursive: true });
+      writeAtomic(own, JSON.stringify(Object.assign({ at: now }, entry)) + '\n');
+      published = text; publishedAt = now;
+    } catch (e) { deps.log('steward panel: ' + ((e && e.message) || e)); }
+  };
+  /* The windows on this machine, this one included, from their entries. */
+  const windows = (now = Date.now()) => {
+    const out = [{ pid: process.pid, name: deps.windowName(), folders: deps.windowFolders(), sessions: deps.shownList() }];
+    let names = [];
+    try { names = fs.readdirSync(path.join(deps.dir, WINDOWS_DIR)).filter((n) => /^\d+\.json$/.test(n)); } catch (_) { return out; }
+    for (const n of names) {
+      const pid = Number(n.slice(0, -5));
+      if (pid === process.pid) continue;
+      let d;
+      try { d = JSON.parse(fs.readFileSync(path.join(deps.dir, WINDOWS_DIR, n), 'utf8')); } catch (_) { continue; }
+      if (!d || !(now - d.at < WINDOW_STALE_MS) || !deps.alive(pid)) continue;
+      out.push({ pid, name: typeof d.name === 'string' ? d.name : '', folders: Array.isArray(d.folders) ? d.folders : [],
+        sessions: Array.isArray(d.sessions) ? d.sessions : [] });
+    }
+    return out;
   };
 
   /* `shown` is the list the page has, or null when it needs the whole page. */
@@ -217,6 +300,7 @@ function create(vscode, deps) {
   /* Skipped while the panel is hidden and no steward here needs notices: a pass reads every plan and transcript end. */
   const pass = async () => {
     if (busy || !deps.enabled()) return;
+    publish();
     if (!(view && view.visible) && !Object.keys(stewards.read(deps.dir)).some((id) => deps.shownHere(id))) return;
     busy = true;
     try {
@@ -241,6 +325,10 @@ function create(vscode, deps) {
     const table = stewards.read(deps.dir);
     const mine = new Set(table[front] ? table[front].manages : []);
     if (m.type === 'toggle' && typeof m.id === 'string') { if (m.on) mine.add(m.id); else mine.delete(m.id); }
+    else if (m.type === 'group' && typeof m.key === 'string') {
+      const g = model(last, front).groups.find((x) => x.key === m.key);
+      for (const c of g ? g.rows : []) { if (m.on) mine.add(c.sessionId); else mine.delete(c.sessionId); }
+    }
     else if (m.type === 'all') for (const id of last.keys()) { if (id !== front) mine.add(id); }
     else if (m.type === 'none') mine.clear();
     else if (m.type === 'open' && typeof m.id === 'string') {
@@ -272,10 +360,14 @@ function create(vscode, deps) {
     pass();
   }, REFRESH_MS);
   return {
-    dispose() { clearInterval(timer); reg.dispose(); },
+    dispose() {
+      clearInterval(timer);
+      reg.dispose();
+      if (published) { try { fs.unlinkSync(own); } catch (_) { /* gone already */ } }
+    },
     refresh() { render(); },
     _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage,
   };
 }
 
-module.exports = { create, gather, doingRows, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS };
+module.exports = { create, gather, grouped, doingRows, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS, WINDOWS_DIR };

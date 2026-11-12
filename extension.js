@@ -750,15 +750,15 @@ function start(context, log, renamed, handing = false) {
   }
 
   /* The Steward panel, and the notices it sends a steward when a conversation it manages stops (src/steward-view.js). */
-  const shownHere = (sessionId) => {
-    const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
-    return list('__cceSessionsShown').includes(sessionId) && !list('__cceSessionsElsewhere').includes(sessionId);
-  };
+  const panelList = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
+  const shownList = () => { const elsewhere = panelList('__cceSessionsElsewhere'); return panelList('__cceSessionsShown').filter((id) => !elsewhere.includes(id)); };
+  const shownHere = (sessionId) => shownList().includes(sessionId);
   const steward = stewardView.create(vscode, {
     activeChat, freshAgents: () => claude.freshAgents(), readPlan, titles: readTitles.titles, since: readTitles.since,
     live: () => liveStates, unread: () => unreadKeys, reveal: (sessionId) => claude.source.reveal(sessionId), shownHere,
     canWrite: () => !removed() && !replaced() && !uninstalling(), enabled: () => enabled() && !removed(),
-    log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(),
+    log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(), shownList,
+    windowName: () => vscode.workspace.name || '', windowFolders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push(steward);
 
