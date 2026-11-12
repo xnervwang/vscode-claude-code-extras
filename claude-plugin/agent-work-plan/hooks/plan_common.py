@@ -510,24 +510,38 @@ def plan_lock(plan, on_miss=None):
     lock = plan + LOCK_SUFFIX
     deadline = time.monotonic() + LOCK_WAIT
     held = False
+    denied = None
     while True:
         try:
             os.mkdir(lock)
             held = True
             break
         except FileExistsError:
-            pass
+            denied = None
         except FileNotFoundError:
             # No directory, so no plan in it for anyone else to be changing.
             break
+        except PermissionError as e:
+            # Windows refuses to make it again while the removed one is still open somewhere, as access denied.
+            if os.name != "nt":
+                if on_miss:
+                    on_miss("could not make %s (%s)" % (lock, e.strerror or e))
+                break
+            denied = e
         except OSError as e:
             if on_miss:
                 on_miss("could not make %s (%s)" % (lock, e.strerror or e))
             break
         if time.monotonic() >= deadline:
             if on_miss:
-                on_miss("%s was still held after %g seconds" % (lock, LOCK_WAIT))
+                if denied is not None:
+                    on_miss("could not make %s for %g seconds (%s)" % (lock, LOCK_WAIT, denied.strerror or denied))
+                else:
+                    on_miss("%s was still held after %g seconds" % (lock, LOCK_WAIT))
             break
+        if denied is not None:
+            time.sleep(LOCK_POLL)
+            continue
         try:
             stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
         except OSError:
