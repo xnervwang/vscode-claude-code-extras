@@ -679,16 +679,18 @@ function start(context, log, renamed, handing = false) {
       if (!statesTimer) statesTimer = setTimeout(() => { statesTimer = 0; claude.changed(); }, 300);
     } catch (_) { /* the next update */ }
   };
-  /* The info box asks for its conversation's process id. `claude agents` is run for it unless the last run is under
-     half a minute old. The Work plan line is sent separately, without waiting for `claude agents`. */
+  /* The info box asks for its conversation's process id, and the context meter's hover asks the same to get the work
+     plan's figures. `claude agents` is run for the process id unless the last run is under half a minute old. The work
+     plan's figures and the token mode are sent separately, without waiting for it. */
   globalThis.__cceProcessHook = (sessionId) => {
-    if (removed() || !enabled() || switchedOff().includes('footerInfo')) return;
+    if (removed() || !enabled()) return;
     const transcript = runs(WORK_PLAN_SETTING) ? transcriptOf(sessionId) : '';
     const mode = tokenMode.labelOf(tokenMode.modeNow(vscode));
     (transcript ? planInjections.measure(transcript) : Promise.resolve(null)).then((m) => {
-      const reply = { type: 'cce_plan', sessionId, text: planInjections.describe(m), mode };
+      const reply = { type: 'cce_plan', sessionId, text: planInjections.describe(m), plan: planInjections.figures(m), mode };
       if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);
-    }).catch((e) => log.appendLine('work plan line for the info box: ' + (e && e.message)));
+    }).catch((e) => log.appendLine('work plan figures: ' + (e && e.message)));
+    if (switchedOff().includes('footerInfo')) return;
     claude.freshAgents().then((r) => {
       const reply = { type: 'cce_process', sessionId, pids: r.records ? waiting.pidsOf(r.records, sessionId) : null };
       if (typeof globalThis.__cceToPanel === 'function') globalThis.__cceToPanel(sessionId, reply);

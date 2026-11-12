@@ -85,7 +85,7 @@ Verified against Claude Code 2.1.322.
 | Sub-agent tags and filters | Tag each sub-agent's messages with its task, such as `#look up tomorrow's weather`, and filter to the main thread or one sub-agent. | Tags on messages; filter in the footer |
 | Conversation navigation | Find your messages by time and first words or find compaction points; filter, click to scroll, step with arrows or `,` and `.`, or jump to the top or bottom. | Right edge of the panel |
 | Focus view button | Toggle Claude Code's own Focus view; while it is on and Claude works, the working line shows the latest tool call and elapsed time, such as `Bash running for 2m55s (since 11:11:18)`. | Footer button; working line |
-| Context meter | Keep the meter visible, outline it when 15% of the window remains, and hover for a breakdown by category, memory files and custom agents. | Panel's context meter |
+| Context meter | Keep the meter visible, outline it when 15% of the window remains, and hover for what the work plan has added to the context and a breakdown by category, memory files and custom agents. | Panel's context meter |
 | Open sessions | The conversations open in this window, in an editor tab or in the sidebar while it is shown, most recently active first, each with the status dot the session list gives it; click one to switch to it. | Top of the session list |
 | Open in a tab or the sidebar | **New in tab** and **New in sidebar** replace the New session button. A closed conversation's right-click menu offers **Resume in tab** and **Resume in sidebar** instead of Resume session; an open one keeps Switch to session. These do not change `claudeCode.preferredLocation`; the Claude button at the right of the editor tabs still opens where that setting says. | Session list |
 | Delete archived conversations | **Delete session…** in an archived conversation's right-click menu permanently deletes it from disk once you confirm: its transcripts, sub-agent conversations, saved tool outputs, file checkpoints (Claude Code's copies, not your files), debug log and work plan. A conversation open in a tab or the sidebar, or still running, is left alone. | Archived sessions in the session list |
@@ -153,7 +153,7 @@ The tables below show the text Claude Code Plus adds to what Claude Code sends t
 
 - Everything Claude Code Plus and Agent Plus draw in VS Code.
 - An answer you give in Agent Plus's Answer view is typed into the conversation and sent as your message, as if you had typed it there.
-- The information button shows, for the conversation in front, how many times the work plan was added since the last compaction, how many characters that came to, and about what share of the context in use.
+- Hovering the context meter shows, for the conversation in front, how many times the work plan was added since the last compaction, how many characters that came to, and about what share of the context in use.
 
 ### Typical values
 

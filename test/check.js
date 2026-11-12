@@ -1089,7 +1089,10 @@ console.log('\nthe context breakdown on the usage meter');
   const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '55-context-detail.js'), 'utf8');
   const made = [], timers = [];
   const el = () => {
-    const e = { style: {}, children: [], textContent: '', isConnected: true, parentElement: null,
+    let text = '';
+    const e = { style: {}, children: [], isConnected: true, parentElement: null,
+      // As in a page: setting the text replaces what the element held.
+      get textContent() { return text; }, set textContent(v) { text = String(v); this.children = []; },
       appendChild(c) { this.children.push(c); c.parentElement = this; return c; },
       addEventListener(t, f) { (this.on = this.on || {})[t] = f; },
       getBoundingClientRect: () => ({ top: 500, bottom: 520, left: 280, right: 300 }) };
@@ -1098,10 +1101,13 @@ console.log('\nthe context breakdown on the usage meter');
   };
   const btn = el();
   btn.parentElement = { children: [btn] };
+  const asked = [];
   const env = { out: {}, sessionRef: null, WeakSet, Date, window: { innerHeight: 800, innerWidth: 400 },
     setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout: () => {},
-    document: { querySelector: () => btn, createElement: el, body: { appendChild() {} } } };
-  new vm.Script(`(function(){${KIT}\n${fragment}\n;out.wire = wireCtxButton;`
+    document: { querySelector: () => btn, createElement: el, body: { appendChild() {} } },
+    // From src/page/80-session-info.js, which this fragment is assembled with.
+    PLANS: {}, sigValue: (k) => (k === 'sessionId' ? 'S1' : undefined), askPlan: (sid) => asked.push(sid) };
+  new vm.Script(`(function(){${KIT}\n${fragment}\n;out.wire = wireCtxButton; out.arrived = planArrived;`
     + 'out.keep = function(u, k){ ctxCache = u; ctxKey = k; ctxAt = Date.now(); };})()', { filename: '55-context-detail.js' })
     .runInNewContext(env);
   env.out.wire();
@@ -1127,6 +1133,38 @@ console.log('\nthe context breakdown on the usage meter');
   if (!unaskable && !inHand && onItsWay) {
     ok('no loading note with no way to ask or with the breakdown already in hand, and one while it is being asked for');
   } else bad(`the loading note: with no way to ask ${unaskable}, with the breakdown in hand ${inHand}, while asking ${onItsWay}`);
+  leave();
+
+  /* The work plan's part of the context: asked for as the pointer arrives, shown at once above the panel's own tooltip,
+     and as a section of the breakdown once that opens. */
+  const note = () => made.find((e) => e.id === 'cce-ctx-note');
+  const box = () => made.find((e) => e.id === 'cce-ctx');
+  const askedOnce = asked.length === 1 && asked[0] === 'S1';
+  btn.on.mouseenter();
+  const notAgain = asked.length === 1;
+  const line = 'injected 2 times since the last compaction: 9412 characters, about 2353 tokens, 3% of the 80000 in context';
+  env.PLANS.S1 = { text: line, plan: { count: 2, chars: 9412, tokens: 2353, context: 80000, since: 'since the last compaction' },
+    mode: 'All features', at: Date.now() };
+  env.out.arrived('S1');
+  const first = note() && note().style.display === 'block' ? note().textContent : '';
+  if (askedOnce && notAgain && first === 'Work plan: ' + line) {
+    ok('hovering the meter asks once for the work plan\'s figures, and shows them over the panel\'s tooltip as they come');
+  } else bad(`asked ${JSON.stringify(asked)}, the line over the tooltip read ${JSON.stringify(first)}`);
+  leave();
+  const wide = Object.assign({}, usageFigures, { rawMaxTokens: 100000 });
+  env.out.keep(wide, '5');
+  hover();
+  const texts = (e) => (e ? [e.textContent].concat(...(e.children || []).map(texts)) : []);
+  const shown = box() && box().style.display === 'block' ? texts(box()).join('|') : '';
+  if (/Work plan\|since the last compaction/.test(shown) && /Injected 2 times\|2\.4k\|2\.4%/.test(shown) && note().style.display === 'none') {
+    ok('the breakdown carries a Work plan section with its share of the window, and the line over the tooltip gives way to it');
+  } else bad(`the breakdown read ${JSON.stringify(shown)}`);
+  leave();
+  delete env.PLANS.S1;
+  env.out.keep(wide, '5');
+  hover();
+  if (box() && !/Work plan/.test(texts(box()).join('|'))) ok('and has no such section while the work plan sent nothing');
+  else bad('a breakdown with no work plan figures still had a Work plan section');
 }
 
 /* ── the effort each reply was sent with ──
@@ -5478,8 +5516,8 @@ console.log('\nthe old id\'s last version, shim/');
   } else bad('the uninstall question is not held back by a reload the first sync asks for');
 }
 
-/* The Work plan line of the info box, counted from the transcript back to its latest compaction. */
-console.log('\nthe Work plan line of the info box');
+/* What the work plan has added to the context, counted from the transcript back to its latest compaction. */
+console.log('\nthe work plan\'s part of the context');
 {
   const pi = require('../src/plan-injections');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-planline-'));
@@ -5531,10 +5569,19 @@ console.log('\nthe Work plan line of the info box');
   fs.rmSync(dir, { recursive: true, force: true });
   const page = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '80-session-info.js'), 'utf8');
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  if (/m\.type === 'cce_plan'/.test(page) && /rows\.push\(\['Work plan', plan\.text\]\)/.test(page) && /rows\.push\(\['Token mode', plan\.mode\]\)/.test(page)
-    && /type: 'cce_plan', sessionId, text: planInjections\.describe\(m\), mode/.test(ext) && /runs\(WORK_PLAN_SETTING\) \? transcriptOf\(sessionId\)/.test(ext)) {
-    ok('the box shows the Work plan line and the token mode the extension sends, and no line while the work plan does not run');
-  } else bad('the info box or the extension does not carry the Work plan line');
+  const hookAt = ext.indexOf('globalThis.__cceProcessHook = (sessionId) => {');
+  const procHook = ext.slice(hookAt, ext.indexOf('\n  };', hookAt));
+  if (/m\.type === 'cce_plan'/.test(page) && !/\['Work plan'/.test(page) && /rows\.push\(\['Token mode', plan\.mode\]\)/.test(page)
+    && /type: 'cce_plan', sessionId, text: planInjections\.describe\(m\), plan: planInjections\.figures\(m\), mode/.test(procHook)
+    && /runs\(WORK_PLAN_SETTING\) \? transcriptOf\(sessionId\)/.test(procHook)
+    && procHook.indexOf("if (switchedOff().includes('footerInfo')) return;") > procHook.indexOf('__cceToPanel(sessionId, reply)')) {
+    ok('the extension sends the work plan\'s figures, none while the work plan does not run, also with the info button off; the box keeps only the token mode');
+  } else bad('the info box or the extension does not carry the work plan figures as expected');
+  const f = pi.figures({ count: 2, chars: 9412, context: 80000, since: 'compaction' });
+  if (f && f.tokens === 2353 && f.since === 'since the last compaction' && f.context === 80000 && pi.figures(null) === null
+      && pi.figures({ count: 0, chars: 0, context: 1, since: 'start' }) === null) {
+    ok('the figures carry the count, tokens and context, and there are none when nothing was injected');
+  } else bad(`the figures came out ${JSON.stringify(f)}`);
 }
 
 /* Uninstalling the old extension unregisters the plugin, and its uninstall hook first copies the plans to

@@ -3,7 +3,7 @@
 // All rights reserved.
 
 // The session id, the Claude process id, the directory the conversation started in, where its transcripts are kept,
-// their size, what the work plan has added to the conversation, and the token mode.
+// their size, and the token mode.
 // Fragment of the in-page script - see README.md in this folder.
 
   var INFO = null, INFOBOX = null, infoWired = false;
@@ -13,8 +13,8 @@
    * the row says unknown.
    */
   var PROCS = {}, procsWired = false;
-  /* The Work plan line and the token mode by session id. This extension sends them each time the box asks for the
-     process id. */
+  /* Per session id: the work plan's figures, the token mode, and when they arrived. This extension sends them each time
+     the box or the context meter's hover (src/page/55-context-detail.js) asks for the process id. */
   var PLANS = {};
   var PROC_WAIT_MS = 20000;
 
@@ -67,7 +67,6 @@
     var size = sigValue('fileSize');
     if (typeof size === 'number') rows.push(['On disk', bytesFmt(size)]);
     var plan = sid && PLANS[sid];
-    if (plan && plan.text) rows.push(['Work plan', plan.text]);
     if (plan && plan.mode) rows.push(['Token mode', plan.mode]);
     return rows;
   };
@@ -102,25 +101,36 @@
 
   var infoOpen = function(){ return !!(INFOBOX && INFOBOX.style.display === 'block'); };
 
+  var wireReplies = function(){
+    if (procsWired) return;
+    procsWired = true;
+    window.addEventListener('message', function(ev){
+      var d = ev && ev.data, m = d && d.type === 'from-extension' ? d.message : null;
+      if (m && m.type === 'cce_plan' && typeof m.sessionId === 'string') {
+        var f = m.plan && typeof m.plan === 'object' && typeof m.plan.tokens === 'number' ? m.plan : null;
+        PLANS[m.sessionId] = { plan: f, text: typeof m.text === 'string' ? m.text : '', mode: typeof m.mode === 'string' ? m.mode : '',
+          at: Date.now() };
+        if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
+        try { planArrived(m.sessionId); } catch (e) {}
+        return;
+      }
+      if (!m || m.type !== 'cce_process' || typeof m.sessionId !== 'string' || !PROCS[m.sessionId]) return;
+      var pids = Array.isArray(m.pids) ? m.pids.filter(function(n){ return typeof n === 'number'; }) : null;
+      PROCS[m.sessionId] = { at: Date.now(), pids: pids };
+      if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
+    });
+  };
+  /* The context meter's hover sends the same request to get the work plan's figures, and ignores the process id. */
+  var askPlan = function(sid){
+    wireReplies();
+    try { acquireVsCodeApi().postMessage({ type: 'cce_process_ask', sessionId: sid }); } catch (e) {}
+  };
+
   var askProcess = function(){
     var sid = sigValue('sessionId');
     if (typeof sid !== 'string' || !sid) return;
     PROCS[sid] = { at: Date.now() };
-    if (!procsWired) {
-      procsWired = true;
-      window.addEventListener('message', function(ev){
-        var d = ev && ev.data, m = d && d.type === 'from-extension' ? d.message : null;
-        if (m && m.type === 'cce_plan' && typeof m.sessionId === 'string' && typeof m.text === 'string') {
-          PLANS[m.sessionId] = { text: m.text, mode: typeof m.mode === 'string' ? m.mode : '' };
-          if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
-          return;
-        }
-        if (!m || m.type !== 'cce_process' || typeof m.sessionId !== 'string' || !PROCS[m.sessionId]) return;
-        var pids = Array.isArray(m.pids) ? m.pids.filter(function(n){ return typeof n === 'number'; }) : null;
-        PROCS[m.sessionId] = { at: Date.now(), pids: pids };
-        if (infoOpen() && sigValue('sessionId') === m.sessionId) renderInfo();
-      });
-    }
+    wireReplies();
     try { acquireVsCodeApi().postMessage({ type: 'cce_process_ask', sessionId: sid }); }
     catch (e) { PROCS[sid].pids = null; return; }
     setTimeout(function(){
@@ -193,7 +203,7 @@
     INFO.setAttribute('data-cce-info', '1');
     INFO.textContent = String.fromCharCode(8505);   // information source
     setLabel(INFO, 'About this conversation: its session id, process id, the directory it started in, where its '
-      + 'transcripts are kept, their size, and what the work plan has added to it');
+      + 'transcripts are kept, their size, and the token mode');
     var proto = document.querySelector('button[class*="menuButton"]');
     if (proto) INFO.className = proto.className;
     else {

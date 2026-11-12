@@ -4,9 +4,9 @@
 
 'use strict';
 /*
- * The Work plan line of the info box (src/page/80-session-info.js): how often the plan was put in front of Claude since
- * the conversation's last compaction, and their total length in characters. Read from the end of the conversation's
- * own transcript.
+ * The work plan's part of the context, shown on hovering the context meter (src/page/55-context-detail.js): how often
+ * the plan was put in front of Claude since the conversation's last compaction, and their total length in characters.
+ * Read from the end of the conversation's own transcript.
  *
  * An injection is an attachment record of type hook_additional_context for UserPromptSubmit whose text starts with the
  * plan's opening words. The time-zone hook writes the same kind of record; the opening words tell them apart.
@@ -82,13 +82,20 @@ async function measure(file, maxBytes = MAX_BYTES) {
   }
 }
 
-/** The line shown for a measurement, or '' when there is nothing to show. */
-function describe(m, maxBytes = MAX_BYTES) {
-  if (!m || !m.count) return '';
-  const tokens = Math.round(m.chars / 4);
+/** The numbers behind describe(), for the context meter's hover; null when nothing was injected. */
+function figures(m, maxBytes = MAX_BYTES) {
+  if (!m || !m.count) return null;
   const since = m.since === 'compaction' ? 'since the last compaction'
     : m.since === 'limit' ? `in the last ${Math.round(maxBytes / (1 << 20))} MB of the transcript` : 'since the conversation began';
-  let text = `injected ${m.count} time${m.count === 1 ? '' : 's'} ${since}: ${m.chars} characters, about ${tokens} tokens`;
+  return { count: m.count, chars: m.chars, tokens: Math.round(m.chars / 4), context: m.context, since };
+}
+
+/** The line shown for a measurement, or '' when there is nothing to show. */
+function describe(m, maxBytes = MAX_BYTES) {
+  const f = figures(m, maxBytes);
+  if (!f) return '';
+  const tokens = f.tokens;
+  let text = `injected ${m.count} time${m.count === 1 ? '' : 's'} ${f.since}: ${m.chars} characters, about ${tokens} tokens`;
   if (m.context > 0) {
     const share = Math.round(100 * tokens / m.context);
     text += `, ${share ? share + '%' : 'under 1%'} of the ${m.context} in context`;
@@ -96,4 +103,4 @@ function describe(m, maxBytes = MAX_BYTES) {
   return text;
 }
 
-module.exports = { measure, describe, MARK, MAX_BYTES };
+module.exports = { measure, describe, figures, MARK, MAX_BYTES };

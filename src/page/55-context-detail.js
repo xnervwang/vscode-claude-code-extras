@@ -2,7 +2,7 @@
 // Copyright (c) 2026, Xnerv Wang
 // All rights reserved.
 
-// The context breakdown shown on hovering the usage meter.
+// The context breakdown shown on hovering the usage meter, and what the work plan has added to the context.
 // Fragment of the in-page script - see README.md in this folder.
 
   // Context usage breakdown on hover. The CLI recomputes per-part token counts for each request, so it is never polled:
@@ -127,6 +127,12 @@
       CTX.appendChild(ctxHead('Custom agents', '/agents'));
       for (var q = 0; q < ags.length; q++) CTX.appendChild(ctxRow(ags[q].agentType, ags[q].tokens, '', null));
     }
+    var f = planNow() && planNow().plan;
+    if (f) {
+      CTX.appendChild(ctxHead('Work plan', f.since));
+      CTX.appendChild(ctxRow('Injected ' + f.count + (f.count === 1 ? ' time' : ' times'), f.tokens,
+                             pctText(f.tokens, u.rawMaxTokens), null));
+    }
   };
   var ensureCtx = function(){
     if (CTX && CTX.isConnected) return;
@@ -162,9 +168,31 @@
     var ref = nativeTip() || ctxBtn;
     return ref ? ref.getBoundingClientRect() : null;
   };
-  // A line of our own, sitting above the panel's tooltip, to say the breakdown is on its way.
-  var NOTEBOX = null;
+  /* The work plan's figures for this panel's conversation, as last received (src/page/80-session-info.js). */
+  var planNow = function(){
+    var sid = sigValue('sessionId'), p = sid && PLANS[sid];
+    return p && p.plan ? p : null;
+  };
+  var PLAN_ASKED = {};
+  var askPlanSoon = function(){
+    var sid = sigValue('sessionId');
+    if (typeof sid !== 'string' || !sid) return;
+    var p = PLANS[sid], now = Date.now();
+    if ((p && now - p.at < CTX_TTL) || (PLAN_ASKED[sid] && now - PLAN_ASKED[sid] < CTX_TTL)) return;
+    PLAN_ASKED[sid] = now;
+    askPlan(sid);
+  };
+  /* The work plan's line, then the breakdown's loading or error note, in a box of our own above the panel's tooltip.
+     It is hidden while the breakdown is open, since the breakdown has a Work plan section. */
+  var NOTEBOX = null, noteStatus = '';
   var noteLine = function(text){
+    noteStatus = text || '';
+    paintNote();
+  };
+  var paintNote = function(){
+    var p = planNow();
+    var lines = ctxOver && !(CTX && CTX.style.display === 'block') ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus] : [];
+    var text = lines.filter(Boolean).join('\n');
     if (!text) { if (NOTEBOX) NOTEBOX.style.display = 'none'; return; }
     if (!NOTEBOX || !NOTEBOX.isConnected) {
       NOTEBOX = document.createElement('div');
@@ -172,7 +200,7 @@
       var s = NOTEBOX.style;
       s.position = 'fixed'; s.zIndex = '32'; s.display = 'none';
       s.padding = '4px 8px'; s.borderRadius = '4px';
-      s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'nowrap';
+      s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'pre';
       s.background = 'var(--vscode-editorHoverWidget-background, rgba(30,30,30,0.99))';
       s.color = 'var(--vscode-descriptionForeground, #aaa)';
       s.border = '1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.18))';
@@ -234,6 +262,12 @@
       if (sessionRef === asked && ctxOver) noteLine('Breakdown request failed');
     });
   };
+  /* Called when the work plan's figures arrive. Redraws the hover if the pointer is still on that conversation's meter. */
+  var planArrived = function(sid){
+    if (!ctxOver || sigValue('sessionId') !== sid) return;
+    if (CTX && CTX.style.display === 'block' && ctxCache) renderCtx(ctxCache);
+    else paintNote();
+  };
   /* The breakdown shown and kept belongs to the conversation it was asked for. */
   var forgetCtx = function(){
     ctxCache = null; ctxKey = ''; ctxAt = 0;
@@ -250,7 +284,9 @@
     btn.addEventListener('mouseenter', function(){
       ctxOver = true;
       if (ctxHideTimer) { clearTimeout(ctxHideTimer); ctxHideTimer = null; }
+      askPlanSoon();
       if (ctxFresh()) showCtx(ctxCache);
+      else paintNote();
       if (ctxOpenTimer) clearTimeout(ctxOpenTimer);
       // Two seconds resting on the button before anything happens: reading the panel's own summary, or passing over
       // on the way somewhere else, then costs nothing at all.
