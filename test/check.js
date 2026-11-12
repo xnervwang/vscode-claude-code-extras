@@ -8227,7 +8227,7 @@ console.log('\nthe Steward panel');
     ];
     fs.writeFileSync(path.join(conf, 'projects', '-w', S(2) + '.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const peek = cp.spawnSync('python3', [path.join(hooks, 'steward-peek.py'), S(2), data], { encoding: 'utf8', env });
-    const p = peek.stdout || '';
+    const p = (peek.stdout || '').replace(/\r\n/g, '\n');
     if (peek.status === 0 && p.includes('state: idle') && p.includes('1. [doing] Port the reader') && p.includes('question for the user: Which one?')
         && /latest reply:\nLooking\.\n\nIt builds\./.test(p) && !/BUILD OUTPUT|secret|old answer|make/.test(p)) {
       ok('steward-peek.py gives the state, the open rows and the latest reply without tool calls, output or thinking');
