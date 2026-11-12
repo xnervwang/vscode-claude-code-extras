@@ -8096,16 +8096,17 @@ console.log('\nthe Steward panel');
         && text.includes(`a conversation (${S(3)}) is waiting for the user`)) ok('the notice says it is not from the user, and names each conversation');
     else bad(`the notice read ${JSON.stringify(text)}`);
     const sockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-sk-'));
-    const sock = path.join(sockDir, 's.sock');
+    // A Unix socket elsewhere, a named pipe on Windows; post() is told it is not on Windows so that it connects.
+    const sock = process.platform === 'win32' ? '\\\\.\\pipe\\' + path.basename(sockDir) : path.join(sockDir, 's.sock');
     const posted = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
       const net = require('net'); const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
       let got = '';
       const srv = net.createServer((c) => { c.on('data', (d) => { got += d; }); c.on('end', () => {
-        srv.close(); st.post('uds:' + ${JSON.stringify(path.join(sockDir, 'none.sock'))}, 'x', { timeoutMs: 500 }).then((miss) =>
+        srv.close(); st.post('uds:' + ${JSON.stringify(path.join(sockDir, 'none.sock'))}, 'x', { timeoutMs: 500, platform: 'linux' }).then((miss) =>
           st.post('uds:' + ${JSON.stringify(sock)}, 'y', { platform: 'win32' }).then((win) =>
             process.stdout.write(JSON.stringify({ got, sent, miss, win })))); }); });
       let sent;
-      srv.listen(${JSON.stringify(sock)}, () => st.post('uds:' + ${JSON.stringify(sock)}, 'hello there').then((r) => { sent = r; }));`],
+      srv.listen(${JSON.stringify(sock)}, () => st.post('uds:' + ${JSON.stringify(sock)}, 'hello there', { platform: 'linux' }).then((r) => { sent = r; }));`],
     { encoding: 'utf8', timeout: 20000 }));
     fs.rmSync(sockDir, { recursive: true, force: true });
     const line = JSON.parse(posted.got.trim());
@@ -8131,7 +8132,8 @@ console.log('\nthe Steward panel');
       let provider, front = ${JSON.stringify(S(1))}, writable = true;
       const vscode = { window: { registerWebviewViewProvider: (id, p) => { provider = p; return { dispose() {} }; },
         showInformationMessage() {} } };
-      const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => ({ records }), readPlan: (id) => plans[id] || null,
+      let asked = 0;
+      const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => { asked++; return { records }; }, readPlan: (id) => plans[id] || null,
         titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(), reveal: async () => true,
         shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, enabled: () => true, log: (m) => logs.push(m),
         home: '/', dir: ${JSON.stringify(path.join(root, 'plans2'))}, isBackground: (id) => id === ${JSON.stringify(S(5))},
@@ -8141,6 +8143,8 @@ console.log('\nthe Steward panel');
       const view = { visible: true, webview: { options: {}, html: '', onDidReceiveMessage: (f) => { onMsg = f; },
         postMessage: (m) => { sentToPage.push(m); } }, onDidChangeVisibility() {}, onDidDispose() {} };
       (async () => {
+        await v._pass();
+        const idle = asked;
         provider.resolveWebviewView(view);
         await v._pass();
         const latest = () => sentToPage.filter((m) => m.type === 'body').map((m) => m.html).pop() || view.webview.html;
@@ -8166,7 +8170,7 @@ console.log('\nthe Steward panel');
         await v._onMessage({ type: 'none' });
         const cleared = st.read(${JSON.stringify(path.join(root, 'plans2'))});
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst }));
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
     if (out.error) bad('the panel threw: ' + out.error);
     else {
@@ -8184,6 +8188,8 @@ console.log('\nthe Steward panel');
           && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')) {
         ok('a turn that ends is sent to the steward\'s inbox, and the next change waits for the minute between notices');
       } else bad(`the notices were ${JSON.stringify(out.posts)} (${out.afterDone}, ${out.held})`);
+      if (out.idle === 0) ok('with the panel never shown and no steward in this window, nothing is read');
+      else bad(`a hidden panel with no steward still listed conversations ${out.idle} time(s)`);
       if (out.stillTicked[S(1)] && out.cleared[S(1)] === undefined) ok('a window that may not write shared files changes nothing; Clear empties the list');
       else bad(`clearing gave ${JSON.stringify([out.stillTicked, out.cleared])}`);
     }

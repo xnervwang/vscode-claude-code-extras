@@ -214,8 +214,10 @@ function create(vscode, deps) {
     }
   };
 
+  /* Skipped while the panel is hidden and no steward here needs notices: a pass reads every plan and transcript end. */
   const pass = async () => {
     if (busy || !deps.enabled()) return;
+    if (!(view && view.visible) && !Object.keys(stewards.read(deps.dir)).some((id) => deps.shownHere(id))) return;
     busy = true;
     try {
       const r = await deps.freshAgents();
