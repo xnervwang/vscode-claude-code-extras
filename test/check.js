@@ -4226,7 +4226,7 @@ console.log('\nthe row command');
     const kept = read(t).nodes.length - plan().nodes.length;
     const strays = fs.readdirSync(t.dir).filter((f) => /\.(lock|tmp)$/.test(f));
     if (r.status === 0 && kept === n && !strays.length) ok(`${n} runs at once each keep their row, and leave no lock or temporary file behind`);
-    else bad(`${n} runs at once: status ${r.status}, ${kept} rows kept, left ${JSON.stringify(strays)}`);
+    else bad(`${n} runs at once: status ${r.status}, ${kept} rows kept, left ${JSON.stringify(strays)}; ${(r.stderr || '').trim().split('\n').slice(-4).join(' | ')}`);
     done(t);
   }
   {
