@@ -26,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const { claudeDir, planDir, SESSION, transcriptOf, readLines, oneAtATime, writeAtomic } = require('./claude-files');
+const detached = require('./detached');
 
 const jobsDir = () => path.join(claudeDir(), 'jobs');
 const SUFFIX = '.background';
@@ -53,10 +54,19 @@ const INTENT_CHARS = 80;
 const MIN_INTENT = 12;
 /* The flag that starts one, found in the command a tool result answers. */
 const BG_FLAG = Buffer.from('--bg', 'utf8');
-const NEEDLES = [BG_FLAG, MARK, ...HINT_NEEDLES, ...ALONE_NEEDLES];
+/* A `claude -p` worker. Its session id follows --resume or --session-id in the command, or is in the stream-json init
+   line the command printed. */
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const WORKER_CMD = /\bclaude\b[^\n|;&]*?\s(?:-p|--print)(?=[\s"']|$)/;
+const WORKER_IDS = new RegExp(`(?:--resume|--session-id)[ =]+["']?(${UUID})`, 'gi');
+const INIT_ID = new RegExp(`"session_id"\\s*:\\s*"(${UUID})"`, 'gi');
+const WORKER_NEEDLES = ['claude -p', 'claude --print', 'claude --resume', 'claude --session-id']
+  .map((s) => Buffer.from(s, 'utf8'));
+const MAX_WORKERS = 50;
+const NEEDLES = [BG_FLAG, MARK, ...HINT_NEEDLES, ...ALONE_NEEDLES, ...WORKER_NEEDLES];
 /* Bump this when the scan starts recognising a launch it used to miss: link files written by an older version are then
    read again from the start, once. */
-const READER = 3;
+const READER = 4;
 /* The stylesheet carries all of this to every panel on every change, so the caps are about its size, not about how
    many sessions anyone starts. */
 const MAX_SESSIONS = 10;
@@ -86,21 +96,29 @@ const textOf = (b) => (typeof b.content === 'string' ? b.content
  * `ran` carries the commands, and when each was made, across lines and passes, since a call and its result are
  * separate rows.
  */
-function readLine(line, ran, jobs, seen) {
+function readLine(line, ran, jobs, seen, workers) {
   let row;
   try { row = JSON.parse(line); } catch (_) { return; }
   const blocks = row && row.message && Array.isArray(row.message.content) ? row.message.content : [];
   const at = Date.parse(row && row.timestamp);
   for (const b of blocks) {
     if (!b) continue;
-    if (b.type === 'tool_use' && b.input && typeof b.input.command === 'string' && b.input.command.includes('--bg')) {
-      ran.set(b.id, { at, command: b.input.command });
+    if (b.type === 'tool_use' && b.input && typeof b.input.command === 'string') {
+      const command = b.input.command;
+      const worker = !command.includes('--bg') && WORKER_CMD.test(command);
+      if (!worker && !command.includes('--bg')) continue;
+      if (worker) for (const m of command.matchAll(WORKER_IDS)) workers.add(m[1].toLowerCase());
+      ran.set(b.id, { at, command, worker });
       if (ran.size > 500) ran.delete(ran.keys().next().value);
       continue;
     }
     if (b.type !== 'tool_result' || !ran.has(b.tool_use_id)) continue;
     const call = ran.get(b.tool_use_id);
     const text = textOf(b);
+    if (call.worker) {
+      for (const m of text.matchAll(INIT_ID)) workers.add(m[1].toLowerCase());
+      continue;
+    }
     let m, named = false;
     for (const re of [ID_AFTER, ID_IN_HINT]) {
       re.lastIndex = 0;
@@ -159,16 +177,17 @@ function readLink(file) {
   let st;
   try { st = fs.statSync(file); } catch (e) {
     links.delete(file);
-    return { ids: [], scannedTo: 0, launched: 0, exists: !(e && e.code === 'ENOENT') };
+    return { ids: [], workers: [], scannedTo: 0, launched: 0, exists: !(e && e.code === 'ENOENT') };
   }
   const was = links.get(file);
   if (was && was.mtimeMs === st.mtimeMs && was.size === st.size) return was.link;
   let d = null;
   try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { /* caught mid-write, or not ours */ }
   const ids = d && Array.isArray(d.ids) ? d.ids.filter((x) => typeof x === 'string' && SHORT_ID.test(x)) : [];
+  const workers = d && Array.isArray(d.workers) ? d.workers.filter((x) => typeof x === 'string' && SESSION.test(x)) : [];
   const scannedTo = d && d.reader === READER && typeof d.scannedTo === 'number' && d.scannedTo >= 0 ? d.scannedTo : 0;
   const launched = d && typeof d.launched === 'number' && isFinite(d.launched) ? d.launched : 0;
-  const link = { ids, scannedTo, launched, exists: true };
+  const link = { ids, workers, scannedTo, launched, exists: true };
   links.set(file, { mtimeMs: st.mtimeMs, size: st.size, link });
   return link;
 }
@@ -179,8 +198,8 @@ function writeLink(file, link) {
   try {
     const st = fs.statSync(file);
     links.set(file, { mtimeMs: st.mtimeMs, size: st.size,
-      link: { ids: link.ids.slice(), scannedTo: link.reader === READER ? link.scannedTo : 0, launched: link.launched || 0,
-        exists: true } });
+      link: { ids: link.ids.slice(), workers: (link.workers || []).slice(), scannedTo: link.reader === READER ? link.scannedTo : 0,
+        launched: link.launched || 0, exists: true } });
   } catch (_) { /* read again next time */ }
 }
 
@@ -210,6 +229,7 @@ function scan(session, opts = {}) {
 /* What this host has found per conversation, kept so that a write which lost a race with another window's write puts
    back what the other one did not know about, the next time this host writes. */
 const known = new Map();
+const knownWorkers = new Map();
 const commands = new Map();
 /* How far this host has read each transcript, ahead of the file, which is written only every PERSIST_EVERY bytes. */
 const readTo = new Map();
@@ -220,7 +240,7 @@ const readTo = new Map();
  * the CLI's words in it.
  */
 const RESULT_ID = Buffer.from('"tool_use_id":"', 'utf8');
-function readChunk(data, ran, jobs, seen) {
+function readChunk(data, ran, jobs, seen, workers) {
   const last = data.length - 1;
   const starts = new Set(), results = new Map();
   for (const needle of NEEDLES) {
@@ -238,7 +258,7 @@ function readChunk(data, ran, jobs, seen) {
   }
   for (const ls of [...starts, ...results.keys()].sort((a, b) => a - b)) {
     if (results.has(ls) && !ran.has(results.get(ls))) continue;
-    readLine(data.subarray(ls, data.indexOf(0x0a, ls)).toString('utf8'), ran, jobs, seen);
+    readLine(data.subarray(ls, data.indexOf(0x0a, ls)).toString('utf8'), ran, jobs, seen, workers);
   }
 }
 
@@ -251,22 +271,31 @@ async function scanOnce(session, opts) {
   const link = readLink(file);
   const seen = new Set(link.ids);
   for (const id of known.get(session) || []) seen.add(id);
+  const workers = new Set(link.workers);
+  for (const id of knownWorkers.get(session) || []) workers.add(id);
   if (!commands.has(session)) commands.set(session, new Map());
   const ran = commands.get(session);
   // A position past the end means the transcript was replaced rather than appended to, so it is read again in full.
-  const reader = { pos: Math.max(link.scannedTo, readTo.get(session) || 0), take: (data) => readChunk(data, ran, jobs, seen) };
+  const reader = { pos: Math.max(link.scannedTo, readTo.get(session) || 0),
+    take: (data) => readChunk(data, ran, jobs, seen, workers) };
   if (!(await readLines(transcript, reader))) return { added: 0, scannedTo: 0 };
   const consumed = reader.pos;
   const ids = [...seen];
   known.set(session, ids);
   readTo.set(session, consumed);
   const fresh = ids.filter((id) => !link.ids.includes(id));
+  // A worker found by the ten-second check (working()) can have been written since this pass read the file.
+  for (const id of readLink(file).workers) workers.add(id);
+  const found = [...workers].slice(-MAX_WORKERS);
+  knownWorkers.set(session, found);
+  const freshWorkers = found.filter((id) => !link.workers.includes(id));
   /* Written even when nothing was launched (see the top of this file); collect() skips such files. */
-  if (fresh.length || !link.exists || consumed - link.scannedTo >= PERSIST_EVERY) {
+  if (fresh.length || freshWorkers.length || !link.exists || consumed - link.scannedTo >= PERSIST_EVERY) {
     const launched = Math.max(link.launched, launchOf(link.launched ? fresh : ids, jobs));
     try {
       fs.mkdirSync(dir, { recursive: true });
-      writeLink(file, Object.assign({ ids, scannedTo: consumed, reader: READER }, launched ? { launched } : {}));
+      writeLink(file, Object.assign({ ids, scannedTo: consumed, reader: READER }, found.length ? { workers: found } : {},
+        launched ? { launched } : {}));
     } catch (_) { /* the next pass writes it */ }
   }
   return { added: fresh.length, scannedTo: consumed };
@@ -357,39 +386,106 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
 }
 
-/*
- * Job ids of busy `claude --bg` sessions, read from ~/.claude/sessions/<pid>.json, the files `claude agents` lists.
- * Status "busy" is a turn in progress and "shell" a command still running. Records of dead processes are skipped.
- */
-const BUSY = new Set(['busy', 'shell']);
-function busyJobs(dir = path.join(claudeDir(), 'sessions'), isAlive = alive) {
-  const out = new Set();
+/* Whether a record still belongs to the process now holding its pid. A process that died can leave a record whose pid
+   another process has since been given. Checked where /proc gives the process start time. */
+function sameStart(d, proc) {
+  if (typeof d.procStart !== 'string' || !d.procStart) return true;
+  let s;
+  try { s = fs.readFileSync(path.join(proc, String(d.pid), 'stat'), 'latin1'); } catch (_) { return true; }
+  return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] === d.procStart;
+}
+
+/* Session records of running claude processes: the ~/.claude/sessions/<pid>.json files that `claude agents` lists. */
+function liveRecords(dir = path.join(claudeDir(), 'sessions'), isAlive = alive, proc = '/proc') {
+  const out = [];
   let names;
   try { names = fs.readdirSync(dir).filter((n) => /^\d+\.json$/.test(n)); } catch (_) { return out; }
   for (const n of names) {
     let d;
     try { d = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')); } catch (_) { continue; }
-    if (!d || d.kind !== 'bg' || !BUSY.has(d.status) || typeof d.jobId !== 'string' || !SHORT_ID.test(d.jobId)) continue;
-    if (Number.isInteger(d.pid) && isAlive(d.pid)) out.add(d.jobId);
+    if (d && Number.isInteger(d.pid) && isAlive(d.pid) && sameStart(d, proc)) out.push(d);
   }
   return out;
 }
 
-/* Session ids of the conversations with a busy `claude --bg` session. */
+/*
+ * Job ids of busy `claude --bg` sessions. Status "busy" is a turn in progress and "shell" a command still running.
+ * A session whose detached command (src/detached.js) still runs is busy as well.
+ */
+const BUSY = new Set(['busy', 'shell']);
+function busyOf(records, outside = new Set()) {
+  const out = new Set();
+  for (const d of records) {
+    if (d.kind !== 'bg' || typeof d.jobId !== 'string' || !SHORT_ID.test(d.jobId)) continue;
+    const own = typeof d.sessionId === 'string' && outside.has(d.sessionId.toLowerCase());
+    if (BUSY.has(d.status) || own) out.add(d.jobId);
+  }
+  return out;
+}
+function busyJobs(dir, isAlive = alive, outside) {
+  return busyOf(liveRecords(dir, isAlive), outside);
+}
+
+/* A `claude -p` worker's record. An idle one is an SDK session waiting for input. */
+const isWorker = (d) => /^sdk-/.test(d.entrypoint || '') && d.kind !== 'bg' && SESSION.test(d.sessionId || '');
+
+/* Adds workers to their launchers' link files, so a launcher keeps them after its process exits (a window reload ends
+   it). */
+function noteWorkers(launchedBy, dir) {
+  const by = new Map();
+  for (const [w, l] of launchedBy) { if (!by.has(l)) by.set(l, []); by.get(l).push(w); }
+  for (const [session, ws] of by) {
+    const file = path.join(dir, session + SUFFIX), link = readLink(file);
+    const fresh = ws.filter((w) => !link.workers.includes(w));
+    if (!fresh.length) continue;
+    const workers = [...link.workers, ...fresh].slice(-MAX_WORKERS);
+    knownWorkers.set(session, [...new Set([...(knownWorkers.get(session) || []), ...fresh])]);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      writeLink(file, Object.assign({ ids: link.ids, workers, scannedTo: link.exists ? link.scannedTo : 0, reader: READER },
+        link.launched ? { launched: link.launched } : {}));
+    } catch (_) { /* found again on the next check */ }
+  }
+}
+
+/*
+ * Session ids of the conversations with work still running after their turn: a busy `claude --bg` session it started,
+ * a `claude -p` worker it started, or a command of its own still running outside every claude process. While the
+ * conversation's process runs, a worker is tied to it by CLAUDE_PID in the worker's environment. After that the link
+ * file holds the tie, along with the workers named in the conversation's transcript.
+ *
+ * `outside` and `launchers` are what src/detached.js found. `write` false leaves the link files alone, for a window
+ * that must not write shared files.
+ */
 function working(opts = {}) {
   const dir = opts.dir || planDir();
-  const busy = opts.busy || busyJobs(opts.sessions);
-  const out = new Set();
-  if (!busy.size) return out;
+  const records = opts.records || liveRecords(opts.sessions);
+  const outside = opts.outside || new Set();
+  const launchedBy = opts.launchers || new Map();
+  const busy = opts.busy || busyOf(records, outside);
+  if (opts.write !== false && launchedBy.size) noteWorkers(launchedBy, dir);
+  const live = new Set(records.filter((d) => isWorker(d) && d.status !== 'idle').map((d) => d.sessionId.toLowerCase()));
+  const out = new Set(outside);
+  for (const [w, l] of launchedBy) if (live.has(w)) out.add(l);
   let names;
   try { names = fs.readdirSync(dir).filter((n) => LINK_FILE.test(n)); } catch (_) { return out; }
   for (const n of names) {
-    if (readLink(path.join(dir, n)).ids.some((id) => busy.has(id))) out.add(n.slice(0, -SUFFIX.length));
+    const link = readLink(path.join(dir, n));
+    if (link.ids.some((id) => busy.has(id)) || link.workers.some((w) => live.has(w) || outside.has(w))) {
+      out.add(n.slice(0, -SUFFIX.length));
+    }
   }
   return out;
 }
 
+/* Reads /proc, then calls working(). */
+async function workingNow(opts = {}) {
+  const records = liveRecords(opts.sessions);
+  const { outside, launchers } = await detached.snapshot({ proc: opts.proc, records });
+  return working(Object.assign({}, opts, { records, outside, launchers }));
+}
+
 module.exports = {
-  scan, collect, readState, busyJobs, working,
+  scan, collect, readState, busyJobs, liveRecords, working, workingNow,
   SUFFIX, LINK_FILE, MAX_SESSIONS, MAX_PER_SESSION, MAX_ENTRIES, PERSIST_EVERY,
 };

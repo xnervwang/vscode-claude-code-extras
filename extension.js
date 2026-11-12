@@ -846,12 +846,17 @@ function start(context, log, renamed, handing = false) {
   /* The patched host asks for each tab's icon here (src/tabdot.js). VS Code sends an icon to the editor only when the
      object changes, so each file keeps one Uri. */
   /*
-   * Show a conversation as running while a `claude --bg` session it started is busy. Claude Code does the same for a
-   * conversation's own background commands. Checked every ten seconds.
+   * Claude Code shows a conversation as running while its own background commands run. Checked every ten seconds.
    */
   let bgWorking = new Set();
-  const readBgWorking = () => {
-    const next = removed() || !enabled() ? new Set() : background.working();
+  let bgReading = false;
+  const readBgWorking = async () => {
+    if (bgReading) return;
+    bgReading = true;
+    let next;
+    try {
+      next = removed() || !enabled() ? new Set() : await background.workingNow({ write: !replaced() && !uninstalling() });
+    } finally { bgReading = false; }
     if (next.size === bgWorking.size && [...next].every((id) => bgWorking.has(id))) return;
     bgWorking = next;
     try { if (typeof globalThis.__cceRefreshTabIcons === 'function') globalThis.__cceRefreshTabIcons(); } catch (_) { /* next change */ }
@@ -861,7 +866,7 @@ function start(context, log, renamed, handing = false) {
     ? infos.map((i) => (i && i.state === 'idle' && bgWorking.has(i.sessionId) ? Object.assign({}, i, { state: 'running' }) : i))
     : infos);
   const bgTimer = setInterval(() => {
-    try { readBgWorking(); } catch (e) { log.appendLine('busy background sessions: ' + (e && e.message)); }
+    readBgWorking().catch((e) => log.appendLine('work running after a turn: ' + (e && e.message)));
   }, 10000);
   context.subscriptions.push({ dispose: () => {
     clearInterval(bgTimer);

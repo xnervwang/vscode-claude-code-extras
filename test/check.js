@@ -7885,15 +7885,133 @@ console.log('\nconversations whose background sessions are busy');
     const S1 = '11111111-1111-4111-8111-111111111111', S2 = '22222222-2222-4222-8222-222222222222';
     fs.writeFileSync(path.join(plans, S1 + bgr.SUFFIX), JSON.stringify({ ids: ['cccc3333', 'bbbb2222'], scannedTo: 1 }));
     fs.writeFileSync(path.join(plans, S2 + bgr.SUFFIX), JSON.stringify({ ids: ['cccc3333', 'eeee5555'], scannedTo: 1 }));
-    const conv = bgr.working({ dir: plans, busy });
+    const conv = bgr.working({ dir: plans, busy, records: [] });
     if (JSON.stringify([...busy].sort()) === '["aaaa1111","bbbb2222"]' && JSON.stringify([...conv]) === JSON.stringify([S1])) {
       ok('busy bg sessions are found and mapped to the conversation that started them');
     } else bad(`busy ${JSON.stringify([...busy])}, conversations ${JSON.stringify([...conv])}`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  /* `claude -p` workers: named by the launching conversation's transcript, or tied to it by the worker's CLAUDE_PID while
+     that conversation's process runs, and written to its link file so that the tie outlasts a window reload. */
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-workers-'));
+  try {
+    const plans = path.join(root2, 'plans');
+    fs.mkdirSync(plans);
+    const L = 'aaaaaaaa-0000-4000-8000-000000000001', L2 = 'aaaaaaaa-0000-4000-8000-000000000002';
+    const W = 'bbbbbbbb-0000-4000-8000-000000000001', W2 = 'bbbbbbbb-0000-4000-8000-000000000002';
+    const W3 = 'bbbbbbbb-0000-4000-8000-000000000003';
+    fs.writeFileSync(path.join(plans, L + bgr.SUFFIX), JSON.stringify({ ids: [], workers: [W], scannedTo: 1, reader: 4 }));
+    const rec = (sessionId, o) => Object.assign({ pid: 1, kind: 'interactive', entrypoint: 'sdk-cli', status: 'busy', sessionId }, o);
+    const quiet = { dir: plans, records: [], write: false };
+    const run = (o) => [...bgr.working(Object.assign({}, quiet, o))].sort();
+    if (JSON.stringify(run({ records: [rec(W)] })) === JSON.stringify([L])) ok('a running worker named in a link file shows its launcher as running');
+    else bad(`with a running worker: ${JSON.stringify(run({ records: [rec(W)] }))}`);
+    const none = [run({ records: [rec(W, { status: 'idle' })] }), run({ records: [rec(W, { kind: 'bg' })] }),
+      run({ records: [rec(W, { entrypoint: 'claude-vscode' })] }), run({})];
+    if (none.every((r) => !r.length)) ok('an idle SDK session, a bg session, an editor conversation, or no record at all, does not');
+    else bad(`a worker that is not running counted: ${JSON.stringify(none)}`);
+    if (JSON.stringify(run({ outside: new Set([W]) })) === JSON.stringify([L, W])) {
+      ok('nor does a finished worker, except while a shell it detached still runs');
+    } else bad(`a detached shell of a worker gave ${JSON.stringify(run({ outside: new Set([W]) }))}`);
+    const launchers = new Map([[W2, L2], [W3, L2]]);
+    const seen = [...bgr.working({ dir: plans, records: [rec(W2)], launchers, write: false })];
+    if (JSON.stringify(seen) === JSON.stringify([L2]) && !fs.existsSync(path.join(plans, L2 + bgr.SUFFIX))) {
+      ok('a worker tied to its launcher by its environment shows the launcher as running, and write false writes nothing');
+    } else bad(`a worker found by its environment gave ${JSON.stringify(seen)}`);
+    bgr.working({ dir: plans, records: [rec(W2)], launchers });
+    let kept = null;
+    try { kept = JSON.parse(fs.readFileSync(path.join(plans, L2 + bgr.SUFFIX), 'utf8')); } catch (_) { /* none */ }
+    if (kept && JSON.stringify(kept.workers) === JSON.stringify([W2, W3])
+        && JSON.stringify([...bgr.working({ dir: plans, records: [rec(W2)], write: false })]) === JSON.stringify([L2])) {
+      ok('and is written to the launcher\'s link file, which keeps the tie once the launcher has exited');
+    } else bad(`the launcher's link file held ${JSON.stringify(kept)}`);
+
+    // The transcript side: a resumed worker, and a launch whose stream-json output names its session.
+    const proj = path.join(root2, 'projects', '-p'), jobs = path.join(root2, 'jobs');
+    fs.mkdirSync(proj, { recursive: true });
+    const T = 'cccccccc-0000-4000-8000-000000000001';
+    let n = 0;
+    const call = (command, text) => {
+      const id = 'toolu_w' + (++n);
+      return JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [
+        { type: 'tool_use', id, name: 'Bash', input: { command } }] } }) + '\n'
+        + JSON.stringify({ type: 'user', message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: id, content: text }] } }) + '\n';
+    };
+    const init = (sid) => JSON.stringify({ type: 'system', subtype: 'init', session_id: sid }) + '\n';
+    const A = 'dddddddd-0000-4000-8000-00000000000a', B = 'dddddddd-0000-4000-8000-00000000000b';
+    const C = 'dddddddd-0000-4000-8000-00000000000c', D = 'dddddddd-0000-4000-8000-00000000000d';
+    fs.writeFileSync(path.join(proj, T + '.jsonl'),
+      call(`setsid nohup env -u CLAUDE_CODE_SESSION_ID claude -p --resume ${A} "carry on" > out.jsonl 2>&1 &`, '')
+      + call('claude -p "start" --output-format stream-json --verbose | head -1', init(B))
+      + call(`echo claude agents; grep -- "--resume ${C}" notes.md`, '')                        // no claude -p in it
+      + call('cat old-run.jsonl | head -1', init(D)));                                          // printed back
+    const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      const bg = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'background.js'))});
+      const fs = require('fs');
+      const opts = ${JSON.stringify({ dir: plans, jobs, transcript: path.join(proj, T + '.jsonl') })};
+      bg.scan(${JSON.stringify(T)}, opts).then(() => {
+        process.stdout.write(fs.readFileSync(opts.dir + '/' + ${JSON.stringify(T)} + '.background', 'utf8'));
+      }).catch((e) => { process.stdout.write(JSON.stringify({ error: e.message })); });`], { encoding: 'utf8' }));
+    if (JSON.stringify(out.workers) === JSON.stringify([A, B])) {
+      ok('the scan records a worker it resumed, and one whose launch printed its session id');
+    } else bad(`the scan recorded workers ${JSON.stringify(out)}`);
+  } finally { fs.rmSync(root2, { recursive: true, force: true }); }
+
+  /* The /proc side, on a made-up /proc: which processes count as work left running, and which worker came from where. */
+  const root3 = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-proc-'));
+  try {
+    const S = (n) => `eeeeeeee-0000-4000-8000-00000000000${n}`;
+    const put = (pid, { comm, state = 'S', ppid = 1, start = 100, argv, env = {} }) => {
+      const d = path.join(root3, String(pid));
+      fs.mkdirSync(d);
+      fs.writeFileSync(path.join(d, 'stat'), `${pid} (${comm}) ${state} ${ppid} ${Array(17).fill(0).join(' ')} ${start} 0 0\n`);
+      fs.writeFileSync(path.join(d, 'cmdline'), (argv || [comm]).join('\0') + '\0');
+      fs.writeFileSync(path.join(d, 'environ'), Object.entries(Object.assign({ HOME: '/h' }, env)).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
+    };
+    put(100, { comm: 'claude' });
+    put(101, { comm: 'node', ppid: 100, argv: ['node', 'mcp.js'], env: { CLAUDE_CODE_SESSION_ID: S(1) } });       // an MCP server
+    put(102, { comm: 'bash', ppid: 100, argv: ['/bin/bash', '-c', 'sleep 9'], env: { CLAUDE_CODE_SESSION_ID: S(1) } }); // a turn's command
+    put(200, { comm: 'bash', argv: ['bash', '-c', 'timeout 1800 codex exec -'], env: { CLAUDE_CODE_SESSION_ID: S(2) } });
+    put(201, { comm: 'codex', ppid: 200, env: { CLAUDE_CODE_SESSION_ID: S(2) } });
+    put(300, { comm: 'tail', argv: ['tail', '-F', 'x.log'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });
+    put(301, { comm: 'java', argv: ['/jdk/bin/java', '-jar', 'server.jar'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });
+    put(302, { comm: 'bash', argv: ['mfns-holder:x', '-c', 'sleep infinity & wait'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });
+    put(303, { comm: 'bash', state: 'Z', argv: ['bash'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });
+    put(304, { comm: 'claude', argv: ['ugrep', '-r', 'x'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });                // Claude's own helper
+    put(400, { comm: 'run.sh', argv: ['/bin/bash', './run.sh'], env: { CLAUDE_CODE_SESSION_ID: S(4) } });            // a script
+    put(500, { comm: 'timeout', argv: ['timeout', '600', 'make'], env: { CLAUDE_CODE_SESSION_ID: S(5) } });
+    put(700, { comm: 'claude', start: 50 });                                                                     // a launcher
+    put(600, { comm: 'claude', start: 60, argv: ['claude', '-p', 'go'], env: { CLAUDE_PID: '700' } });           // its worker
+    put(601, { comm: 'claude', start: 40, argv: ['claude', '-p', 'go'], env: { CLAUDE_PID: '700' } });           // older than pid 700
+    const records = [{ pid: 700, sessionId: S(7), kind: 'interactive', entrypoint: 'claude-vscode' },
+      { pid: 600, sessionId: S(6), kind: 'interactive', entrypoint: 'sdk-cli' },
+      { pid: 601, sessionId: S(8), kind: 'interactive', entrypoint: 'sdk-cli' }];
+    const snap = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      require(${JSON.stringify(path.join(__dirname, '..', 'src', 'detached.js'))})
+        .snapshot(${JSON.stringify({ proc: root3, records })})
+        .then((r) => process.stdout.write(JSON.stringify({ outside: [...r.outside].sort(), launchers: [...r.launchers] })))
+        .catch((e) => process.stdout.write(JSON.stringify({ error: e.message })));`], { encoding: 'utf8' }));
+    if (JSON.stringify(snap.outside) === JSON.stringify([S(2), S(4), S(5)])) {
+      ok('a detached shell, a script and a timeout count as work left running, under the conversation they carry');
+    } else bad(`outside every claude process: ${JSON.stringify(snap)}`);
+    if (snap.outside && !snap.outside.includes(S(1)) && !snap.outside.includes(S(3))) {
+      ok('a claude process\'s MCP server and turn command, a forgotten tail -F, a Java server, an mfns holder, a zombie and Claude\'s own helper do not');
+    } else bad(`something that is not left-running work counted: ${JSON.stringify(snap.outside)}`);
+    if (JSON.stringify(snap.launchers) === JSON.stringify([[S(6), S(7)]])) {
+      ok('a worker is tied to the claude process named by its CLAUDE_PID, and not to one that started after it');
+    } else bad(`workers were tied as ${JSON.stringify(snap.launchers)}`);
+    const noProc = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      require(${JSON.stringify(path.join(__dirname, '..', 'src', 'detached.js'))})
+        .snapshot(${JSON.stringify({ proc: path.join(root3, 'none'), records })})
+        .then((r) => process.stdout.write(JSON.stringify([r.outside.size, r.launchers.size])));`], { encoding: 'utf8' }));
+    if (JSON.stringify(noProc) === '[0,0]') ok('where there is no /proc, nothing is found');
+    else bad(`without /proc the snapshot gave ${JSON.stringify(noProc)}`);
+  } finally { fs.rmSync(root3, { recursive: true, force: true }); }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   if (/i && i\.state === 'idle' && bgWorking\.has\(i\.sessionId\) \? Object\.assign\(\{\}, i, \{ state: 'running' \}\)/.test(ext)
-      && /globalThis\.__cceRefreshTabIcons\(\)/.test(ext) && /globalThis\.__cceSendSessionStates\(\)/.test(ext)) {
-    ok('an idle conversation with a busy bg session is reported as running');
+      && /globalThis\.__cceRefreshTabIcons\(\)/.test(ext) && /globalThis\.__cceSendSessionStates\(\)/.test(ext)
+      && /await background\.workingNow\(\{ write: !replaced\(\) && !uninstalling\(\) \}\)/.test(ext)) {
+    ok('an idle conversation with work still running is reported as running, and a replaced window writes no link file');
   } else bad('extension.js does not mark conversations whose background sessions are busy');
 }
 

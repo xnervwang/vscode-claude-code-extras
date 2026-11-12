@@ -17,7 +17,8 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `src/carryover.js` copies what the earlier id, `xnervwang.claude-code-extras`, kept and this extension still uses: the session pins and colors, two saved values, and the work plans an uninstall moved aside. It also tells whether an earlier version of that id is installed.
 - `src/removal.js` notices an uninstall when VS Code restarts its extensions, and restores Claude Code then rather than when VS Code deletes the folder.
 - `src/openlatency.js` pairs panel-opening times from the official extension's log.
-- `src/background.js` finds the `claude --bg` sessions a conversation started, in its transcript, and reads their state for the agent map.
+- `src/background.js` finds the `claude --bg` sessions and `claude -p` workers a conversation started, in its transcript, and reads their state for the agent map and the green dot.
+- `src/detached.js` reads /proc for the work a conversation left running after its turn: shells it detached, and the conversation each `claude -p` worker was started from.
 - `src/efforts.js` reads, from a conversation's transcripts, where the effort its replies were sent with changed, for the reply figures.
 - `src/sessionpins.js` keeps the conversations pinned in the session list from Claude Code's transcript cleanup, by giving their files a later modification time before they reach its age, and records when each was really last active.
 - `src/sessioncolors.js` stores the text color picked for each conversation in the session list.
