@@ -8217,7 +8217,9 @@ console.log('\nthe Steward panel');
       { sessionId: S(6), kind: 'interactive', cwd: '/w/f', name: 'Six', status: 'idle' },
       { sessionId: S(7), kind: 'interactive', cwd: '/w/g', name: 'Seven', status: 'idle' },
     ];
-    const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] } };
+    const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] },
+      // The steward waits on Two, so Two's turn ending is worth a notice; nothing in its plan names Three.
+      [S(1)]: { nodes: [{ title: 'Two: wait for its CR', state: 'waiting', waitingOn: 'session' }, { title: 'Old, done', state: 'done' }] } };
     const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
       const sv = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'steward-view.js'))});
       const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
@@ -8299,7 +8301,7 @@ console.log('\nthe Steward panel');
       } else bad(`after ticking: ${JSON.stringify(out.ticked)} ${out.second.slice(0, 200)}`);
       if (out.afterDone === 1 && out.posts[0][0] === 'uds:/x' && out.posts[0][1].includes('"Two"') && out.posts[0][1].includes('finished its turn')
           && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')) {
-        ok('a turn that ends is sent to the steward\'s inbox, and the next change waits for the minute between notices');
+        ok('a turn that ends in a conversation the steward is waiting on is sent to its inbox, and the next change waits for the minute between notices');
       } else bad(`the notices were ${JSON.stringify(out.posts)} (${out.afterDone}, ${out.held})`);
       const order = (h) => [...h.matchAll(/class="gname">([^<]+)</g)].map((m) => m[1]);
       const box = (h, key) => (new RegExp('<input type="checkbox" data-group="' + key + '"[^>]*>').exec(h) || [''])[0];
@@ -8323,6 +8325,17 @@ console.log('\nthe Steward panel');
           && JSON.stringify(out.dropped) === JSON.stringify([S(3)]) && JSON.stringify(out.everyShown) === JSON.stringify([S(2), S(3), S(6)].sort())) {
         ok('a ticked conversation open in no window is counted, not listed, and can be unticked; Select all ticks only the listed ones');
       } else bad(`with one ticked outside every window: ${JSON.stringify([out.away.slice(0, 400), out.dropped, out.everyShown])}`);
+    }
+
+    /* Which managed conversations a steward's plan is waiting on: named in an open row, by title or by id. */
+    {
+      const sv = require('../src/steward-view');
+      const plan = { nodes: [{ title: 'Tell Two to rebase', state: 'waiting', children: [{ title: 'check ' + S(3), state: 'todo' }] },
+        { title: 'Ask Five', state: 'done' }] };
+      const got = [...sv.waitedOn(plan, [S(2), S(3), S(5)], { [S(2)]: 'Two', [S(3)]: 'Three', [S(5)]: 'Five' })].sort();
+      if (JSON.stringify(got) === JSON.stringify([S(2), S(3)].sort()) && sv.waitedOn(null, [S(2)], {}).size === 0) {
+        ok('a steward waits on the conversations its open rows name, by title or by id, and not on one named only in a closed row; an id prefix several share names none');
+      } else bad(`the steward was waiting on ${JSON.stringify(got)}`);
     }
 
     /* A steward's title in its tab and in the session list (src/steward-marks.js). */

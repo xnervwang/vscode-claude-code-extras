@@ -26,6 +26,7 @@ const bgSessions = require('./bgsessions');
 const { planQuestions } = require('./folders');
 const { writeAtomic } = require('./claude-files');
 const { liveRecords } = require('./background');
+const { OPEN_STATES } = require('./workplan');
 
 const VIEW = 'claudeCodePlus.steward';
 /* How often the list and the notices are refreshed. `claude agents --json` is asked at most every half minute
@@ -92,6 +93,23 @@ function ago(ms, now) {
   if (m < 60) return `${m}m ago`;
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
+/* Returns the managed conversations named in an open row of the steward's plan, by title, session id, or the id's first
+   eight characters. names: session id -> title. */
+function waitedOn(plan, ids, names) {
+  const texts = [];
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if (n && OPEN_STATES.includes(n.state)) texts.push(String(n.title || '') + ' ' + String(n.note || ''));
+      if (n) walk(n.children);
+    }
+  };
+  walk(plan && plan.nodes);
+  const all = texts.join('\n');
+  // Skip an eight-character prefix that more than one of them has.
+  const prefix = (id) => ids.filter((x) => x.slice(0, 8) === id.slice(0, 8)).length === 1 && all.includes(id.slice(0, 8));
+  return new Set(ids.filter((id) => all.includes(id) || prefix(id) || (names[id] && names[id].trim().length >= 2 && all.includes(names[id].trim()))));
 }
 
 /* Signal 0 only checks; EPERM still means the process exists. */
@@ -274,21 +292,28 @@ function create(vscode, deps) {
   };
 
   /*
-   * Notices for the stewards whose panel this window shows. Changes are gathered and sent at most once every
-   * NOTICE_GAP_MS per steward: each notice starts a turn in an idle steward, and several conversations often stop
-   * within a minute of each other.
+   * Notices for the stewards whose panel this window shows. A notice starts a turn in an idle steward, so it is sent
+   * only if a conversation began waiting for the user, has more questions for the user than at the last pass, or ended
+   * a turn while the steward's plan names it. A steward gets at most one notice per NOTICE_GAP_MS; conversations often
+   * stop within a minute of each other.
    */
-  const pending = new Map(), sentAt = new Map();
+  const pending = new Map(), sentAt = new Map(), asked = new Map();
   const notify = async (now = Date.now()) => {
     const table = stewards.read(deps.dir);
     const after = new Map([...last].map(([id, c]) => [id, c.state]));
     for (const steward of Object.keys(table)) {
       if (!deps.shownHere(steward)) { pending.delete(steward); continue; }
-      const list = stewards.changes(states, after, table[steward].manages);
+      const manages = table[steward].manages;
+      const more = (id) => last.get(id) && asked.has(id) && last.get(id).questions > asked.get(id);
+      const waited = waitedOn(deps.readPlan(steward), manages, table[steward].names);
+      const list = stewards.changes(states, after, manages)
+        .filter((c) => c.what === 'waiting' || more(c.id) || waited.has(c.id));
       if (list.length) pending.set(steward, (pending.get(steward) || []).filter((c) => !list.some((x) => x.id === c.id)).concat(list));
     }
     states.clear();
     for (const [id, s] of after) states.set(id, s);
+    asked.clear();
+    for (const [id, c] of last) asked.set(id, c.questions);
     let records = null;
     for (const [steward, list] of pending) {
       if (!table[steward] || now - (sentAt.get(steward) || 0) < NOTICE_GAP_MS) continue;
@@ -378,4 +403,4 @@ function create(vscode, deps) {
   };
 }
 
-module.exports = { create, gather, grouped, doingRows, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS, WINDOWS_DIR };
+module.exports = { create, gather, grouped, doingRows, waitedOn, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS, WINDOWS_DIR };
