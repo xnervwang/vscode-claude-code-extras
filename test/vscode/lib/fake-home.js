@@ -79,8 +79,10 @@ function transcript(thread, cwd, now) {
 
 /* Writes ~/.claude.json and the transcripts under `home`/.claude for conversations started in `folder`. */
 function write(home, { folder, now = Date.now() }) {
+  // The folder is trusted already, as after someone answered Claude Code's question about it (asked from 2.1.323 on).
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true,
-    customApiKeyResponses: { approved: [KEY.trim().slice(-20)], rejected: [] } }, null, 2));
+    customApiKeyResponses: { approved: [KEY.trim().slice(-20)], rejected: [] },
+    projects: { [folder]: { hasTrustDialogAccepted: true } } }, null, 2));
   const dir = path.join(home, '.claude', 'projects', folderName(folder));
   fs.mkdirSync(dir, { recursive: true });
   const files = THREADS.map((t) => {
