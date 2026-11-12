@@ -150,6 +150,8 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
   /* Compares the crop of `loc` once it is still, with `masks` (boxes in the window's pixels) left out. */
   const compareAt = async (name, loc, { masks = [], pad = 0 } = {}) => {
     await still(loc);
+    /* Agent Plus's first-install token mode notice stays at the bottom right until it is answered, over the footer. */
+    await exec('notifications.hideToasts');
     const b = await loc.boundingBox();
     if (!b) { check(false, `${name} can be cropped`, 'the element has no box'); return; }
     const box = { x: b.x - pad, y: b.y - pad, width: b.width + 2 * pad, height: b.height + 2 * pad };
@@ -186,6 +188,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
   const dotsOn = async (label) => { const l = await tabLogo(label); return l && l.count; };
   /* The hover label this extension draws in `frame` while the pointer rests on `loc`, as { text, box }. */
   const labelOf = async (frame, loc) => {
+    await exec('notifications.hideToasts');
     await page.mouse.move(5, 5);
     await sleep(200);
     await loc.hover();
