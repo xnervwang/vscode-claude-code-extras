@@ -77,12 +77,27 @@ function transcript(thread, cwd, now) {
   return lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
 }
 
+/* `folder` as given, and on Windows also with either case of drive letter and with forward slashes. */
+function trustKeys(folder) {
+  const keys = new Set([folder]);
+  if (/^[a-z]:/i.test(folder)) {
+    for (const f of [folder, folder.replace(/\\/g, '/')]) {
+      keys.add(f);
+      keys.add(f[0].toLowerCase() + f.slice(1));
+      keys.add(f[0].toUpperCase() + f.slice(1));
+    }
+  }
+  return [...keys];
+}
+
 /* Writes ~/.claude.json and the transcripts under `home`/.claude for conversations started in `folder`. */
 function write(home, { folder, now = Date.now() }) {
   // The folder is trusted already, as after someone answered Claude Code's question about it (asked from 2.1.323 on).
+  // On Windows the folder is written several ways, since which form Claude Code keys it by is not documented.
+  const projects = {};
+  for (const key of trustKeys(folder)) projects[key] = { hasTrustDialogAccepted: true };
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true,
-    customApiKeyResponses: { approved: [KEY.trim().slice(-20)], rejected: [] },
-    projects: { [folder]: { hasTrustDialogAccepted: true } } }, null, 2));
+    customApiKeyResponses: { approved: [KEY.trim().slice(-20)], rejected: [] }, projects }, null, 2));
   const dir = path.join(home, '.claude', 'projects', folderName(folder));
   fs.mkdirSync(dir, { recursive: true });
   const files = THREADS.map((t) => {
@@ -95,4 +110,4 @@ function write(home, { folder, now = Date.now() }) {
   return { dir, files, threads: THREADS };
 }
 
-module.exports = { write, folderName, THREADS, MODEL, KEY };
+module.exports = { trustKeys, write, folderName, THREADS, MODEL, KEY };
