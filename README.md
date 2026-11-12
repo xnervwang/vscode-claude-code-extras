@@ -102,8 +102,9 @@ Verified against Claude Code 2.1.322.
 | Background commands | See a count such as `1 task` while a background build, test run or `sleep` timer runs, with the list one click away. | Footer |
 | Tabs back after a restart | Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection, are opened again when it starts. Tabs you closed while connected stay closed. | Editor tabs |
 | Status dots | A Claude Code tab's logo shows a green dot while Claude works, where Claude Code shows none, and a red one instead of Claude Code's orange when it finished while you were away. Work a conversation left running after its turn counts as working too: a `claude --bg` session or `claude -p` worker it started, or a shell it detached with `setsid` or `nohup` (read from /proc, so on Linux). The session list uses the same green and red. | Editor tabs, session list |
+| Steward | Tick other Claude Code conversations in the Steward panel, from any window on this machine, and the conversation in front becomes their steward. Each message you send the steward comes with what each of them is doing. Start a message with `@` and a conversation's name to have the steward pass it on. Their questions come back to you word for word, and the steward is notified when one of them finishes a turn or starts waiting for you. | Steward panel, at the bottom of the window; the steward conversation |
 | Token mode | Agent Plus's `agentPlus.tokenMode`, chosen from its entry in the status bar, decides which of the work plan, the time-zone note and the brief add to Claude's context; each one's own setting applies only in Custom. See [What it costs in tokens](#what-it-costs-in-tokens). | Status bar (Agent Plus) |
-| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size, how much the work plan has added since the last compaction, and the token mode; click a value to copy it. | Footer button |
+| Session information | See the session ID, Claude's process ID, starting directory, transcript location and size, and the token mode; click a value to copy it. | Footer button |
 
 ## What it costs in tokens
 
@@ -119,13 +120,15 @@ In Interface features, Claude Code does not load the work plan plugin, just as w
 
 In a running conversation, a mode change applies from the next message to work plan injection and reminders, conversation brief requests, and the time zone. `Claude Code Plus: Show Status` shows the mode and which of the three features run. The information button in the footer of a Claude Code conversation names the mode.
 
-The tables below show the text Claude Code Plus adds to what Claude Code sends the model. All of it comes from the work plan plugin Claude Code Plus registers with Claude Code; what Claude Code Plus draws in VS Code sends nothing to the model. Text added to a conversation stays in context and goes with every later model call until compaction replaces the conversation with a summary. A token is about four characters of English.
+The tables below show the text Claude Code Plus adds to what Claude Code sends the model. All of it comes from the work plan plugin Claude Code Plus registers with Claude Code; what Claude Code Plus draws in VS Code sends nothing to the model. The exception is the steward notice, which the extension posts to the steward's inbox. Text added to a conversation stays in context and goes with every later model call until compaction replaces the conversation with a summary. A token is about four characters of English.
 
 ### Added to every message
 
 | What | When | At most | Turned off by |
 | --- | --- | --- | --- |
 | The work plan | Each message, while the conversation's plan has a row that is not `done` or `dropped`. The whole block, with what the states mean and how to change a row, on the conversation's first message and the first after each compaction; a short head in its place otherwise; one line when no row has changed since the message before | 6,000 characters, the brief included; the one line is about 160 characters and the plan's path | `claudeCodePlus.workPlan` |
+
+| The steward's list | Each message in a conversation that manages others in the Steward panel: one line per conversation, and what changed since its previous message | About 150 characters, and about 170 more per conversation it manages with a 40-character title, at most 30 of them | Unticking them in the Steward panel |
 
 ### Added now and then
 
@@ -138,6 +141,7 @@ The tables below show the text Claude Code Plus adds to what Claude Code sends t
 | After a compaction | Once per compaction | About 950 characters, the plan's path, and the path of its closed rows when it has any | `claudeCodePlus.workPlan`; `claudeCodePlus.workPlanQuietWhenReplyMatches` |
 | The offer of a plan | Once, in a conversation with no plan, after your third message and a turn of 25 tool calls | About 390 characters and the plan's path | `claudeCodePlus.workPlan`; `claudeCodePlus.workPlanOfferMinTurns`, `claudeCodePlus.workPlanOfferMinToolCalls` |
 | A write to the plan, refused | When Claude writes or edits the plan file with a row description longer than the view shows, or a question that asks more than one thing | About 450 characters | `claudeCodePlus.workPlan` |
+| A steward notice | When a conversation a steward manages finishes a turn or starts waiting for you, at most once a minute for each steward. If the steward is idle, the notice starts a turn | About 210 characters, and about 100 more per conversation it names with a 40-character title | Unticking them in the Steward panel |
 | Your time zone | When the panel reads in another time zone than this machine's: on the conversation's first message and after each compaction, then when either side's date turns over, the offset changes, or the context has grown by 100k tokens | About 300 characters | `claudeCodePlus.tellClaudeYourTimeZone` |
 
 - The work plan is cut at 6,000 characters by the plugin. The reminders have no cut: each is fixed text with at most six row titles of 60 characters.
@@ -219,6 +223,8 @@ Message appearance: `claudeCodePlus.userMessageColor` and `claudeCodePlus.userMe
 - To protect a pinned conversation, the extension moves its files' modification time forward once they are old enough for the cleanup. The row still shows when the conversation was last active, but the list sorts it by the moved time. Uninstalling the extension removes the pins; the conversations stay, and the cleanup treats them as usual again.
 - A pin protects a conversation only while some VS Code window with this extension connects to the machine that holds its transcript, and stays open for at least a minute, at least once every `claudeCodePlus.sessionPinsMarginDays` days (14 by default, and never more than half of `cleanupPeriodDays`). The folder the window has open does not matter: each window refreshes every pinned conversation on that machine a minute after it starts and every 30 minutes while it stays open. After a longer gap, Claude Code's cleanup can delete pinned conversations the next time Claude Code runs on that machine, in a terminal or as a background session.
 - Pins are kept on the machine that holds the transcripts. Pins on your computer do not protect a remote machine's conversations, or the other way round; a remote machine's pins are refreshed only by windows connected to it.
+- Something a steward passes to another conversation arrives there as a message from another session, which Claude Code never counts as your consent: an approval has to be given in that conversation itself.
+- Steward notices go to the steward's inbox socket, which Claude Code documents for scripts but not the line it reads; they are not sent on native Windows, where that socket needs a token only the session holds.
 - Editor-tab panels that stay blank in every window after running version 1.0.8 or earlier of the old extension: quit VS Code and delete the `CacheStorage` folders under `WebStorage` in VS Code's data folder (`~/Library/Application Support/Code` on macOS, `%APPDATA%\Code` on Windows, `~/.config/Code` on Linux).
 
 ## Contributing

@@ -10,6 +10,10 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/tell-time-zone.py\" \"${CLAUDE_PLUGIN_DATA}\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/steward.py\" \"${CLAUDE_PLUGIN_DATA}\""
           }
         ]
       }

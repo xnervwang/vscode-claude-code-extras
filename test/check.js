@@ -6010,7 +6010,7 @@ console.log('\nwhat a tick and a change of setting cost');
     delete env.CLAUDE_CONFIG_DIR;
     try { r = JSON.parse(cp.execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000, env })); }
     catch (e) { r = { threw: e.message }; }
-    if (!r.threw && r.listeners === 2 && JSON.stringify(r.timers) === JSON.stringify([1000, 10000, 30000, 1800000]) && JSON.stringify(r.recent) === JSON.stringify(['abababab-1111-4222-8333-444444444444'])) {
+    if (!r.threw && r.listeners === 2 && JSON.stringify(r.timers) === JSON.stringify([1000, 5000, 10000, 30000, 1800000]) && JSON.stringify(r.recent) === JSON.stringify(['abababab-1111-4222-8333-444444444444'])) {
       ok('activation, a change of setting, every timer, the hooks and deactivation run against a stand-in editor without throwing');
     } else bad(`against a stand-in editor: ${JSON.stringify(r).slice(0, 600)}`);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
@@ -8062,6 +8062,179 @@ console.log('\nconversations whose background sessions are busy');
   } else bad('extension.js does not mark conversations whose background sessions are busy');
 }
 
+/* ── the Steward panel ──
+   Which conversations a steward manages is kept in stewards.json (src/stewards.js), written only by the panel
+   (src/steward-view.js); the plugin's steward.py tells the steward at each turn, steward-peek.py reads one conversation
+   for it, and the panel posts a notice to the steward's inbox when one of them stops. */
+console.log('\nthe Steward panel');
+{
+  const st = require('../src/stewards');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-stw-'));
+  try {
+    const dir = path.join(root, 'plans');
+    const S = (n) => `5e5e5e5e-0000-4000-8000-00000000000${n}`;
+    st.setManaged(S(1), [S(2), S(3), S(1), 'not-an-id', S(2)], { [S(2)]: 'Two' }, { dir, now: 5 });
+    fs.writeFileSync(path.join(dir, st.FILE), JSON.stringify(Object.assign(JSON.parse(fs.readFileSync(path.join(dir, st.FILE), 'utf8')),
+      {})).replace('"stewards":{', `"stewards":{"x":{"manages":["${S(2)}"]},"${S(4)}":{"manages":[]},`));
+    const t = st.read(dir);
+    if (JSON.stringify(Object.keys(t)) === JSON.stringify([S(1)]) && JSON.stringify(t[S(1)].manages) === JSON.stringify([S(2), S(3)])
+        && t[S(1)].names[S(2)] === 'Two' && t[S(1)].at === 5) {
+      ok('a steward manages the ids it was given once each, not itself, and the table leaves out what is malformed or empty');
+    } else bad(`the steward table read ${JSON.stringify(t)}`);
+    const renamedOnce = st.rename({ [S(3)]: 'Three' }, { dir }), renamedAgain = st.rename({ [S(3)]: 'Three' }, { dir });
+    st.setManaged(S(1), [], {}, { dir });
+    if (renamedOnce && !renamedAgain && st.read(dir)[S(1)] === undefined) ok('a new title is written once, and an empty list makes it a steward no longer');
+    else bad(`renaming ${renamedOnce} then ${renamedAgain}, cleared ${JSON.stringify(st.read(dir))}`);
+    const before = new Map([[S(2), 'working'], [S(3), 'working'], [S(5), 'idle'], [S(6), 'idle']]);
+    const after = new Map([[S(2), 'idle'], [S(3), 'prompt'], [S(5), 'working'], [S(6), 'idle'], [S(7), 'idle']]);
+    const ch = st.changes(before, after, [S(2), S(3), S(5), S(6), S(7)]);
+    if (JSON.stringify(ch) === JSON.stringify([{ id: S(2), what: 'done' }, { id: S(3), what: 'waiting' }])) {
+      ok('a steward is told of a turn that ended and of a conversation that started waiting, not of one starting or seen for the first time');
+    } else bad(`the changes came out ${JSON.stringify(ch)}`);
+    const text = st.noticeText(ch, { [S(2)]: 'Two' });
+    if (text.startsWith('Steward notice from Claude Code Plus, not a message from the user.') && text.includes(`"Two" (${S(2)}) finished its turn`)
+        && text.includes(`a conversation (${S(3)}) is waiting for the user`)) ok('the notice says it is not from the user, and names each conversation');
+    else bad(`the notice read ${JSON.stringify(text)}`);
+    const sockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-sk-'));
+    const sock = path.join(sockDir, 's.sock');
+    const posted = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      const net = require('net'); const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
+      let got = '';
+      const srv = net.createServer((c) => { c.on('data', (d) => { got += d; }); c.on('end', () => {
+        srv.close(); st.post('uds:' + ${JSON.stringify(path.join(sockDir, 'none.sock'))}, 'x', { timeoutMs: 500 }).then((miss) =>
+          st.post('uds:' + ${JSON.stringify(sock)}, 'y', { platform: 'win32' }).then((win) =>
+            process.stdout.write(JSON.stringify({ got, sent, miss, win })))); }); });
+      let sent;
+      srv.listen(${JSON.stringify(sock)}, () => st.post('uds:' + ${JSON.stringify(sock)}, 'hello there').then((r) => { sent = r; }));`],
+    { encoding: 'utf8', timeout: 20000 }));
+    fs.rmSync(sockDir, { recursive: true, force: true });
+    const line = JSON.parse(posted.got.trim());
+    if (posted.sent === true && posted.got.endsWith('\n') && line.type === 'user' && line.message.content === 'hello there'
+        && line.from === 'claude-code-plus' && posted.miss === false && posted.win === false) {
+      ok('a notice goes to the inbox socket as one user line; a socket that is not there, or native Windows, gives false');
+    } else bad(`posting gave ${JSON.stringify(posted)}`);
+
+    /* The panel, against a stand-in editor: the rows, a tick, Clear, and the notices with their spacing. */
+    const records = [
+      { sessionId: S(1), kind: 'interactive', cwd: '/w/a', name: 'steward-ab', status: 'idle' },
+      { sessionId: S(2), kind: 'interactive', cwd: '/w/b', name: 'Two', status: 'busy' },
+      { sessionId: S(3), kind: 'interactive', cwd: '/w/c', name: 'Three', status: 'idle' },
+      { sessionId: S(4), kind: 'background', cwd: '/w/d', name: 'bg', status: 'busy' },
+      { sessionId: S(5), kind: 'interactive', cwd: '/w/e', name: 'Five', status: 'idle' },
+    ];
+    const plans = { [S(2)]: { nodes: [{ title: 'Port the reader', state: 'doing', children: [{ title: 'Ask about it', state: 'waiting', waitingOn: 'user', question: 'Which one?' }] }] } };
+    const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      const sv = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'steward-view.js'))});
+      const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
+      let records = ${JSON.stringify(records)};
+      const plans = ${JSON.stringify(plans)}, posts = [], logs = [];
+      let provider, front = ${JSON.stringify(S(1))}, writable = true;
+      const vscode = { window: { registerWebviewViewProvider: (id, p) => { provider = p; return { dispose() {} }; },
+        showInformationMessage() {} } };
+      const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => ({ records }), readPlan: (id) => plans[id] || null,
+        titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(), reveal: async () => true,
+        shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, enabled: () => true, log: (m) => logs.push(m),
+        home: '/', dir: ${JSON.stringify(path.join(root, 'plans2'))}, isBackground: (id) => id === ${JSON.stringify(S(5))},
+        records: () => [{ sessionId: ${JSON.stringify(S(1))}, messagingSocketPath: 'uds:/x' }], post: async (a, t) => { posts.push([a, t]); return true; } });
+      let onMsg;
+      const sentToPage = [];
+      const view = { visible: true, webview: { options: {}, html: '', onDidReceiveMessage: (f) => { onMsg = f; },
+        postMessage: (m) => { sentToPage.push(m); } }, onDidChangeVisibility() {}, onDidDispose() {} };
+      (async () => {
+        provider.resolveWebviewView(view);
+        await v._pass();
+        const latest = () => sentToPage.filter((m) => m.type === 'body').map((m) => m.html).pop() || view.webview.html;
+        const first = latest();
+        const shellFirst = view.webview.html;
+        await v._onMessage({ type: 'toggle', id: ${JSON.stringify(S(2))}, on: true });
+        await v._onMessage({ type: 'toggle', id: ${JSON.stringify(S(3))}, on: true });
+        const ticked = st.read(${JSON.stringify(path.join(root, 'plans2'))});
+        const shellAfter = view.webview.html;
+        const second = latest();
+        await v._pass();
+        records = records.map((r) => r.sessionId === ${JSON.stringify(S(2))} ? Object.assign({}, r, { status: 'idle' }) : r);
+        await v._pass();
+        const afterDone = posts.length;
+        records = records.map((r) => r.sessionId === ${JSON.stringify(S(3))} ? Object.assign({}, r, { status: 'waiting' }) : r);
+        await v._pass();
+        const held = posts.length;
+        await v._notify(Date.now() + sv.NOTICE_GAP_MS + 1);
+        writable = false;
+        await v._onMessage({ type: 'none' });
+        const stillTicked = st.read(${JSON.stringify(path.join(root, 'plans2'))});
+        writable = true;
+        await v._onMessage({ type: 'none' });
+        const cleared = st.read(${JSON.stringify(path.join(root, 'plans2'))});
+        v.dispose();
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst }));
+      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
+    if (out.error) bad('the panel threw: ' + out.error);
+    else {
+      const names = (h) => [...h.matchAll(/data-open="([^"]+)"/g)].map((m) => m[1]);
+      if (JSON.stringify(names(out.first).sort()) === JSON.stringify([S(2), S(3)].sort()) && !/type="checkbox"[^>]*\bchecked\b/.test(out.first)
+          && out.first.includes('Managed by <b>steward-ab</b>: 0')) {
+        ok('the panel lists the other conversations, none ticked, leaving out the one in front, bg sessions and claude -p workers');
+      } else bad(`the first panel listed ${JSON.stringify(names(out.first))}: ${out.first.slice(0, 300)}`);
+      const mine = out.ticked[S(1)];
+      if (mine && JSON.stringify(mine.manages) === JSON.stringify([S(2), S(3)]) && mine.names[S(2)] === 'Two'
+          && /Port the reader/.test(out.second) && /1 question for you/.test(out.second) && out.second.includes(': 2</span>') && !out.reloaded) {
+        ok('ticking makes the conversation in front their steward, a managed row shows what it is doing and its questions, and the page is updated rather than reloaded');
+      } else bad(`after ticking: ${JSON.stringify(out.ticked)} ${out.second.slice(0, 200)}`);
+      if (out.afterDone === 1 && out.posts[0][0] === 'uds:/x' && out.posts[0][1].includes('"Two"') && out.posts[0][1].includes('finished its turn')
+          && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')) {
+        ok('a turn that ends is sent to the steward\'s inbox, and the next change waits for the minute between notices');
+      } else bad(`the notices were ${JSON.stringify(out.posts)} (${out.afterDone}, ${out.held})`);
+      if (out.stillTicked[S(1)] && out.cleared[S(1)] === undefined) ok('a window that may not write shared files changes nothing; Clear empties the list');
+      else bad(`clearing gave ${JSON.stringify([out.stillTicked, out.cleared])}`);
+    }
+
+    /* The plugin's two scripts. */
+    const hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks');
+    const data = path.join(root, 'data'), conf = path.join(root, 'conf');
+    fs.mkdirSync(path.join(conf, 'sessions'), { recursive: true });
+    st.setManaged(S(1), [S(2), S(3)], { [S(2)]: 'Two', [S(3)]: 'Three' }, { dir: data });
+    fs.writeFileSync(path.join(data, S(2) + '.json'), JSON.stringify(plans[S(2)]));
+    const rec = (status) => fs.writeFileSync(path.join(conf, 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: S(2), status }));
+    const env = Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: conf });
+    const hook = (sid) => cp.spawnSync('python3', [path.join(hooks, 'steward.py'), data],
+      { input: JSON.stringify({ session_id: sid, hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8', env });
+    rec('busy');
+    const h1 = hook(S(1));
+    rec('idle');
+    const h2 = hook(S(1));
+    const other = hook(S(3));
+    const ctx = (r) => { try { return JSON.parse(r.stdout).hookSpecificOutput.additionalContext; } catch (_) { return ''; } };
+    const c1 = ctx(h1), c2 = ctx(h2);
+    if (c1.startsWith('You are the steward of 2 Claude Code conversations') && c1.includes(`- "Two" (${S(2)}): working; doing: Port the reader; 1 question for the user`)
+        && c1.includes(`- "Three" (${S(3)}): not running`) && !c1.includes('Changed since')
+        && c2.includes('Changed since your previous turn: "Two": working -> idle.') && other.stdout === '' && other.status === 0) {
+      ok('steward.py tells a steward each conversation\'s state, work and questions, and then what changed; others get nothing');
+    } else bad(`steward.py said ${JSON.stringify([c1, c2, other.stdout, h1.stderr])}`);
+    fs.mkdirSync(path.join(conf, 'projects', '-w'), { recursive: true });
+    const rows = [
+      { type: 'user', message: { content: 'earlier question' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'an old answer' }] } },
+      { type: 'user', message: { content: [{ type: 'text', text: 'what now?' }] } },
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'secret' }, { type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'make' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'BUILD OUTPUT' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'It builds.' }] } },
+    ];
+    fs.writeFileSync(path.join(conf, 'projects', '-w', S(2) + '.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const peek = cp.spawnSync('python3', [path.join(hooks, 'steward-peek.py'), S(2), data], { encoding: 'utf8', env });
+    const p = peek.stdout || '';
+    if (peek.status === 0 && p.includes('state: idle') && p.includes('1. [doing] Port the reader') && p.includes('question for the user: Which one?')
+        && /latest reply:\nLooking\.\n\nIt builds\./.test(p) && !/BUILD OUTPUT|secret|old answer|make/.test(p)) {
+      ok('steward-peek.py gives the state, the open rows and the latest reply without tool calls, output or thinking');
+    } else bad(`steward-peek.py printed ${JSON.stringify(p + peek.stderr)}`);
+    const registered = JSON.parse(fs.readFileSync(path.join(hooks, 'hooks.json'), 'utf8')).hooks.UserPromptSubmit[0].hooks.map((x) => x.command);
+    const skill = fs.readFileSync(path.join(hooks, '..', 'skills', 'steward', 'SKILL.md'), 'utf8');
+    if (registered.some((c) => c.includes('/hooks/steward.py" "${CLAUDE_PLUGIN_DATA}"')) && /^name: steward$/m.test(skill) && skill.includes('hooks/steward-peek.py')
+        && require('../src/workplan').SIDE_SUFFIXES.includes('.steward-seen')) {
+      ok('the hook is registered, the steward skill ships beside it, and the steward\'s side file is swept with its conversation');
+    } else bad('the steward hook, skill or side file is not wired as expected');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
 console.log('\nthe patch markers follow the code');
 {
   /* A marker that stays the same while what patching writes changes leaves the old patch in place, and every step
@@ -8594,9 +8767,13 @@ console.log('\nwhat the manifest declares for Agent Plus');
     ok('the manifest has what Agent Plus requires of a source');
   } else bad(`manifest for Agent Plus: ${JSON.stringify([pkg.extensionDependencies, pkg.agentPlus, pkg.extensionKind, trust, protocol])}`);
   const props = Object.keys(c.configuration.properties);
-  if (!c.views && !c.viewsContainers && !c.viewsWelcome && !c.menus
+  /* The Conversations and Work plan views are Agent Plus's. The one view here is the Steward panel (src/steward-view.js). */
+  const onlySteward = JSON.stringify(c.views) === JSON.stringify({ claudeCodePlusSteward: [{ type: 'webview', id: 'claudeCodePlus.steward', name: 'Steward' }] })
+    && JSON.stringify(Object.keys(c.viewsContainers || {})) === '["panel"]' && c.viewsContainers.panel.length === 1
+    && c.viewsContainers.panel[0].id === 'claudeCodePlusSteward' && fs.existsSync(path.join(__dirname, '..', c.viewsContainers.panel[0].icon));
+  if (onlySteward && !c.viewsWelcome && !c.menus
     && !props.some((k) => /\.(conversations|webviewRequestLimit)$/.test(k)) && props.includes('claudeCodePlus.workPlan')) {
-    ok('the manifest has no views, menus or view settings left');
+    ok('the manifest has no views, menus or view settings left but the Steward panel, whose icon ships');
   } else bad(`left over in the manifest: ${JSON.stringify({ views: c.views, containers: c.viewsContainers, menus: c.menus, props })}`);
   const declared = c.commands.map((x) => x.command.replace(/^claudeCodePlus\./, ''));
   const missing = declared.filter((n) => !ext.includes(`registerCommand('${n}'`));
@@ -8874,7 +9051,8 @@ console.log('\nthe token mode');
           onDidChangeConfiguration: (fn) => { listeners.push(fn); return disposable; }, onDidChangeWorkspaceFolders: () => disposable },
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
           showInformationMessage: async (text, ...buttons) => { told.push([text, buttons]); return undefined; },
-          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null } },
+          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null },
+          registerWebviewViewProvider: () => disposable },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
         extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');
@@ -9031,7 +9209,8 @@ console.log('\nRestricted Mode');
           workspaceFolders: [], getConfiguration: () => ({ get: (k, d) => d, inspect: () => undefined, update: async () => {} }),
           onDidChangeConfiguration: () => disposable, onDidChangeWorkspaceFolders: () => disposable },
         window: { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }), showInformationMessage: async () => undefined,
-          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null } },
+          showWarningMessage: async () => undefined, setStatusBarMessage() {}, tabGroups: { all: [], activeTabGroup: null },
+          registerWebviewViewProvider: () => disposable },
         commands: { registerCommand: () => disposable, executeCommand: async () => {} },
         extensions: { getExtension: (id) => (id === 'xnervwang.agent-plus' ? core : undefined), onDidChange: () => disposable } };`);
     const root = path.join(__dirname, '..');

@@ -104,6 +104,24 @@
         "title": "Claude Code Plus: Stop Loading the Work Plan Plugin"
       }
     ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "claudeCodePlusSteward",
+          "title": "Steward",
+          "icon": "images/steward.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeCodePlusSteward": [
+        {
+          "type": "webview",
+          "id": "claudeCodePlus.steward",
+          "name": "Steward"
+        }
+      ]
+    },
     "configuration": {
       "title": "Claude Code Plus",
       "properties": {

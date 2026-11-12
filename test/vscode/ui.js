@@ -725,6 +725,30 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       if (d) check(await answerDialog('Cancel') && fs.existsSync(transcriptOf(t1)), 'Cancel closes it and deletes nothing', transcriptOf(t1));
     });
 
+    await step('the steward panel', async () => {
+      const front = threads[0];
+      await exec('claude-vscode.editor.open', front.id);
+      await sleep(1500);
+      await exec('workbench.view.extension.claudeCodePlusSteward');
+      const frame = await frameWhere(() => /Managed by/.test(document.body ? document.body.innerText : ''), 30000);
+      const text = frame ? await frame.evaluate(() => document.body.innerText.slice(0, 300)) : '';
+      check(!!frame, 'the Steward panel opens at the bottom of the window for the conversation in front', text);
+      const boxes = frame ? await frame.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].map((b) => [b.dataset.id, b.checked])) : [];
+      check(boxes.length >= 1 && boxes.every(([id, on]) => id !== front.id && !on), 'it lists the other conversations, none ticked, and not the one in front', boxes);
+      await shot('steward-panel');
+      if (frame && boxes.length) {
+        await frame.locator('input[type=checkbox]').first().click();
+        const file = path.join(profile.home, '.claude', 'plugins', 'data', 'agent-work-plan-claude-code-extras', 'stewards.json');
+        const table = await until(() => {
+          try { const t = JSON.parse(fs.readFileSync(file, 'utf8')); return t.stewards && t.stewards[front.id] ? t : null; } catch (_) { return null; }
+        }, 10000, 300);
+        check(!!table && table.stewards[front.id].manages.includes(boxes[0][0]), 'ticking one makes the conversation in front its steward', table);
+        await shot('steward-ticked');
+        await frame.locator('button[data-act="none"]').click();
+      }
+      await exec('workbench.action.closePanel');
+    });
+
     await step('commands', async () => {
       await exec('notifications.clearAll');
       await exec('claudeCodePlus.status');

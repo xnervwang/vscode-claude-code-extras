@@ -17,12 +17,14 @@
  */
 const vscode = require('vscode');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const webview = require('./src/webview');
 const host = require('./src/host');
 const { safeColor } = webview;
 const { readTasks, rememberDirs } = require('./src/tasks');
 const background = require('./src/background');
+const stewardView = require('./src/steward-view');
 const efforts = require('./src/efforts');
 const { sweepOrphans, planDir, readPlan } = require('./src/workplan');
 const { transcriptOf } = require('./src/claude-files');
@@ -747,6 +749,19 @@ function start(context, log, renamed, handing = false) {
     }
   }
 
+  /* The Steward panel, and the notices it sends a steward when a conversation it manages stops (src/steward-view.js). */
+  const shownHere = (sessionId) => {
+    const list = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
+    return list('__cceSessionsShown').includes(sessionId) && !list('__cceSessionsElsewhere').includes(sessionId);
+  };
+  const steward = stewardView.create(vscode, {
+    activeChat, freshAgents: () => claude.freshAgents(), readPlan, titles: readTitles.titles, since: readTitles.since,
+    live: () => liveStates, unread: () => unreadKeys, reveal: (sessionId) => claude.source.reveal(sessionId), shownHere,
+    canWrite: () => !removed() && !replaced() && !uninstalling(), enabled: () => enabled() && !removed(),
+    log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(),
+  });
+  context.subscriptions.push(steward);
+
   globalThis.__cceAnswerHook = (key, sent, reason) => claude.answered(key, sent, reason);
   context.subscriptions.push({ dispose: () => { if (globalThis.__cceAnswerHook) delete globalThis.__cceAnswerHook; } });
   coreLink.link(vscode, claude.source, { name: 'the Claude Code source', log: (m) => log.appendLine(m) }).then((r) => {
@@ -818,6 +833,7 @@ function start(context, log, renamed, handing = false) {
     scanBackground();
     scanEffort();
     watchEffort();
+    if (steward) steward.refresh();
   };
   let chatPoll = 0;
   const stopPolling = () => { if (chatPoll) { clearInterval(chatPoll); chatPoll = 0; } };

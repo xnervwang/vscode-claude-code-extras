@@ -19,6 +19,7 @@ conversation source. Agent Plus's `docs/protocol.md` describes the interface.
 - `src/openlatency.js` pairs panel-opening times from the official extension's log.
 - `src/background.js` finds the `claude --bg` sessions and `claude -p` workers a conversation started, in its transcript, and reads their state for the agent map and the green dot.
 - `src/detached.js` reads /proc for the work a conversation left running after its turn: shells it detached, and the conversation each `claude -p` worker was started from.
+- `src/stewards.js` keeps which conversations each steward manages, works out what to tell a steward, and posts it to the steward's inbox socket. `src/steward-view.js` is the Steward panel. The plugin's `hooks/steward.py` tells a steward at each turn how its conversations stand, `hooks/steward-peek.py` reads one of them for it, and `skills/steward/SKILL.md` says what a steward does.
 - `src/efforts.js` reads, from a conversation's transcripts, where the effort its replies were sent with changed, for the reply figures.
 - `src/sessionpins.js` keeps the conversations pinned in the session list from Claude Code's transcript cleanup, by giving their files a later modification time before they reach its age, and records when each was really last active.
 - `src/sessioncolors.js` stores the text color picked for each conversation in the session list.

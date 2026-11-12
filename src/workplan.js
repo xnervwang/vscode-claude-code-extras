@@ -64,11 +64,12 @@ const { readBounded } = require('./bounded');
  *   .briefed     which parts of the brief the Stop hook last asked for
  *   .injected    what the plan looked like when the injection hook last showed it, so an unchanged plan is one line
  *   .effort      where each reply's effort changed (src/efforts.js)
+ *   .steward-seen  how the conversations a steward manages stood at its previous turn (hooks/steward.py)
  *
  * The row command also moves rows closed for a day to closed/<session id>.json (CLOSED_DIR), deleted with the rest.
  */
 const SIDE_SUFFIXES = ['.json', '.offered', '.nudged', '.settled', require('./background').SUFFIX, '.turn', '.watermark', '.tz',
-  '.compacted', '.briefed', '.injected', require('./efforts').SUFFIX];
+  '.compacted', '.briefed', '.injected', require('./efforts').SUFFIX, '.steward-seen'];
 const CLOSED_DIR = 'closed';
 const SIDE_FILE = new RegExp('^[0-9a-f][0-9a-f-]{7,}(?:' + SIDE_SUFFIXES.map((s) => s.replace('.', '\\.')).join('|') + ')$', 'i');
 const PLAN_FILE = /^[0-9a-f][0-9a-f-]{7,}\.json$/i;

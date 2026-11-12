@@ -14,9 +14,9 @@
  * edit still matches exactly once. That failure is caught at runtime instead, by the marker the script raises in the
  * panel when it can no longer find any message.
  *
- * Exits 1 when an edit does not match exactly once, when test/reply-shape.js finds a new child in a reply element, or
- * when test/todo-gate.js finds the built-in to-do tools on for current models; the workflow opens an issue for any of
- * them.
+ * Exits 1 when an edit does not match exactly once, when test/reply-shape.js finds a new child in a reply element, when
+ * test/todo-gate.js finds the built-in to-do tools on for current models, or when test/inbox-shape.js finds the CLI no
+ * longer reads a steward notice; the workflow opens an issue for any of them.
  */
 const fs = require('fs');
 const os = require('os');
@@ -114,6 +114,11 @@ async function fetchPackage(url, dest) {
   console.log('');
   try {
     execFileSync('node', [path.join(__dirname, 'todo-gate.js'), cli], { stdio: 'inherit' });
+  } catch (_) {
+    failed = true;
+  }
+  try {
+    execFileSync('node', [path.join(__dirname, 'inbox-shape.js'), cli], { stdio: 'inherit' });
   } catch (_) {
     failed = true;
   }
