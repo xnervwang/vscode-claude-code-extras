@@ -4,16 +4,14 @@
 
 'use strict';
 /*
- * Passes a message from a steward into a conversation it manages.
- * A message between sessions never counts as the user's consent in the conversation that receives it; text typed into
- * that conversation's message input does. The steward speaks for the user: it words each message for the conversation
- * it goes to, and what it sends counts there as the user's own message, approvals included. So the steward does not
- * send it itself: the plugin's hooks/steward-relay.py leaves a request in RELAY_DIR of the plan directory, and the
- * window that shows the conversation checks the request and types the text into its input (src/page/91-answer.js).
+ * Claude Code does not count a message from another session as the user's consent, but it does count text typed into
+ * the conversation's input. A steward speaks for the user in the conversations it manages, so the plugin's
+ * hooks/steward-relay.py leaves its message as a request in RELAY_DIR of the plan directory, and a window showing the
+ * conversation types it into the input (src/page/91-answer.js).
  *
- * Any process can write a request file, so a request is carried out only if the steward conversation sent it: the
- * steward the user ticked the conversation for in the Steward panel ran steward-relay.py itself, in the last RAN_MS,
- * with a command that names the conversation and holds the text (ranBy). Each such tool call is carried out once.
+ * Any process can write a request file. A window carries one out only if the conversation is one the steward manages
+ * and the steward's own transcript has the tool call that ran steward-relay.py for it in the last RAN_MS (ranBy), and
+ * at most once per call.
  *
  *   <plan dir>/relay/<id>.json          { id, steward, to, text, at }    written by steward-relay.py
  *   <plan dir>/relay/<id>.taken-<pid>   the request, claimed by window <pid> with a rename
@@ -28,7 +26,6 @@ const RELAY_DIR = 'relay';
 const REQUEST = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/i;
 /* Requests older than this are dropped; steward-relay.py stops waiting before then. */
 const MAX_AGE_MS = 60000;
-/* How long before a request the steward's call of steward-relay.py may have been made. */
 const RAN_MS = 5 * 60000;
 /* Bytes read from the end of the steward's transcript to find that call. */
 const TAIL_BYTES = 2 * 1024 * 1024;
@@ -38,10 +35,10 @@ const SENT_KEEP_MS = 24 * 3600000;
 const SCRIPT = 'steward-relay.py';
 
 /*
- * The steward's own call of steward-relay.py that sent `text` to conversation `to`, from the end of its transcript:
- * { id, at } of the newest tool call by the steward itself, not by a subagent, made in the last RAN_MS, whose command
- * names the conversation and holds the text, or null. Claude Code writes a tool call to the transcript before it runs
- * it, so the call is there while the script waits for an answer.
+ * The tool call in the steward's transcript that ran steward-relay.py for this request, as { id, at }, or null. It
+ * must be the steward's own, not a subagent's, at most RAN_MS old, and its command must contain the conversation's
+ * session id and the text. Claude Code writes a tool call to the transcript before running it, so the call is already
+ * there while the script waits for an answer.
  */
 function ranBy(file, to, text, now = Date.now()) {
   let tail = '';

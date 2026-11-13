@@ -9,11 +9,10 @@
     <the message, worded for that conversation>
     EOF
 
-Run from the steward conversation: its session id comes from CLAUDE_CODE_SESSION_ID. The message is read from
-standard input. Claude Code Plus, in the VS Code window that shows the conversation, types it into its message input
-and sends it, so it arrives as the user's own message, approvals included. Before that it checks that the steward
-conversation itself ran this script, in the last five minutes, with a command that names the conversation and holds
-the message, so the message has to be in a here-document in the command, not in a file.
+Run from the steward conversation: its session id comes from CLAUDE_CODE_SESSION_ID. Claude Code Plus types the
+message into that conversation's input in the VS Code window that has it open and sends it, so it arrives as the
+user's own message, approvals included. The window first looks for this command in the steward's transcript, so give
+the message in a here-document as above.
 
 Prints what happened and exits 0 when the message was sent, 1 otherwise.
 """
