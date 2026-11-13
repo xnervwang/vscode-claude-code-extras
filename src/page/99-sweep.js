@@ -227,6 +227,7 @@
     try { ensureInfo(); } catch (e) {}
     try { orderControls(); } catch (e) {}
     try { wireCtxButton(); } catch (e) {}
+    try { wireStewardLinks(); } catch (e) {}
     try { watchIdle(); } catch (e) {}
     try { fillWindow(); } catch (e) {}
     try { markCtxLow(); } catch (e) {}

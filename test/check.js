@@ -8909,6 +8909,35 @@ console.log('\nanswering from the Conversations tab');
     if (!r.error && JSON.stringify(asked) === '["s1"]' && /^Received message from webview: /.test(env.out)) {
       ok('a cce_process_ask message reaches __cceProcessHook and is still logged');
     } else bad(`process question: ${r.error || JSON.stringify([asked, env.out])}`);
+    const opened = [];
+    env.__cceOpenSessionHook = (id) => opened.push(id);
+    if (!r.error) vm.runInContext('eT({info:()=>{}},{type:"cce_open_session",sessionId:"s2"});eT({info:()=>{}},{type:"cce_open_session"});', env);
+    if (!r.error && JSON.stringify(opened) === '["s2"]') ok('a cce_open_session message reaches __cceOpenSessionHook');
+    else bad(`opening a conversation from a panel: ${r.error || JSON.stringify(opened)}`);
+  }
+
+  {
+    /* The page's listener for steward links (src/page/93-steward-links.js). */
+    const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '93-steward-links.js'), 'utf8');
+    const sent = [], listeners = [];
+    const env = { out: {}, document: { addEventListener: (t, f, c) => listeners.push([t, f, c]) },
+      acquireVsCodeApi: () => ({ postMessage: (m) => sent.push(m) }) };
+    new vm.Script(`(function(){${fragment}\n;out.wire = wireStewardLinks;})()`).runInNewContext(env);
+    env.out.wire();
+    env.out.wire();
+    const click = (href) => {
+      const ev = { prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; },
+        target: { closest: () => (href ? { getAttribute: () => href } : null) } };
+      listeners[0][1](ev);
+      return ev.prevented && ev.stopped;
+    };
+    const id = 'ABCDEF01-2345-4678-9abc-def012345678';
+    const taken = [click('vscode://xnervwang.claude-code-plus/open?session=' + id), click('https://example.com/'),
+      click('vscode://xnervwang.claude-code-plus/open?session=not-an-id'), click(null)];
+    if (listeners.length === 1 && listeners[0][0] === 'click' && listeners[0][2] === true && JSON.stringify(taken) === '[true,false,false,false]'
+        && JSON.stringify(sent) === JSON.stringify([{ type: 'cce_open_session', sessionId: id.toLowerCase() }])) {
+      ok('clicking a steward\'s link posts the session id to the extension and cancels the click; other links go to Claude Code as before');
+    } else bad(`steward links in a panel: ${JSON.stringify({ listeners: listeners.length, taken, sent })}`);
   }
 
   /* In a browser, against an input built like Claude Code's: an editable box whose Enter sends, or with Ctrl+Enter

@@ -791,6 +791,13 @@ function start(context, log, renamed, handing = false) {
     cp.execFile(cli, [target.fsPath], { timeout: 15000, shell: process.platform === 'win32', windowsHide: true },
       (e) => { if (e) log.appendLine('steward panel: bringing this window to the front: ' + e.message); });
   };
+  /* The same link clicked in a Claude Code panel, which the page hands here directly (src/page/93-steward-links.js). */
+  globalThis.__cceOpenSessionHook = (id) => {
+    steward.open(id).then((r) => {
+      if (r === 'nowhere') vscode.window.showInformationMessage('That conversation is not open in any VS Code window on this machine.');
+    }, (e) => log.appendLine('steward panel: ' + ((e && e.message) || e)));
+  };
+  context.subscriptions.push({ dispose: () => { if (globalThis.__cceOpenSessionHook) delete globalThis.__cceOpenSessionHook; } });
   /* vscode://xnervwang.claude-code-plus/open?session=<id>, the link a steward gives for a conversation it names. */
   context.subscriptions.push(vscode.window.registerUriHandler({
     handleUri(uri) {

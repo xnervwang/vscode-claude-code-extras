@@ -118,7 +118,9 @@ const EDITS = [
       + `else if(${msg}&&${msg}.type==="cce_process_ask"&&typeof ${msg}.sessionId==="string"){`
       + `globalThis.__cceProcessHook&&globalThis.__cceProcessHook(${msg}.sessionId)}`
       + `else if(${msg}&&${msg}.type==="cce_page_focus"&&typeof ${msg}.sessionId==="string"){`
-      + `globalThis.__cceFocusHook&&globalThis.__cceFocusHook(${msg}.sessionId)}}catch(e){}${rest}`,
+      + `globalThis.__cceFocusHook&&globalThis.__cceFocusHook(${msg}.sessionId)}`
+      + `else if(${msg}&&${msg}.type==="cce_open_session"&&typeof ${msg}.sessionId==="string"){`
+      + `globalThis.__cceOpenSessionHook&&globalThis.__cceOpenSessionHook(${msg}.sessionId)}}catch(e){}${rest}`,
   },
   /*
    * A conversation opened from the session list in the place asked for (src/page/86-open-in-tab-or-sidebar.js). The
