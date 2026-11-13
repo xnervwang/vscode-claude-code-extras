@@ -8570,14 +8570,17 @@ console.log('\nthe Steward panel');
     const h1 = hook(S(1));
     rec('idle');
     const h2 = hook(S(1));
-    const other = hook(S(3));
+    const managed = hook(S(3)), other = hook(S(4));
     const ctx = (r) => { try { return JSON.parse(r.stdout).hookSpecificOutput.additionalContext; } catch (_) { return ''; } };
-    const c1 = ctx(h1), c2 = ctx(h2);
+    const c1 = ctx(h1), c2 = ctx(h2), c3 = ctx(managed);
     if (c1.startsWith('You are the steward of 2 Claude Code conversations') && c1.includes(`- "Two" (${S(2)}): working; doing: Port the reader; 1 question for the user`)
-        && c1.includes(`- "Three" (${S(3)}): not running`) && !c1.includes('Changed since')
+        && c1.includes(`- "Three" (${S(3)}): not running`) && !c1.includes('Changed since') && !c1.includes('watches this one')
         && c2.includes('Changed since your previous turn: "Two": working -> idle.') && other.stdout === '' && other.status === 0) {
-      ok('steward.py tells a steward each conversation\'s state, work and questions, and then what changed; others get nothing');
+      ok('steward.py tells a steward each conversation\'s state, work and questions, and then what changed; a conversation nobody manages gets nothing');
     } else bad(`steward.py said ${JSON.stringify([c1, c2, other.stdout, h1.stderr])}`);
+    if (c3.startsWith(`A steward conversation (${S(1)}) watches this one`) && c3.includes('Do not send it status messages') && managed.status === 0) {
+      ok('a managed conversation hears which steward watches it and is asked to leave questions in its plan, not message the steward');
+    } else bad(`a managed conversation was told ${JSON.stringify(c3)}`);
     fs.mkdirSync(path.join(conf, 'projects', '-w'), { recursive: true });
     const rows = [
       { type: 'user', message: { content: 'earlier question' } },

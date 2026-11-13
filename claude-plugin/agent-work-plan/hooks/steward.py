@@ -3,7 +3,8 @@
 # Copyright (c) 2026, Xnerv Wang
 # All rights reserved.
 
-"""UserPromptSubmit hook: for a steward, list the conversations it manages and the state of each.
+"""UserPromptSubmit hook: for a steward, list the conversations it manages and the state of each; for a managed
+conversation, say that a steward watches it.
 
 Claude Code Plus's Steward panel keeps who manages whom in stewards.json in this plugin's data directory
 (src/stewards.js in the extension).
@@ -113,6 +114,26 @@ def managed_by(directory, sid):
     return ids[:MAX_LISTED], names
 
 
+def stewards_of(directory, sid):
+    """The stewards that manage this conversation."""
+    try:
+        with open(os.path.join(directory, STEWARDS_FILE), encoding="utf-8") as fh:
+            table = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    all_ = table.get("stewards") if isinstance(table, dict) and isinstance(table.get("stewards"), dict) else {}
+    return [s.lower() for s, e in all_.items() if isinstance(e, dict) and SESSION_NAME.match(s) and s.lower() != sid
+            and sid in [m.lower() for m in listed(e.get("manages")) if isinstance(m, str)]]
+
+
+def watched(stewards):
+    """The line a managed conversation gets each turn."""
+    return ("A steward conversation (%s) watches this one for the user through Claude Code Plus: it reads your work "
+            "plan and latest reply, and passes on the user's own words by typing them here. Do not send it status "
+            "messages; put questions for the user in your plan as rows waiting on the user, where it sees them."
+            % ", ".join(stewards))
+
+
 def block(ids, names, now, seen, directory):
     lines = []
     for m in ids:
@@ -144,7 +165,11 @@ def main():
         return 0
     directory = data_dir()
     ids, names = managed_by(directory, sid)
+    over = stewards_of(directory, sid)
     if not ids:
+        if over:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"), "additionalContext": watched(over)}}))
         return 0
     now = states()
     seen_path = side_file(os.path.join(directory, sid + ".json"), SEEN_SUFFIX)
@@ -155,6 +180,8 @@ def main():
     except (OSError, ValueError):
         seen = {}
     text = block(ids, names, now, seen, directory)
+    if over:
+        text += "\n" + watched(over)
     write_quietly(seen_path, json.dumps({m: now.get(m, STOPPED) for m in ids}))
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name", "UserPromptSubmit"), "additionalContext": text}}))
