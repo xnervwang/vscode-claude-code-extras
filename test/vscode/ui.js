@@ -793,16 +793,16 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         const row = list ? await until(() => list.evaluate(() => (document.body.innerText.match(/Steward of 1 conversation/g) || []).length), 15000, 500) : 0;
         check(row >= 1, 'and its row in the session list too', row);
         await shot('steward-ticked');
-        /* The user's words, passed on by the steward's script: the window types them into the managed conversation,
-           which sends them as the user's message. */
+        /* A message the steward passes on with its script: the window types it into the managed conversation, which
+           sends it as the user's message. The steward's tool call that runs the script is in its transcript first. */
         const target = threads.find((t) => t.id === boxes[0][0]);
         if (target) {
           const words = 'Please run the tests once more, then stop.';
-          const at = new Date().toISOString();
-          fs.appendFileSync(transcriptOf(front), JSON.stringify({ type: 'user', uuid: `${front.id.slice(0, 24)}000000000777`, timestamp: at,
-            sessionId: front.id, cwd: profile.folder, origin: { kind: 'human' },
-            message: { role: 'user', content: [{ type: 'text', text: 'Tell it: ' + words }] } }) + '\n');
           const hooks = path.join(__dirname, '..', '..', 'claude-plugin', 'agent-work-plan', 'hooks', 'steward-relay.py');
+          fs.appendFileSync(transcriptOf(front), JSON.stringify({ type: 'assistant', uuid: `${front.id.slice(0, 24)}000000000777`,
+            timestamp: new Date().toISOString(), sessionId: front.id, cwd: profile.folder, isSidechain: false,
+            message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_relay_test', name: 'Bash',
+              input: { command: `python3 ${hooks} ${target.id} <<'EOF'\n${words}\nEOF`, description: 'Pass the message on' } }] } }) + '\n');
           const said = await new Promise((resolve) => {
             const kid = require('child_process').spawn(process.platform === 'win32' ? 'python' : 'python3', [hooks, target.id, dataDir],
               { env: Object.assign({}, process.env, { CLAUDE_CODE_SESSION_ID: front.id }) });
@@ -816,7 +816,7 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
           const arrived = /^Sent: /.test(said) ? await until(() => {
             try { return fs.readFileSync(transcriptOf(target), 'utf8').includes(JSON.stringify(words).slice(1, -1)); } catch (_) { return false; }
           }, 30000, 500) : false;
-          check(/^Sent: /.test(said) && !!arrived, 'the steward passes the user\'s own words on: they are typed into the managed conversation and sent as its user\'s message',
+          check(/^Sent: /.test(said) && !!arrived, 'the steward passes a message on: it is typed into the managed conversation and sent as its user\'s message',
             { said, arrived: !!arrived });
           await shot('steward-relay');
         } else note('the conversation ticked first is not one of the test conversations, so passing words on was not looked at');

@@ -129,8 +129,9 @@ def stewards_of(directory, sid):
 def watched(stewards):
     """The line a managed conversation gets each turn."""
     return ("A steward conversation (%s) watches this one for the user through Claude Code Plus: it reads your work "
-            "plan and latest reply, and passes on the user's own words by typing them here. Do not send it status "
-            "messages; put questions for the user in your plan as rows waiting on the user, where it sees them."
+            "plan and latest reply, and speaks for the user by typing messages here, which come as the user's own. Do "
+            "not send it status messages; put questions for the user in your plan as rows waiting on the user, where "
+            "it sees them."
             % ", ".join(stewards))
 
 

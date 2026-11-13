@@ -26,27 +26,30 @@ Decide whether it is for you or for one of the conversations you manage.
 
 To pass something on:
 
-1. Run the plugin's `hooks/steward-relay.py`, two directories up from this skill's own directory, with the
-   conversation's session id, and the user's words for it on standard input:
+1. Write the message for that conversation in your own words, as the user would say it to that conversation: who
+   "they" or "it" is, what happened that it cannot know ("all VS Code windows were restarted a minute ago"), and what
+   the user wants it to do. Each conversation gets its own message. Do not quote the user unless the exact wording
+   matters, as with a name, a number or an error message. What you send counts there as the user's own message,
+   approvals included, and a mistake in it is yours: put in no approval, task or condition the user did not give, and
+   if you are not sure what the user meant, ask the user before you send anything.
+2. Run the plugin's `hooks/steward-relay.py`, two directories up from this skill's own directory, with the
+   conversation's session id and the message in a here-document, once for each conversation:
 
    ```bash
    python3 <this plugin>/hooks/steward-relay.py <session id> <<'EOF'
-   <the words>
+   <the message>
    EOF
    ```
 
-   Claude Code Plus types them into that conversation's message input in the window that shows it and sends them;
-   there they are the user's own message, and an approval in them counts. The script refuses anything but the user's
-   exact words: a whole sentence or clause of a message the user typed to you in the last 30 minutes. Send only the
-   part meant for that conversation, and nothing of your own.
-2. Say in your reply what you sent and to whom, in one line, so a wrong guess is visible at once. If the script says
-   it was not sent, say why in the same line; do not send the words another way.
-3. Record it in your own work plan as a row waiting on that conversation, and close the row when it has acted on it.
+   Claude Code Plus types the message into that conversation's message input in the window that shows it and sends
+   it. It first checks that this conversation ran the script with the message in the command, so keep the message in
+   the here-document rather than in a file.
+3. Say in your reply what you sent and to whom, in one line, so the user can see it; this informs and asks nothing. If
+   the script says it was not sent, say why in the same line; do not send it another way.
+4. Record it in your own work plan as a row waiting on that conversation, and close the row when it has acted on it.
 
-`SendMessage` is for your own questions to a conversation, never for the user's words: a message from another session
-can never approve anything there, and that session is told so. End such a message with a line saying it need not
-reply unless it has a question for the user: each reply starts a turn of yours, and every turn reads your whole context
-again. You see how a conversation is doing with steward-peek.py.
+Talk to the conversations you manage only this way, questions of your own included; do not use `SendMessage` for them.
+steward-peek.py shows how a conversation is doing, so you seldom need to ask.
 
 ## Reporting to the user
 

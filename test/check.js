@@ -8517,7 +8517,7 @@ console.log('\nthe Steward panel');
       } else bad(`managing all: ${JSON.stringify([kept, still, whole, allTab, st.read(allDir)])}`);
     }
 
-    /* The user's words passed on by a steward (src/relay.js, hooks/steward-relay.py). */
+    /* A message a steward passes on (src/relay.js, hooks/steward-relay.py). */
     {
       const relay = require('../src/relay');
       const rdir = path.join(root, 'relay-plans'), tdir = path.join(root, 'relay-transcripts');
@@ -8525,22 +8525,24 @@ console.log('\nthe Steward panel');
       fs.mkdirSync(tdir, { recursive: true });
       const now = Date.now(), iso = (ms) => new Date(ms).toISOString();
       const transcript = path.join(tdir, S(1) + '.jsonl');
+      const restarted = 'VS Code 刚才全部重启了，请检查你自己的后台任务还在不在跑。', lines2 = 'Line one\nline two';
+      const call = (uuid, id, ms, command, extra) => Object.assign({ type: 'assistant', uuid, timestamp: iso(ms), isSidechain: false,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Passing it on.' }, { type: 'tool_use', id, name: 'Bash', input: { command, description: 'x' } }] } }, extra || {});
+      const cmd = (to, text) => `python3 /p/hooks/steward-relay.py ${to} <<'EOF'\n${text}\nEOF`;
       fs.writeFileSync(transcript, [
-        { type: 'user', uuid: 'old', timestamp: iso(now - 40 * 60000), origin: { kind: 'human' }, message: { role: 'user', content: [{ type: 'text', text: '可以删' }] } },
-        { type: 'user', uuid: 'u1', timestamp: iso(now - 60000), origin: { kind: 'human' },
-          message: { role: 'user', content: [{ type: 'text', text: '<ide_opened_file>x</ide_opened_file>' }, { type: 'text', text: '告诉 Two 可以改，但先别推。不可以删\ndon\'t push it\nTell it:  Go ahead' }] } },
-        { type: 'user', uuid: 'p1', timestamp: iso(now - 30000), isMeta: true, origin: { kind: 'peer' }, message: { role: 'user', content: 'Another Claude session sent a message:\n可以推' } },
-        { type: 'attachment', uuid: 'q1', timestamp: iso(now - 20000), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: '先停一下，等我看完' }],
-          origin: { kind: 'human' }, humanTurn: true } },
-        { type: 'attachment', uuid: 'q2', timestamp: iso(now - 10000), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: '可以合并' }], origin: { kind: 'peer' } } },
+        call('a0', 'toolu_old', now - relay.RAN_MS - 60000, cmd(S(3), 'old')),
+        call('a1', 'toolu_1', now - 60000, cmd(S(2), restarted)),
+        call('a2', 'toolu_side', now - 30000, cmd(S(3), 'from a subagent'), { isSidechain: true }),
+        call('a3', 'toolu_crlf', now - 20000, cmd(S(3), lines2).replace(/\n/g, '\r\n')),
+        { type: 'user', uuid: 'u1', timestamp: iso(now - 10000), origin: { kind: 'human' },
+          message: { role: 'user', content: [{ type: 'text', text: cmd(S(2), 'typed, not run') + ' "tool_use"' }] } },
       ].map((r) => JSON.stringify(r)).join('\n') + '\n');
-      const msgs = relay.userMessages(transcript, now);
-      const said = (w) => !!relay.saidBy(w, msgs);
-      const clauses = ['可以改', '但先别推', '不可以删', "don't push it", '告诉 Two 可以改', '可以改，但先别推', 'Go ahead', '先停一下'].every(said)
-        && !['可以删', 'push it', 'Two', '可以推', '改，但', 'x', '可以合并'].some(said);
-      if (msgs.length === 2 && msgs[0].uuid === 'q1' && msgs[1].uuid === 'u1' && clauses) {
-        ok('only what the user typed in the last 30 minutes counts, also while a turn was running, and only a whole sentence or clause of it: not "可以删" out of "不可以删", not "push it" out of "don\'t push it"');
-      } else bad(`the user's words read ${JSON.stringify(msgs)}, clauses ${clauses}`);
+      const by = (to, text) => (relay.ranBy(transcript, to, text, now) || {}).id || null;
+      const found = [by(S(2), restarted), by(S(3), lines2)];
+      const none = [by(S(2), 'something else'), by(S(4), restarted), by(S(3), 'from a subagent'), by(S(3), 'old'), by(S(2), 'typed, not run')];
+      if (found[0] === 'toolu_1' && found[1] === 'toolu_crlf' && none.every((x) => x === null)) {
+        ok('a request is the steward\'s only when the steward itself ran steward-relay.py in the last 5 minutes with a command that names the conversation and holds the text: not a subagent, not an older call, not text the user typed');
+      } else bad(`the steward's calls read ${JSON.stringify({ found, none })}`);
       /* In a child process, since take() is asynchronous and this script is not. */
       const R = (n) => `aaaaaaaa-0000-4000-8000-00000000000${n}`;
       const relayed = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
@@ -8548,30 +8550,33 @@ console.log('\nthe Steward panel');
         const relay = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'relay.js'))});
         const rdir = ${JSON.stringify(rdir)}, S = (n) => '5e5e5e5e-0000-4000-8000-00000000000' + n, now = ${now};
         const R = (n) => 'aaaaaaaa-0000-4000-8000-00000000000' + n;
+        const restarted = ${JSON.stringify(restarted)}, lines2 = ${JSON.stringify(lines2)};
         const table = { [S(1)]: { manages: [S(2), S(3)], names: {}, at: 0, all: false } };
         const put = (id, req) => fs.writeFileSync(path.join(rdir, relay.RELAY_DIR, id + '.json'),
           JSON.stringify(Object.assign({ id, steward: S(1), at: now }, req)));
-        put(R(1), { to: S(2), text: '可以改' });
-        put(R(2), { to: S(2), text: '改，但' });
-        put(R(3), { to: S(4), text: '可以改' });
-        put(R(4), { to: S(3), text: '可以改', at: now - relay.MAX_AGE_MS - 1 });
-        put(R(5), { to: S(5), text: '可以改' });
+        put(R(1), { to: S(2), text: restarted });
+        put(R(2), { to: S(2), text: 'something else' });
+        put(R(3), { to: S(4), text: restarted });
+        put(R(4), { to: S(3), text: lines2, at: now - relay.MAX_AGE_MS - 1 });
+        put(R(5), { to: S(5), text: restarted });
+        put(R(7), { to: S(3), text: lines2 });
         const typed = [];
         const deps = { shownHere: (id) => id !== S(5), stewards: () => table, transcriptOf: (id) => (id === S(1) ? ${JSON.stringify(transcript)} : ''),
           pid: 77, deliver: async (id, text) => { typed.push([id, text]); return { outcome: 'submitted' }; }, now: () => now };
         (async () => {
           const first = await relay.take(rdir, deps);
-          put(R(6), { to: S(2), text: '可以改' });
+          put(R(6), { to: S(2), text: restarted });
           const again = await relay.take(rdir, deps);
           const left = fs.readdirSync(path.join(rdir, relay.RELAY_DIR)).sort();
           const results = Object.fromEntries(first.map((r) => [r.id, r.outcome]));
           process.stdout.write(JSON.stringify({ typed, results, again, left }));
         })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
       const { typed, results, again, left } = relayed;
-      if (typed && JSON.stringify(typed) === JSON.stringify([[S(2), '可以改']]) && results[R(1)] === 'submitted' && results[R(2)] === 'refused'
-          && results[R(3)] === 'refused' && again.length === 1 && again[0].outcome === 'refused' && /already/.test(again[0].reason)
+      if (typed && JSON.stringify(typed) === JSON.stringify([[S(2), restarted], [S(3), lines2]]) && results[R(1)] === 'submitted'
+          && results[R(7)] === 'submitted' && results[R(2)] === 'refused' && results[R(3)] === 'refused'
+          && again.length === 1 && again[0].outcome === 'refused' && /already/.test(again[0].reason)
           && left.includes(R(5) + '.json') && !left.includes(R(4) + '.json') && !left.some((n) => n.includes('.taken-'))) {
-        ok('a window types the words into a conversation it shows when they are the user\'s and the steward manages it, refuses other words, other conversations and a repeat, leaves a request for another window, and drops a stale one');
+        ok('a window types the steward\'s text into a conversation it shows when the steward manages it and sent it, refuses text the steward did not send, other conversations and a second request from one call, leaves a request for another window, and drops a stale one');
       } else bad(`relaying gave ${JSON.stringify(relayed)}`);
       /* The script the steward runs: it leaves the request and prints the answer a window writes back. */
       const script = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks', 'steward-relay.py');
@@ -8584,21 +8589,21 @@ console.log('\nthe Steward panel');
           { env: Object.assign({}, process.env, { CLAUDE_CODE_SESSION_ID: ${JSON.stringify(S(1))} }) });
         let out = '';
         kid.stdout.on('data', (d) => { out += d; });
-        kid.stdin.end('可以改，但先别推');
+        kid.stdin.end('请先别推，等测试结果出来。' + String.fromCharCode(10));
         const t = setInterval(() => {
           for (const n of fs.readdirSync(dir)) {
             const m = /^([0-9a-f-]{36})\.json$/.exec(n);
             if (!m) continue;
             const req = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'));
             fs.unlinkSync(path.join(dir, n));
-            fs.writeFileSync(path.join(dir, m[1] + '.result.json'), JSON.stringify({ outcome: req.text === '可以改，但先别推' && req.steward === ${JSON.stringify(S(1))} ? 'submitted' : 'refused', reason: 'x' }));
+            fs.writeFileSync(path.join(dir, m[1] + '.result.json'), JSON.stringify({ outcome: req.text === '请先别推，等测试结果出来。' && req.steward === ${JSON.stringify(S(1))} && req.to === ${JSON.stringify(S(2))} ? 'submitted' : 'refused', reason: 'x' }));
           }
         }, 100);
         kid.on('exit', (code) => { clearInterval(t); process.stdout.write(JSON.stringify({ code, out })); });`], { encoding: 'utf8', timeout: 60000 });
       let ran = {};
       try { ran = JSON.parse(both.stdout); } catch (_) { ran = { error: both.stdout + both.stderr }; }
       if (ran.code === 0 && /^Sent: /.test(ran.out) && fs.readdirSync(path.join(sdir, relay.RELAY_DIR)).length === 0) {
-        ok('steward-relay.py leaves the words as a request from this steward and prints the answer a window writes back');
+        ok('steward-relay.py leaves the message as a request from this steward and prints the answer a window writes back');
       } else bad(`steward-relay.py: ${JSON.stringify(ran)}`);
     }
 
