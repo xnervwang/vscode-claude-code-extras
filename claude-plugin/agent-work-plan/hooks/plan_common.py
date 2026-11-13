@@ -641,9 +641,11 @@ def turn_began(plan, payload):
 # What Claude Code Plus sends a steward conversation. Claude Code puts one of its lines for a message from another session
 # before it, with or without a cross-session-message tag.
 STEWARD_NOTICE = "Steward notice from Claude Code Plus"
-PEER_WRAPPER = re.compile(r"\s*(?:(?:Another Claude session sent a message(?: while you were working)?"
-                          r"|A peer session sent a message while you were working):\s*)?"
-                          r"(?:<cross-session-message\b[^>]*>\s*)?")
+PEER_LEAD = (r"(?:Another Claude session sent a message(?: while you were working)?"
+             r"|A peer session sent a message while you were working):")
+PEER_TAG = r"<cross-session-message\b[^>]*>"
+PEER_WRAPPER = re.compile(r"\s*(?:%s\s*)?(?:%s\s*)?" % (PEER_LEAD, PEER_TAG))
+PEER_START = re.compile(r"\s*(?:%s|%s)" % (PEER_LEAD, PEER_TAG))
 
 
 def steward_notice(prompt):
@@ -651,7 +653,18 @@ def steward_notice(prompt):
     return isinstance(prompt, str) and prompt.startswith(STEWARD_NOTICE, PEER_WRAPPER.match(prompt).end())
 
 
+def peer_message(prompt):
+    """Whether the text a turn began with is a message another session sent, as Claude Code delivers one."""
+    return isinstance(prompt, str) and PEER_START.match(prompt) is not None
+
+
 def notice_turn(plan, payload):
     """Whether this event's turn was begun by a steward notice, as the injection marked it."""
     turn = this_turn(plan, payload)
     return bool(turn and turn.get("notice") is True)
+
+
+def peer_turn(plan, payload):
+    """Whether this event's turn was begun by a message from another session, as the injection marked it."""
+    turn = this_turn(plan, payload)
+    return bool(turn and turn.get("peer") is True)

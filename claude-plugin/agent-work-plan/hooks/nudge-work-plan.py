@@ -64,8 +64,8 @@ from changes import shell_command  # noqa: F401  (kept beside changes so both re
 from plan_path import (AFTER_OFFER, BRIEF_WIDTH, BRIEFED_SUFFIX, CLOSED_STATES, COMPACTED_SUFFIX, MAYBE_CALL, MAYBE_USER,
                        NOTE_WORD, NUDGED_SUFFIX, OFFERED_SUFFIX, QUESTION_WORD, SETTLED_SUFFIX, STOP_REENTERS,
                        WAITING_ON_WORD, ask_how, brief_how, brief_of, children, epoch, listed, notice_turn, offer_how,
-                       open_tail, plan_file, read_payload, settings, settle_how, side_file, spoke, stop_output,
-                       tool_calls, turn_began, write_quietly)
+                       open_tail, peer_turn, plan_file, read_payload, settings, settle_how, side_file, spoke,
+                       stop_output, tool_calls, turn_began, write_quietly)
 
 # Every threshold this uses is in plan_path.DEFAULTS, where the editor's settings can override it.
 
@@ -332,6 +332,9 @@ def main():
             return 0
         return offer_once(payload, path, tools, turns, limits)
     shape = turn_shape(tail, path, turn_began(path, payload))
+    # A message from another session that was only read or passed on left nothing to record; asking costs a reply.
+    if shape[2] == 0 and peer_turn(path, payload):
+        return 0
     texts = [t for t in (reconcile(path, limits, shape), settle(payload, path), unrecorded_question(payload, path, tail),
                          brief_due(payload, path, shape, limits)) if t]
     return speak(payload, "\n\n".join(texts)) if texts else 0

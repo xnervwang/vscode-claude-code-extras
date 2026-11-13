@@ -68,7 +68,9 @@ def main():
         return 0
     turn["calls"] = count(turn.get("calls")) + len(work)
     turn["changes"] = count(turn.get("changes")) + sum(1 for tool, given in work if changes(tool, given))
-    if turn["calls"] < limits["remindMinCalls"] and turn["changes"] < limits["nudgeMinChanges"]:
+    # Reading what another session sent is not work on a row; changing things is.
+    few_calls = turn["calls"] < limits["remindMinCalls"] or turn.get("peer") is True
+    if few_calls and turn["changes"] < limits["nudgeMinChanges"]:
         write_turn(path, turn)
         return 0
     try:
