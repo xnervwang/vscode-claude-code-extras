@@ -770,6 +770,7 @@ function start(context, log, renamed, handing = false) {
     log: (m) => log.appendLine(m), home: os.homedir(), dir: planDir(), shownList,
     changed: () => redrawStewards(),
     focusWindow: () => focusThisWindow(),
+    deliver: (sessionId, text) => claude.source.deliverAnswer(sessionId, text, {}),
     windowName: () => vscode.workspace.name || '', windowFolders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push(steward);

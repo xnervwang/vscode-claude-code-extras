@@ -20,11 +20,12 @@
 const fs = require('fs');
 const path = require('path');
 const stewards = require('./stewards');
+const relay = require('./relay');
 const waiting = require('./waiting');
 const conversations = require('./conversations');
 const bgSessions = require('./bgsessions');
 const { planQuestions } = require('./folders');
-const { writeAtomic, SESSION } = require('./claude-files');
+const { writeAtomic, SESSION, transcriptOf } = require('./claude-files');
 const { liveRecords } = require('./background');
 const { OPEN_STATES } = require('./workplan');
 
@@ -238,11 +239,13 @@ function shell(list, nonce) {
  * shared files, enabled(), log(message), home, dir (the plan directory), windowName(), windowFolders() and shownList()
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
  * the live session records, alive(pid), post(address, text) in place of stewards.post, changed(), called once the
- * table of stewards has been rewritten here, and focusWindow(), which brings this window to the front.
+ * table of stewards has been rewritten here, focusWindow(), which brings this window to the front, transcriptOf(id), and
+ * deliver(id, text), which types text into the conversation's message input here (src/relay.js).
  */
 function create(vscode, deps) {
   deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
-    windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {} }, deps);
+    windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {}, transcriptOf,
+    deliver: () => Promise.resolve({ outcome: 'notReceived', reason: 'this window cannot type into a conversation' }) }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
   /* A pass reads the plan of every conversation listed, every REFRESH_MS. A plan whose file has the same size and
@@ -427,12 +430,38 @@ function create(vscode, deps) {
     } catch (_) { requestWatch = null; }
   };
 
+  /* Words a steward passes on for a conversation this window shows (src/relay.js). The folder is watched, and each
+     pass also looks, in case the watch missed one or the folder did not exist yet when the watch was set. */
+  let relayWatch = null, relaying = false;
+  const takeRelays = async () => {
+    if (relaying || !deps.canWrite()) return;
+    relaying = true;
+    try {
+      for (const r of await relay.take(deps.dir, { shownHere: deps.shownHere, stewards: () => stewards.read(deps.dir),
+        transcriptOf: deps.transcriptOf, deliver: deps.deliver, pid: process.pid })) {
+        deps.log(`steward relay to ${r.to}: ${r.outcome}${r.reason ? ' (' + r.reason + ')' : ''}`);
+      }
+    } catch (e) { deps.log('steward relay: ' + ((e && e.message) || e)); } finally { relaying = false; }
+  };
+  const watchRelays = () => {
+    if (relayWatch) return;
+    try {
+      relayWatch = fs.watch(path.join(deps.dir, relay.RELAY_DIR), { persistent: false }, (event, name) => {
+        if (name && !/^[0-9a-f-]{36}\.json$/i.test(name)) return;
+        takeRelays();
+      });
+      relayWatch.on('error', () => { try { relayWatch.close(); } catch (_) { /* closed */ } relayWatch = null; });
+    } catch (_) { relayWatch = null; }
+  };
+
   /* Skipped while the panel is hidden and no steward here needs notices: a pass reads every plan and transcript end. */
   const pass = async () => {
     if (busy || !deps.enabled()) return;
     publish();
     watchRequests();
     await takeRequest();
+    watchRelays();
+    await takeRelays();
     if (!(view && view.visible) && !Object.keys(stewards.read(deps.dir)).some((id) => deps.shownHere(id))) return;
     busy = true;
     try {
@@ -507,11 +536,13 @@ function create(vscode, deps) {
       clearInterval(timer);
       reg.dispose();
       if (requestWatch) { try { requestWatch.close(); } catch (_) { /* closed */ } }
+      if (relayWatch) { try { relayWatch.close(); } catch (_) { /* closed */ } }
       if (published) { try { fs.unlinkSync(own); } catch (_) { /* gone already */ } }
     },
     refresh() { render(); },
     open,
     _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage, _takeRequest: takeRequest, _syncEvery: syncEvery,
+    _takeRelays: takeRelays,
   };
 }
 

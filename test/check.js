@@ -8474,6 +8474,88 @@ console.log('\nthe Steward panel');
       } else bad(`managing all: ${JSON.stringify([kept, still, whole, allTab, st.read(allDir)])}`);
     }
 
+    /* The user's words passed on by a steward (src/relay.js, hooks/steward-relay.py). */
+    {
+      const relay = require('../src/relay');
+      const rdir = path.join(root, 'relay-plans'), tdir = path.join(root, 'relay-transcripts');
+      fs.mkdirSync(path.join(rdir, relay.RELAY_DIR), { recursive: true });
+      fs.mkdirSync(tdir, { recursive: true });
+      const now = Date.now(), iso = (ms) => new Date(ms).toISOString();
+      const transcript = path.join(tdir, S(1) + '.jsonl');
+      fs.writeFileSync(transcript, [
+        { type: 'user', uuid: 'old', timestamp: iso(now - 40 * 60000), origin: { kind: 'human' }, message: { role: 'user', content: [{ type: 'text', text: '可以删' }] } },
+        { type: 'user', uuid: 'u1', timestamp: iso(now - 60000), origin: { kind: 'human' },
+          message: { role: 'user', content: [{ type: 'text', text: '<ide_opened_file>x</ide_opened_file>' }, { type: 'text', text: '告诉 Two 可以改，但先别推。不可以删\ndon\'t push it\nTell it:  Go ahead' }] } },
+        { type: 'user', uuid: 'p1', timestamp: iso(now - 30000), isMeta: true, origin: { kind: 'peer' }, message: { role: 'user', content: 'Another Claude session sent a message:\n可以推' } },
+      ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+      const msgs = relay.userMessages(transcript, now);
+      const said = (w) => !!relay.saidBy(w, msgs);
+      const clauses = ['可以改', '但先别推', '不可以删', "don't push it", '告诉 Two 可以改', '可以改，但先别推', 'Go ahead'].every(said)
+        && !['可以删', 'push it', 'Two', '可以推', '改，但', 'x'].some(said);
+      if (msgs.length === 1 && msgs[0].uuid === 'u1' && clauses) {
+        ok('only what the user typed in the last 30 minutes counts, and only a whole sentence or clause of it: not "可以删" out of "不可以删", not "push it" out of "don\'t push it"');
+      } else bad(`the user's words read ${JSON.stringify(msgs)}, clauses ${clauses}`);
+      /* In a child process, since take() is asynchronous and this script is not. */
+      const R = (n) => `aaaaaaaa-0000-4000-8000-00000000000${n}`;
+      const relayed = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+        const fs = require('fs'), path = require('path');
+        const relay = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'relay.js'))});
+        const rdir = ${JSON.stringify(rdir)}, S = (n) => '5e5e5e5e-0000-4000-8000-00000000000' + n, now = ${now};
+        const R = (n) => 'aaaaaaaa-0000-4000-8000-00000000000' + n;
+        const table = { [S(1)]: { manages: [S(2), S(3)], names: {}, at: 0, all: false } };
+        const put = (id, req) => fs.writeFileSync(path.join(rdir, relay.RELAY_DIR, id + '.json'),
+          JSON.stringify(Object.assign({ id, steward: S(1), at: now }, req)));
+        put(R(1), { to: S(2), text: '可以改' });
+        put(R(2), { to: S(2), text: '改，但' });
+        put(R(3), { to: S(4), text: '可以改' });
+        put(R(4), { to: S(3), text: '可以改', at: now - relay.MAX_AGE_MS - 1 });
+        put(R(5), { to: S(5), text: '可以改' });
+        const typed = [];
+        const deps = { shownHere: (id) => id !== S(5), stewards: () => table, transcriptOf: (id) => (id === S(1) ? ${JSON.stringify(transcript)} : ''),
+          pid: 77, deliver: async (id, text) => { typed.push([id, text]); return { outcome: 'submitted' }; }, now: () => now };
+        (async () => {
+          const first = await relay.take(rdir, deps);
+          put(R(6), { to: S(2), text: '可以改' });
+          const again = await relay.take(rdir, deps);
+          const left = fs.readdirSync(path.join(rdir, relay.RELAY_DIR)).sort();
+          const results = Object.fromEntries(first.map((r) => [r.id, r.outcome]));
+          process.stdout.write(JSON.stringify({ typed, results, again, left }));
+        })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
+      const { typed, results, again, left } = relayed;
+      if (typed && JSON.stringify(typed) === JSON.stringify([[S(2), '可以改']]) && results[R(1)] === 'submitted' && results[R(2)] === 'refused'
+          && results[R(3)] === 'refused' && again.length === 1 && again[0].outcome === 'refused' && /already/.test(again[0].reason)
+          && left.includes(R(5) + '.json') && !left.includes(R(4) + '.json') && !left.some((n) => n.includes('.taken-'))) {
+        ok('a window types the words into a conversation it shows when they are the user\'s and the steward manages it, refuses other words, other conversations and a repeat, leaves a request for another window, and drops a stale one');
+      } else bad(`relaying gave ${JSON.stringify(relayed)}`);
+      /* The script the steward runs: it leaves the request and prints the answer a window writes back. */
+      const script = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks', 'steward-relay.py');
+      const sdir = path.join(root, 'relay-script');
+      fs.mkdirSync(path.join(sdir, relay.RELAY_DIR), { recursive: true });
+      const both = cp.spawnSync(process.execPath, ['-e', `
+        const fs = require('fs'), path = require('path'), cp = require('child_process');
+        const dir = path.join(${JSON.stringify(sdir)}, 'relay');
+        const kid = cp.spawn('python3', [${JSON.stringify(script)}, ${JSON.stringify(S(2))}, ${JSON.stringify(sdir)}],
+          { env: Object.assign({}, process.env, { CLAUDE_CODE_SESSION_ID: ${JSON.stringify(S(1))} }) });
+        let out = '';
+        kid.stdout.on('data', (d) => { out += d; });
+        kid.stdin.end('可以改，但先别推');
+        const t = setInterval(() => {
+          for (const n of fs.readdirSync(dir)) {
+            const m = /^([0-9a-f-]{36})\.json$/.exec(n);
+            if (!m) continue;
+            const req = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'));
+            fs.unlinkSync(path.join(dir, n));
+            fs.writeFileSync(path.join(dir, m[1] + '.result.json'), JSON.stringify({ outcome: req.text === '可以改，但先别推' && req.steward === ${JSON.stringify(S(1))} ? 'submitted' : 'refused', reason: 'x' }));
+          }
+        }, 100);
+        kid.on('exit', (code) => { clearInterval(t); process.stdout.write(JSON.stringify({ code, out })); });`], { encoding: 'utf8', timeout: 60000 });
+      let ran = {};
+      try { ran = JSON.parse(both.stdout); } catch (_) { ran = { error: both.stdout + both.stderr }; }
+      if (ran.code === 0 && /^Sent: /.test(ran.out) && fs.readdirSync(path.join(sdir, relay.RELAY_DIR)).length === 0) {
+        ok('steward-relay.py leaves the words as a request from this steward and prints the answer a window writes back');
+      } else bad(`steward-relay.py: ${JSON.stringify(ran)}`);
+    }
+
     /* The plugin's two scripts. */
     const hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks');
     const data = path.join(root, 'data'), conf = path.join(root, 'conf');

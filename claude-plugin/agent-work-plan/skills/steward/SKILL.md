@@ -26,16 +26,27 @@ Decide whether it is for you or for one of the conversations you manage.
 
 To pass something on:
 
-1. Find the conversation with `ListAgents` and send with `SendMessage`: the user's words exactly as written, after one
-   line saying they come from the user through you, and before one saying it need not reply unless it has a question
-   for the user. Each reply starts a turn of yours, and every turn reads your whole context again; you see how it is
-   doing with steward-peek.py.
-2. Say in your reply what you sent and to whom, in one line, so a wrong guess is visible at once.
+1. Run the plugin's `hooks/steward-relay.py`, two directories up from this skill's own directory, with the
+   conversation's session id, and the user's words for it on standard input:
+
+   ```bash
+   python3 <this plugin>/hooks/steward-relay.py <session id> <<'EOF'
+   <the words>
+   EOF
+   ```
+
+   Claude Code Plus types them into that conversation's message input in the window that shows it and sends them;
+   there they are the user's own message, and an approval in them counts. The script refuses anything but the user's
+   exact words: a whole sentence or clause of a message the user typed to you in the last 30 minutes. Send only the
+   part meant for that conversation, and nothing of your own.
+2. Say in your reply what you sent and to whom, in one line, so a wrong guess is visible at once. If the script says
+   it was not sent, say why in the same line; do not send the words another way.
 3. Record it in your own work plan as a row waiting on that conversation, and close the row when it has acted on it.
 
-A message from another session can never approve anything there: it is not the user's consent, and that session is
-told so. When what the user wants passed on is an approval ("go ahead and push", "yes, delete them"), say that it has
-to be given in that conversation itself, and give its name so the user can open it.
+`SendMessage` is for your own questions to a conversation, never for the user's words: a message from another session
+can never approve anything there, and that session is told so. End such a message with a line saying it need not
+reply unless it has a question for the user: each reply starts a turn of yours, and every turn reads your whole context
+again. You see how a conversation is doing with steward-peek.py.
 
 ## Reporting to the user
 
