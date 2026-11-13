@@ -8159,7 +8159,7 @@ console.log('\nconversations whose background sessions are busy');
       const real = fs.promises.readFile;
       // The two claude -p workers' environments are read on every snapshot to find their launchers; only the rest count.
       fs.promises.readFile = function (f, ...rest) {
-        if (String(f).endsWith('environ') && !/[\\/]60[01][\\/]environ$/.test(String(f))) environs++;
+        if (String(f).endsWith('environ') && !/[\\\\/]60[01][\\\\/]environ$/.test(String(f))) environs++;
         return real.call(fs.promises, f, ...rest);
       };
       (async () => {

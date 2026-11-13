@@ -47,7 +47,12 @@ def main(argv):
     if not SESSION_NAME.match(steward):
         print("Not sent: CLAUDE_CODE_SESSION_ID is not set, so this was not run from the steward conversation.")
         return 1
-    text = sys.stdin.read().strip()
+    # Read as bytes: on Windows the console code page would otherwise decode the user's words, and fail on Chinese.
+    raw = sys.stdin.buffer.read()
+    try:
+        text = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", "replace").strip()
     if not text:
         print("Not sent: no words on standard input.")
         return 1
