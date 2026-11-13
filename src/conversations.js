@@ -44,19 +44,33 @@ function transcriptCwd(file) {
   return cwd;
 }
 
+/* Whether each plan file has open rows, by its path, kept while its size and modification time stay the same, so a plan
+   that has not changed is not read again. */
+const openSeen = new Map();
+
 /** Stopped conversations in `folders` with a plan written in the last CLOSED_DAYS that has open rows, as merge() records. */
 function stoppedWithOpenRows(folders, running, { dir = planDir(), now = Date.now(), readPlan, find = transcriptOf } = {}) {
   const out = new Map();
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => /^[0-9a-f-]{36}\.json$/i.test(n)); } catch (_) { return out; }
+  if (openSeen.size > 4 * names.length + 100) openSeen.clear();
   for (const name of names) {
     const id = name.slice(0, -5);
     if (running.has(id)) continue;
-    try { if (now - fs.statSync(path.join(dir, name)).mtimeMs > CLOSED_DAYS * 86400e3) continue; } catch (_) { continue; }
-    const plan = readPlan(id);
-    if (!plan || !openCount(plan.nodes)) continue;
-    const file = find(id);
-    const cwd = file ? transcriptCwd(file) : '';
+    const file = path.join(dir, name);
+    let st;
+    try { st = fs.statSync(file); } catch (_) { continue; }
+    if (now - st.mtimeMs > CLOSED_DAYS * 86400e3) continue;
+    const key = st.mtimeMs + ':' + st.size;
+    let seen = openSeen.get(file);
+    if (!seen || seen.key !== key) {
+      const plan = readPlan(id);
+      seen = { key, open: !!(plan && openCount(plan.nodes)) };
+      openSeen.set(file, seen);
+    }
+    if (!seen.open) continue;
+    const transcript = find(id);
+    const cwd = transcript ? transcriptCwd(transcript) : '';
     if (!cwd) continue;
     const s = { sessionId: id, id: '', kind: 'interactive', cwd, name: '', waitingFor: '', busy: false, processes: 0 };
     if (waiting.inFolders(new Map([[id, s]]), folders).size) out.set(id, s);

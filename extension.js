@@ -710,13 +710,17 @@ function start(context, log, renamed, handing = false) {
     if (globalThis.__cceProcessHook) delete globalThis.__cceProcessHook;
   } });
 
+  /* The list of running conversations, shared between windows (listAgents in src/waiting.js). A shared list is at most
+     20 seconds old when a window takes it, and src/claude-source.js caches it for that window like any other. */
+  const AGENTS_FILE = 'agents.json', AGENTS_SHARE_MS = 20000;
   /* Created here because it reads globals the patched host sets in this process. */
   const claude = createClaudeSource({
     planDir,
     enabled: () => runs(WORK_PLAN_SETTING),
     brief: () => runs(BRIEF_SETTING),
     timeZone: () => clientZone(),
-    listAgents: () => waiting.listAgents(pluginInstall.findClaude(claudeFolders())),
+    listAgents: () => waiting.listAgents(pluginInstall.findClaude(claudeFolders()), undefined,
+      { file: path.join(planDir(), AGENTS_FILE), ms: AGENTS_SHARE_MS, write: !replaced() && !uninstalling() }),
     folders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
     readPlan,
     titles: readTitles.titles,

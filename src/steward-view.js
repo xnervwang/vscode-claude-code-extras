@@ -41,6 +41,9 @@ const WINDOW_STALE_MS = 120000;
 const OPEN_SUFFIX = '.open.json';
 const OPEN_FRESH_MS = 30000;
 const MAX_DOING = 2;
+/* The questions a notice quotes for each conversation, and how much of each. */
+const MAX_ASKS = 3;
+const MAX_ASK = 300;
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -72,6 +75,7 @@ function gather(records, deps) {
   const add = (s, on) => {
     const plan = deps.readPlan(s.sessionId);
     const nodes = plan && plan.nodes;
+    const qs = planQuestions(nodes);
     out.set(s.sessionId, {
       sessionId: s.sessionId,
       title: conversations.claudeTitle(s, deps.titles(s), () => plan),
@@ -80,7 +84,8 @@ function gather(records, deps) {
       running: on,
       lastActiveAt: deps.since(s) || 0,
       doing: doingRows(nodes),
-      questions: planQuestions(nodes).length,
+      questions: qs.length,
+      asks: qs.slice(0, MAX_ASKS).map((q) => String(q.question || '').slice(0, MAX_ASK)),
     });
   };
   for (const s of running.values()) add(s, true);
@@ -89,6 +94,8 @@ function gather(records, deps) {
 }
 
 const STATE_TEXT = { working: 'working', prompt: 'waiting for you', unread: 'finished, not read yet', idle: 'idle' };
+/* STATE_TEXT for the steward's notices, which speak of the user in the third person. */
+const NOTICE_STATE = { working: 'working', prompt: 'waiting for the user', unread: 'finished, not read by the user', idle: 'idle' };
 
 function ago(ms, now) {
   if (!ms) return '';
@@ -238,6 +245,19 @@ function create(vscode, deps) {
     windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {} }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
+  /* A pass reads the plan of every conversation listed, every REFRESH_MS. A plan whose file has the same size and
+     modification time as at the last read is taken from here instead. */
+  const planSeen = new Map();
+  const readPlan = (id) => {
+    let st;
+    try { st = fs.statSync(path.join(deps.dir, id + '.json')); } catch (_) { planSeen.delete(id); return deps.readPlan(id); }
+    const key = st.mtimeMs + ':' + st.size, hit = planSeen.get(id);
+    if (hit && hit.key === key) return hit.plan;
+    const plan = deps.readPlan(id);
+    planSeen.set(id, { key, plan });
+    return plan;
+  };
+  const cached = Object.assign({}, deps, { readPlan });
 
   const model = (all, front) => {
     const table = stewards.read(deps.dir);
@@ -340,7 +360,7 @@ function create(vscode, deps) {
       if (!deps.shownHere(steward)) { pending.delete(steward); continue; }
       const manages = table[steward].manages;
       const more = (id) => last.get(id) && asked.has(id) && last.get(id).questions > asked.get(id);
-      const waited = waitedOn(deps.readPlan(steward), manages, table[steward].names);
+      const waited = waitedOn(readPlan(steward), manages, table[steward].names);
       const list = stewards.changes(states, after, manages)
         .filter((c) => c.what === 'waiting' || more(c.id) || waited.has(c.id));
       if (list.length) pending.set(steward, (pending.get(steward) || []).filter((c) => !list.some((x) => x.id === c.id)).concat(list));
@@ -354,9 +374,14 @@ function create(vscode, deps) {
       if (!table[steward] || now - (sentAt.get(steward) || 0) < NOTICE_GAP_MS) continue;
       if (!records) records = deps.records();
       const rec = records.find((r) => r && r.sessionId === steward && typeof r.messagingSocketPath === 'string');
-      const names = Object.assign({}, table[steward].names);
-      for (const c of list) if (last.get(c.id)) names[c.id] = last.get(c.id).title;
-      const sent = rec ? await deps.post(rec.messagingSocketPath, stewards.noticeText(list, names)) : false;
+      const names = Object.assign({}, table[steward].names), details = {};
+      for (const c of list) {
+        const now = last.get(c.id);
+        if (!now) continue;
+        names[c.id] = now.title;
+        details[c.id] = { state: NOTICE_STATE[now.state] || now.state, doing: now.doing, asks: now.asks || [] };
+      }
+      const sent = rec ? await deps.post(rec.messagingSocketPath, stewards.noticeText(list, names, details)) : false;
       pending.delete(steward);
       sentAt.set(steward, now);
       deps.log(`steward ${steward}: ${list.length} change(s) ${sent ? 'sent' : 'not sent, no inbox reached'}`);
@@ -412,7 +437,8 @@ function create(vscode, deps) {
     busy = true;
     try {
       const r = await deps.freshAgents();
-      last = gather(r && r.records, deps);
+      if (planSeen.size > 1000) planSeen.clear();
+      last = gather(r && r.records, cached);
       if (deps.canWrite()) {
         const names = {};
         for (const [id, c] of last) names[id] = c.title;

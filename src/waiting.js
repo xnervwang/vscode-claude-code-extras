@@ -19,7 +19,7 @@
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { transcriptOf } = require('./claude-files');
+const { transcriptOf, writeAtomic } = require('./claude-files');
 const bgSessions = require('./bgsessions');
 /* Real paths are compared, so a folder reached through a symbolic link still matches. */
 const { folderTest } = require('./folders');
@@ -36,14 +36,32 @@ function parseAgents(stdout) {
   return list.filter((r) => r && typeof r === 'object' && typeof r.sessionId === 'string' && r.sessionId);
 }
 
-/** Run `claude agents --json` with the given binary. Resolves to { records, error }; records is null on failure. */
-function listAgents(bin, run = cp.execFile) {
+/*
+ * Run `claude agents --json` with the given binary. Resolves to { records, error }; records is null on failure.
+ *
+ * A run starts Claude Code's whole binary, about 0.4 s of CPU and 160 MB, and every window asks about twice a minute
+ * for the same machine-wide list. With `share` ({ file, ms, write }), a list another window wrote to `file` less than
+ * `ms` ago is returned without running anything, and a list fetched here is written there unless `write` is false.
+ */
+function listAgents(bin, run = cp.execFile, share = null) {
+  if (share && share.file) {
+    try {
+      const d = JSON.parse(fs.readFileSync(share.file, 'utf8')), now = Date.now();
+      if (d.at <= now && now - d.at < share.ms && Array.isArray(d.records)) return Promise.resolve({ records: d.records, error: '' });
+    } catch (_) { /* none yet, or caught mid-write */ }
+  }
   return new Promise((resolve) => {
     if (!bin) { resolve({ records: null, error: 'Claude Code\'s command line was not found' }); return; }
     run(bin, ['agents', '--json'], { timeout: AGENTS_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => {
         const records = parseAgents(stdout);
-        if (records) { resolve({ records, error: '' }); return; }
+        if (records) {
+          if (share && share.file && share.write !== false) {
+            try { writeAtomic(share.file, JSON.stringify({ at: Date.now(), records }) + '\n'); } catch (_) { /* each window asks itself */ }
+          }
+          resolve({ records, error: '' });
+          return;
+        }
         const said = String(stderr || '').trim().split('\n').pop() || (err && err.message) || 'it printed no list';
         resolve({ records: null, error: '`claude agents --json`: ' + said });
       });

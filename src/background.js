@@ -480,14 +480,39 @@ function working(opts = {}) {
   return out;
 }
 
-/* Reads /proc, then calls working(). */
+/*
+ * Every window reads /proc for the same answer, a few hundred milliseconds of work over thousands of files each time.
+ * The windows share it through SNAPSHOT_FILE in the plan directory: a window takes one written less than SHARE_MS ago
+ * instead of reading /proc. A window running an older build reads the file but never writes it. Tests pass a made-up
+ * /proc in opts.proc, which is never shared.
+ */
+const SNAPSHOT_FILE = 'detached.json';
+const SHARE_MS = 9000;
+async function sharedSnapshot(records, opts) {
+  if (opts.proc) return detached.snapshot({ proc: opts.proc, records });
+  const file = path.join(opts.dir || planDir(), SNAPSHOT_FILE), now = Date.now();
+  try {
+    const d = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (d.at <= now && now - d.at < SHARE_MS && Array.isArray(d.outside) && Array.isArray(d.launchers)) {
+      return { outside: new Set(d.outside), launchers: new Map(d.launchers) };
+    }
+  } catch (_) { /* none yet, or caught mid-write */ }
+  const snap = await detached.snapshot({ records });
+  if (opts.write !== false) {
+    try { writeAtomic(file, JSON.stringify({ at: Date.now(), outside: [...snap.outside], launchers: [...snap.launchers] }) + '\n'); }
+    catch (_) { /* the next window reads /proc itself */ }
+  }
+  return snap;
+}
+
+/* Reads /proc, or what another window read from it a moment ago, then calls working(). */
 async function workingNow(opts = {}) {
   const records = liveRecords(opts.sessions);
-  const { outside, launchers } = await detached.snapshot({ proc: opts.proc, records });
+  const { outside, launchers } = await sharedSnapshot(records, opts);
   return working(Object.assign({}, opts, { records, outside, launchers }));
 }
 
 module.exports = {
   scan, collect, readState, busyJobs, liveRecords, working, workingNow,
-  SUFFIX, LINK_FILE, MAX_SESSIONS, MAX_PER_SESSION, MAX_ENTRIES, PERSIST_EVERY,
+  SUFFIX, LINK_FILE, MAX_SESSIONS, MAX_PER_SESSION, MAX_ENTRIES, PERSIST_EVERY, SNAPSHOT_FILE, SHARE_MS,
 };

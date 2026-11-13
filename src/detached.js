@@ -32,17 +32,30 @@ const MAX_DEPTH = 64;
 const BATCH = 128;
 
 async function inBatches(items, fn) {
-  for (let i = 0; i < items.length; i += BATCH) await Promise.all(items.slice(i, i + BATCH).map(fn));
+  for (let i = 0; i < items.length; i += BATCH) await Promise.all(items.slice(i, i + BATCH).map((x, j) => fn(x, j)));
 }
 const read = (file, enc) => fs.promises.readFile(file, enc).catch(() => null);
+/* A /proc file reports its size as 0, so readFile reads it in 64 KB chunks: a 64 KB buffer for each of thousands of stat
+   lines of a few hundred bytes. A stat line is read into one of BATCH small buffers instead, one per read in flight. */
+const STAT_BYTES = 1024;
+const statBuffers = [];
+async function readStat(file, slot) {
+  const buf = statBuffers[slot] || (statBuffers[slot] = Buffer.alloc(STAT_BYTES));
+  let fh;
+  try {
+    fh = await fs.promises.open(file, 'r');
+    const { bytesRead } = await fh.read(buf, 0, STAT_BYTES, 0);
+    return buf.toString('latin1', 0, bytesRead);
+  } catch (_) { return null; } finally { if (fh) await fh.close().catch(() => {}); }
+}
 
 /* pid -> { comm, state, ppid, start } for every process whose stat can be read; start is in clock ticks since boot. */
 async function processes(proc) {
   const out = new Map();
   let names;
   try { names = (await fs.promises.readdir(proc)).filter((n) => /^\d+$/.test(n)); } catch (_) { return out; }
-  await inBatches(names, async (n) => {
-    const s = await read(path.join(proc, n, 'stat'), 'latin1');
+  await inBatches(names, async (n, slot) => {
+    const s = await readStat(path.join(proc, n, 'stat'), slot);
     if (!s) return;
     const open = s.indexOf('('), close = s.lastIndexOf(')');
     if (open < 0 || close < open) return;
@@ -92,20 +105,34 @@ function claudeTest(procs, claudePids) {
  *   A worker's CLAUDE_PID names the claude process whose Bash tool started it. A pid can be reused, so the process now
  *   holding it counts only if it started before the worker.
  */
+/* Session id per process: the CLAUDE_CODE_SESSION_ID in its environment if argv[0] is one of STARTERS, else ''.
+   Keyed by pid, start time and name, which together change when the pid is reused or the process runs another
+   program, so each process is read once rather than on every snapshot. */
+const startedBy = new Map();
+
 async function snapshot({ proc = '/proc', records = [] } = {}) {
   const outside = new Set(), launchers = new Map();
   const procs = await processes(proc);
   if (!procs.size) return { outside, launchers };
   const { isClaude, under } = claudeTest(procs, new Set(records.map((r) => r.pid)));
   const candidates = [...procs].filter(([pid, p]) => p.state !== 'Z' && p.state !== 'X' && !isClaude(pid) && !under(p.ppid));
-  await inBatches(candidates, async ([pid]) => {
-    const env = await read(path.join(proc, String(pid), 'environ'));
-    const id = envValue(env, SESSION_KEY);
-    if (!SESSION.test(id)) return;
-    const args = await read(path.join(proc, String(pid), 'cmdline'), 'latin1');
-    const first = args ? args.split('\0')[0] : '';
-    if (STARTERS.has(path.basename(first))) outside.add(id.toLowerCase());
+  const keep = new Map();
+  await inBatches(candidates, async ([pid, p]) => {
+    const key = proc + '\0' + pid + ':' + p.start + ':' + p.comm;
+    let id = startedBy.get(key);
+    if (id === undefined) {
+      id = '';
+      const found = envValue(await read(path.join(proc, String(pid), 'environ')), SESSION_KEY);
+      if (SESSION.test(found)) {
+        const args = await read(path.join(proc, String(pid), 'cmdline'), 'latin1');
+        if (STARTERS.has(path.basename(args ? args.split('\0')[0] : ''))) id = found.toLowerCase();
+      }
+    }
+    keep.set(key, id);
+    if (id) outside.add(id);
   });
+  startedBy.clear();
+  for (const [k, v] of keep) startedBy.set(k, v);
   const byPid = new Map(records.map((r) => [r.pid, r]));
   await inBatches(records, async (r) => {
     if (!/^sdk-/.test(r.entrypoint || '') || r.kind === 'bg' || !SESSION.test(r.sessionId || '')) return;

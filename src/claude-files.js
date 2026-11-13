@@ -56,14 +56,30 @@ function projectFolders(projects = projectsDir()) {
 }
 
 /*
- * Transcript locations by session id, and the time of the last search that found none. Session ids are unique across
- * projects, so a location once found stays valid. A miss (a conversation whose first message is not written yet) is
- * searched for again only after MISS_MS: a search stats a file in every project folder, and the current conversation is
- * looked up by several callers at once and again every half minute.
+ * Transcript locations by session id, and when each search that found none may be tried again. Session ids are unique
+ * across projects, so a location once found stays valid. A search stats a file in every project folder, of which there
+ * can be thousands, so a miss is searched for again only after MISS_MS, then after twice as long each time, up to
+ * MISS_MAX_MS: a conversation whose first message is not written yet turns up within seconds, and a plan whose
+ * transcript was deleted would otherwise cost a full search on every pass.
  */
 const MISS_MS = 10000;
+const MISS_MAX_MS = 5 * 60000;
 const found = new Map();
 const missed = new Map();
+
+/* projectFolders() for one projects folder, kept until that folder's modification time changes, which it does when a
+   project folder is added or removed. */
+let foldersKey = '', foldersList = null;
+function knownFolders(projects) {
+  let st;
+  try { st = fs.statSync(projects); } catch (_) { return projectFolders(projects); }
+  const key = projects + '\0' + st.mtimeMs;
+  if (key !== foldersKey) {
+    foldersList = projectFolders(projects);
+    foldersKey = foldersList ? key : '';
+  }
+  return foldersList;
+}
 
 /** The transcript of one conversation, or '' when there is none. */
 function transcriptOf(session, projects = projectsDir(), now = Date.now()) {
@@ -72,13 +88,14 @@ function transcriptOf(session, projects = projectsDir(), now = Date.now()) {
   const known = found.get(key);
   if (known && fs.existsSync(known)) return known;
   found.delete(key);
-  if (now - (missed.get(key) || -Infinity) < MISS_MS) return '';
-  for (const dir of projectFolders(projects) || []) {
+  const miss = missed.get(key);
+  if (miss && now - miss.at < miss.wait) return '';
+  for (const dir of knownFolders(projects) || []) {
     const file = path.join(dir, session + '.jsonl');
     if (fs.existsSync(file)) { missed.delete(key); found.set(key, file); return file; }
   }
   if (missed.size > 500) missed.clear();
-  missed.set(key, now);
+  missed.set(key, { at: now, wait: miss ? Math.min(miss.wait * 2, MISS_MAX_MS) : MISS_MS });
   return '';
 }
 

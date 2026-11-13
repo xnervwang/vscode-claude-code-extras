@@ -1700,17 +1700,19 @@ console.log("\nClaude Code's directory, read the same way everywhere");
        a file in every project folder. */
     const projects = path.join(cfg, 'projects');
     const missing = 'cdcdcdcd-1111-4222-8333-444444444444';
-    let walks = 0;
-    const realReaddir = fs.readdirSync;
+    let walks = 0, searches = 0;
+    const realReaddir = fs.readdirSync, realExists = fs.existsSync;
     fs.readdirSync = function (p, ...rest) { if (String(p) === projects) walks++; return realReaddir.call(fs, p, ...rest); };
+    fs.existsSync = function (p) { if (String(p).endsWith(missing + '.jsonl')) searches++; return realExists.call(fs, p); };
     let got;
     try {
-      const t0 = Date.now();
-      got = [cf.transcriptOf(missing, projects, t0), cf.transcriptOf(missing, projects, t0 + 1000), walks,
-        cf.transcriptOf(missing, projects, t0 + cf.MISS_MS + 1), walks];
-    } finally { fs.readdirSync = realReaddir; }
-    if (JSON.stringify(got) === JSON.stringify(['', '', 1, '', 2])) ok('a transcript not found is looked for again only once a short while has passed');
-    else bad(`looking for a missing transcript gave ${JSON.stringify(got)}`);
+      const t0 = Date.now(), W = cf.MISS_MS;
+      const at = (t) => { cf.transcriptOf(missing, projects, t); return searches; };
+      got = [at(t0), at(t0 + 1000), at(t0 + W + 1), at(t0 + W + 1 + W), at(t0 + W + 1 + 2 * W + 1), walks];
+    } finally { fs.readdirSync = realReaddir; fs.existsSync = realExists; }
+    if (JSON.stringify(got) === JSON.stringify([1, 1, 2, 2, 3, 1])) {
+      ok('a missing transcript is searched for again after 10 s, then 20 s, and so on; the project folder list is read once until it changes');
+    } else bad(`looking for a missing transcript gave ${JSON.stringify(got)}`);
 
     /* One project folder that cannot be listed would make every conversation in it look gone, and their plans would be
        deleted as abandoned. */
@@ -8147,6 +8149,47 @@ console.log('\nconversations whose background sessions are busy');
         .then((r) => process.stdout.write(JSON.stringify([r.outside.size, r.launchers.size])));`], { encoding: 'utf8' }));
     if (JSON.stringify(noProc) === '[0,0]') ok('where there is no /proc, nothing is found');
     else bad(`without /proc the snapshot gave ${JSON.stringify(noProc)}`);
+    /* The environment cache, and the snapshot of the real /proc the windows share through the plan directory. */
+    const cachedRun = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+      const fs = require('fs'), path = require('path');
+      const d = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'detached.js'))});
+      const bg = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'background.js'))});
+      const proc = ${JSON.stringify(root3)}, records = ${JSON.stringify(records)};
+      let environs = 0;
+      const real = fs.promises.readFile;
+      // The two claude -p workers' environments are read on every snapshot to find their launchers; only the rest count.
+      fs.promises.readFile = function (f, ...rest) {
+        if (String(f).endsWith('environ') && !/[\\/]60[01][\\/]environ$/.test(String(f))) environs++;
+        return real.call(fs.promises, f, ...rest);
+      };
+      (async () => {
+        await d.snapshot({ proc, records });
+        const first = environs;
+        fs.writeFileSync(path.join(proc, '200', 'environ'), 'HOME=/h' + String.fromCharCode(0));
+        const second = await d.snapshot({ proc, records });
+        const reread = environs - first;
+        const stat = path.join(proc, '200', 'stat');
+        fs.writeFileSync(stat, fs.readFileSync(stat, 'utf8').replace(' 100 0 0', ' 150 0 0'));
+        const third = await d.snapshot({ proc, records });
+        const plans = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cce-share-'));
+        const sessions = path.join(plans, 'sessions');
+        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now(), outside: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
+        const shared = await bg.workingNow({ dir: plans, sessions });
+        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now() - 60000, outside: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
+        const fresh = await bg.workingNow({ dir: plans, sessions });
+        const rewritten = JSON.parse(fs.readFileSync(path.join(plans, bg.SNAPSHOT_FILE), 'utf8'));
+        fs.rmSync(plans, { recursive: true, force: true });
+        process.stdout.write(JSON.stringify({ reread, second: [...second.outside].sort(), third: [...third.outside].sort(),
+          shared: [...shared], fresh: fresh.has('ffffffff-0000-4000-8000-000000000009'), rewrittenAge: Date.now() - rewritten.at }));
+      })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 60000 }));
+    if (cachedRun.reread === 0 && JSON.stringify(cachedRun.second) === JSON.stringify([S(2), S(4), S(5)])
+        && JSON.stringify(cachedRun.third) === JSON.stringify([S(4), S(5)])) {
+      ok('a process\'s environment is read on the first snapshot only, and again when its pid is reused');
+    } else bad(`reading environments again: ${JSON.stringify(cachedRun)}`);
+    if (JSON.stringify(cachedRun.shared) === JSON.stringify(['ffffffff-0000-4000-8000-000000000009']) && cachedRun.fresh === false
+        && cachedRun.rewrittenAge >= 0 && cachedRun.rewrittenAge < 30000) {
+      ok('a /proc snapshot under 9 s old from another window is reused; an older one is replaced with a new reading');
+    } else bad(`the shared /proc snapshot: ${JSON.stringify(cachedRun)}`);
   } finally { fs.rmSync(root3, { recursive: true, force: true }); }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   if (/i && i\.state === 'idle' && bgWorking\.has\(i\.sessionId\) \? Object\.assign\(\{\}, i, \{ state: 'running' \}\)/.test(ext)
@@ -8185,10 +8228,12 @@ console.log('\nthe Steward panel');
     if (JSON.stringify(ch) === JSON.stringify([{ id: S(2), what: 'done' }, { id: S(3), what: 'waiting' }])) {
       ok('a steward is told of a turn that ended and of a conversation that started waiting, not of one starting or seen for the first time');
     } else bad(`the changes came out ${JSON.stringify(ch)}`);
-    const text = st.noticeText(ch, { [S(2)]: 'Two' });
+    const text = st.noticeText(ch, { [S(2)]: 'Two' }, { [S(3)]: { state: 'waiting for the user', doing: ['Port the reader'], asks: ['Which one?'] } });
     if (text.startsWith('Steward notice from Claude Code Plus, not a message from the user.') && text.includes(`"Two" (${S(2)}) finished its turn`)
-        && text.includes(`a conversation (${S(3)}) is waiting for the user`)) ok('the notice says it is not from the user, and names each conversation');
-    else bad(`the notice read ${JSON.stringify(text)}`);
+        && text.includes(`a conversation (${S(3)}) is waiting for the user.\n  Now: waiting for the user; doing: Port the reader\n  Question for the user: Which one?`)
+        && text.includes('steward-peek.py only if you need its latest reply')) {
+      ok('the notice says it is not from the user and gives each conversation\'s name, state, rows in progress and questions');
+    } else bad(`the notice read ${JSON.stringify(text)}`);
     const sockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-sk-'));
     // A Unix socket elsewhere, a named pipe on Windows; post() is told it is not on Windows so that it connects.
     const sock = process.platform === 'win32' ? '\\\\.\\pipe\\' + path.basename(sockDir) : path.join(sockDir, 's.sock');
@@ -8331,7 +8376,8 @@ console.log('\nthe Steward panel');
         ok('ticking makes the conversation in front their steward, a managed row shows what it is doing and its questions, and the page is updated rather than reloaded');
       } else bad(`after ticking: ${JSON.stringify(out.ticked)} ${out.second.slice(0, 200)}`);
       if (out.afterDone === 1 && out.posts[0][0] === 'uds:/x' && out.posts[0][1].includes('"Two"') && out.posts[0][1].includes('finished its turn')
-          && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')) {
+          && out.held === 1 && out.posts.length === 2 && out.posts[1][1].includes('is waiting for the user')
+          && out.posts[0][1].includes('  Now: idle; doing: Port the reader') && out.posts[0][1].includes('  Question for the user: Which one?')) {
         ok('a turn that ends in a conversation the steward is waiting on is sent to its inbox, and the next change waits for the minute between notices');
       } else bad(`the notices were ${JSON.stringify(out.posts)} (${out.afterDone}, ${out.held})`);
       const order = (h) => [...h.matchAll(/class="gname">([^<]+)</g)].map((m) => m[1]);
@@ -8581,6 +8627,15 @@ console.log('\nconversations');
     if ([...got.keys()].join() === S(21) && conv.transcriptCwd(transcripts[S(21)]) === ws) {
       ok('a stopped conversation is listed when its plan is recent, has open rows and it was started in this workspace');
     } else bad(`stopped ${[...got.keys()]}`);
+    let reads = 0;
+    const counted = (id) => { reads++; return readPlan(id); };
+    const again = conv.stoppedWithOpenRows([ws], new Set([S(25)]), { dir, readPlan: counted, find: (id) => transcripts[id] || '' });
+    const unchanged = reads;
+    fs.writeFileSync(path.join(dir, S(24) + '.json'), JSON.stringify({ nodes: openRow.concat(openRow) }));
+    const later = conv.stoppedWithOpenRows([ws], new Set([S(25)]), { dir, readPlan: counted, find: (id) => transcripts[id] || '' });
+    if (unchanged === 0 && reads === 1 && [...again.keys()].join() === S(21) && [...later.keys()].sort().join() === [S(21), S(24)].sort().join()) {
+      ok('a rescan skips plans whose file is unchanged and reads the one that was rewritten');
+    } else bad(`rescanning read ${unchanged} then ${reads} plans and listed ${[...later.keys()]}`);
     fs.rmSync(root, { recursive: true, force: true });
   }
 
@@ -8672,6 +8727,29 @@ console.log('\nconversations');
       && none.records === null && none.error) {
       ok('the running conversations come from `claude agents --json`, and an answer that is not a list is reported, not shown as nothing');
     } else bad(`listAgents: ${r.stdout} ${r.stderr}`);
+    /* Shared between windows: a list another window wrote a moment ago is used without running the binary. */
+    const shareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-agents-'));
+    const shareFile = path.join(shareDir, 'agents.json');
+    const shared = cp.spawnSync(process.execPath, ['-e', `const w = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'waiting.js'))});
+      const fs = require('fs'), file = ${JSON.stringify(shareFile)};
+      let runs = 0;
+      const fake = (bin, args, opts, cb) => { runs++; cb(null, '[{"sessionId":"ran","status":"idle"}]', ''); };
+      (async () => {
+        fs.writeFileSync(file, JSON.stringify({ at: Date.now(), records: [{ sessionId: 'shared' }] }));
+        const fresh = await w.listAgents('claude', fake, { file, ms: 20000 });
+        const r1 = runs;
+        fs.writeFileSync(file, JSON.stringify({ at: Date.now() - 30000, records: [{ sessionId: 'shared' }] }));
+        const stale = await w.listAgents('claude', fake, { file, ms: 20000 });
+        const written = JSON.parse(fs.readFileSync(file, 'utf8')).records[0].sessionId;
+        fs.writeFileSync(file, JSON.stringify({ at: Date.now() - 30000, records: [] }));
+        await w.listAgents('claude', fake, { file, ms: 20000, write: false });
+        const kept = JSON.parse(fs.readFileSync(file, 'utf8')).records.length;
+        console.log(JSON.stringify([fresh.records[0].sessionId, r1, stale.records[0].sessionId, runs, written, kept]));
+      })();`], { encoding: 'utf8' });
+    fs.rmSync(shareDir, { recursive: true, force: true });
+    if (shared.stdout.trim() === JSON.stringify(['shared', 0, 'ran', 2, 'ran', 0])) {
+      ok('a shared list of running conversations under 20 s old is reused without running claude agents; an older one is refreshed, and a window that may not write leaves the file alone');
+    } else bad(`the shared list of running conversations: ${shared.stdout} ${shared.stderr}`);
   }
   {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cce-wait-home-'));
