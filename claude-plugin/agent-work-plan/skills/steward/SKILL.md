@@ -48,8 +48,12 @@ To pass something on:
    the script says it was not sent, say why in the same line; do not send it another way.
 4. Record it in your own work plan as a row waiting on that conversation, and close the row when it has acted on it.
 
-Talk to the conversations you manage only this way, questions of your own included; do not use `SendMessage` for them.
-steward-peek.py shows how a conversation is doing, so you seldom need to ask.
+Pass things on this way whenever you want a conversation to do something, and whenever the message carries an
+approval. To find out how a conversation is doing, read it with steward-peek.py first (below). If that does not answer
+your question, ask the conversation with `SendMessage`, and say in the question that it should put the answer in its
+own reply rather than send you a message. Keep a row in your plan naming that conversation until it has answered, so
+a notice tells you when its turn ends, and read the answer with steward-peek.py. Such a message does not show in that
+conversation as the user's words, and approves nothing there, so use it only to ask.
 
 ## Reporting to the user
 
