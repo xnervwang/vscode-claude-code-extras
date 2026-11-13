@@ -8284,7 +8284,7 @@ console.log('\nthe Steward panel');
       const v = sv.create(vscode, { activeChat: () => front, freshAgents: async () => { asked++; return { records }; }, readPlan: (id) => plans[id] || null,
         titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(),
         reveal: async (id) => { revealed.push(id); return true; }, focusWindow: () => { focused++; },
-        shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, enabled: () => true, log: (m) => logs.push(m),
+        shownHere: (id) => id === ${JSON.stringify(S(1))}, canWrite: () => writable, canShare: () => true, enabled: () => true, log: (m) => logs.push(m),
         home: '/', dir: ${JSON.stringify(path.join(root, 'plans2'))}, isBackground: (id) => id === ${JSON.stringify(S(5))},
         records: () => [{ sessionId: ${JSON.stringify(S(1))}, messagingSocketPath: 'uds:/x' }], post: async (a, t) => { posts.push([a, t]); return true; },
         windowName: () => 'proj-a', windowFolders: () => ['/w'], shownList: () => [${JSON.stringify(S(1))}, ${JSON.stringify(S(2))}, ${JSON.stringify(S(6))}],
@@ -8323,6 +8323,13 @@ console.log('\nthe Steward panel');
         writable = false;
         await v._onMessage({ type: 'none' });
         const stillTicked = st.read(${JSON.stringify(path.join(root, 'plans2'))});
+        /* A window whose build was replaced still takes relay requests for the conversations it shows. */
+        const rq = require('path').join(${JSON.stringify(path.join(root, 'plans2'))}, 'relay');
+        require('fs').mkdirSync(rq, { recursive: true });
+        require('fs').writeFileSync(rq + '/aaaaaaaa-0000-4000-8000-000000000009.json',
+          JSON.stringify({ id: 'aaaaaaaa-0000-4000-8000-000000000009', steward: 'nobody', to: ${JSON.stringify(S(1))}, text: 'hi', at: Date.now() }));
+        await v._takeRelays();
+        const replacedTook = require('fs').existsSync(rq + '/aaaaaaaa-0000-4000-8000-000000000009.result.json');
         writable = true;
         await v._onMessage({ type: 'none' });
         const cleared = st.read(${JSON.stringify(path.join(root, 'plans2'))});
@@ -8359,7 +8366,7 @@ console.log('\nthe Steward panel');
         const freedPage = latest();
         const every = { on: everyOn, lockedPage, locked, grown, off: everyOff, freedPage };
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump, every }));
+        process.stdout.write(JSON.stringify({ replacedTook, first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump, every }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`;
     if (process.env.CCE_DUMP_PANEL) fs.writeFileSync(process.env.CCE_DUMP_PANEL, PANEL_SCRIPT);
     const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', PANEL_SCRIPT], { encoding: 'utf8', timeout: 30000 }));
@@ -8398,6 +8405,11 @@ console.log('\nthe Steward panel');
       else bad(`a hidden panel with no steward still listed conversations ${out.idle} time(s)`);
       if (out.stillTicked[S(1)] && out.cleared[S(1)] === undefined) ok('a window that may not write shared files changes nothing; Clear empties the list');
       else bad(`clearing gave ${JSON.stringify([out.stillTicked, out.cleared])}`);
+      if (out.replacedTook) ok('a window running a replaced build still answers relay requests for the conversations it shows');
+      else bad('a window running a replaced build left a relay request untaken');
+      const extSrc = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+      if (/canShare: \(\) => !removed\(\) && !uninstalling\(\)/.test(extSrc)) ok('and extension.js lets such a window publish its entry and take requests');
+      else bad('extension.js does not give the Steward panel a canShare that holds in a replaced window');
       if (/1 ticked conversation is not open in any\s+VS Code window/.test(out.away) && !names(out.away).includes(S(7))
           && JSON.stringify(out.dropped) === JSON.stringify([S(3)]) && JSON.stringify(out.everyShown) === JSON.stringify([S(2), S(3), S(6)].sort())) {
         ok('a ticked conversation open in no window is counted, not listed, and can be unticked; Select all ticks only the listed ones');

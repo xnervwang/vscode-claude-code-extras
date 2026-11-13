@@ -236,7 +236,9 @@ function shell(list, nonce) {
 /*
  * deps: activeChat(), freshAgents() -> { records }, readPlan(id), titles(s), since(s), live(), unread(), reveal(id),
  * shownHere(id) -> whether this window shows that conversation's panel, canWrite() -> whether this window may write
- * shared files, enabled(), log(message), home, dir (the plan directory), windowName(), windowFolders() and shownList()
+ * shared files, canShare() -> whether it may still publish its own entry and take relay requests (true also in a window
+ * whose build has been replaced, which keeps showing its conversations until it is reloaded), enabled(), log(message),
+ * home, dir (the plan directory), windowName(), windowFolders() and shownList()
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
  * the live session records, alive(pid), post(address, text) in place of stewards.post, changed(), called once the
  * table of stewards has been rewritten here, focusWindow(), which brings this window to the front, transcriptOf(id), and
@@ -245,6 +247,7 @@ function shell(list, nonce) {
 function create(vscode, deps) {
   deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
     windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {}, transcriptOf,
+    canShare: () => deps.canWrite(),
     deliver: () => Promise.resolve({ outcome: 'notReceived', reason: 'this window cannot type into a conversation' }) }, deps);
   let view = null, timer = 0, busy = false, last = new Map(), lastFront = '', shown = null;
   const states = new Map();
@@ -285,7 +288,7 @@ function create(vscode, deps) {
   const own = path.join(deps.dir, WINDOWS_DIR, process.pid + '.json');
   let published = '', publishedAt = 0;
   const publish = (now = Date.now()) => {
-    if (!deps.canWrite()) return;
+    if (!deps.canShare()) return;
     const entry = { pid: process.pid, name: deps.windowName(), folders: deps.windowFolders(), sessions: deps.shownList() };
     const text = JSON.stringify(entry);
     if (text === published && now - publishedAt < WINDOW_STALE_MS / 2) return;
@@ -434,7 +437,7 @@ function create(vscode, deps) {
      pass also looks, in case the watch missed one or the folder did not exist yet when the watch was set. */
   let relayWatch = null, relaying = false;
   const takeRelays = async () => {
-    if (relaying || !deps.canWrite()) return;
+    if (relaying || !deps.canShare()) return;
     relaying = true;
     try {
       for (const r of await relay.take(deps.dir, { shownHere: deps.shownHere, stewards: () => stewards.read(deps.dir),
