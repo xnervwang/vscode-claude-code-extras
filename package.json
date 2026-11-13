@@ -267,6 +267,11 @@
           "default": true,
           "markdownDescription": "Reopen the Claude Code tabs that were open when the window closed but that VS Code did not restore, as can happen after the window lost its remote connection. Tabs you closed while connected stay closed. Takes effect the next time the window starts."
         },
+        "claudeCodePlus.loadRestoredTabs": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "After a reload, or when the window opens, load the Claude Code conversations in background tabs too, instead of each one when you first click its tab. Each tab comes to the front for a moment, then the tab you had in front comes back."
+        },
         "claudeCodePlus.show.deleteArchived": {
           "type": "boolean",
           "default": true,

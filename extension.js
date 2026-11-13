@@ -46,6 +46,7 @@ const sessionPins = require('./src/sessionpins');
 const sessionColors = require('./src/sessioncolors');
 const bgSessions = require('./src/bgsessions');
 const droppedTabs = require('./src/droppedtabs');
+const loadTabs = require('./src/load-tabs');
 const deleteSession = require('./src/deletesession');
 const recentClosed = require('./src/recentclosed');
 const ADAPTERS = require('./src/adapters');
@@ -76,6 +77,7 @@ const LATENCY_ON_SETTING = PREFIX + 'recordOpenLatency';
 const PINS_SETTING = PREFIX + 'sessionPins';
 const PIN_MARGIN_SETTING = PREFIX + 'sessionPinsMarginDays';
 const REOPEN_SETTING = PREFIX + 'reopenDroppedTabs';
+const LOAD_TABS_SETTING = PREFIX + 'loadRestoredTabs';
 const RECENT_SETTING = PREFIX + 'recentClosedSessions';
 const HIDE_BG_SETTING = PREFIX + 'hideBackgroundSessions';
 const WORK_PLAN_SETTING = PREFIX + 'workPlan';
@@ -1102,8 +1104,7 @@ function start(context, log, renamed, handing = false) {
    * in it, for five minutes once a new window connects, and then ends them. So such a tab is looked at again for a while,
    * and opened once its conversation is running nowhere.
    */
-  const FOCUS_GROUP = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth']
-    .map((n) => `workbench.action.focus${n}EditorGroup`);
+  const FOCUS_GROUP = loadTabs.FOCUS_GROUP;
   const DROPPED_WAIT_MS = 10 * 60000, DROPPED_RECHECK_MS = 15000;
   const isClaudeTab = (t) => t.input instanceof vscode.TabInputWebview && String(t.input.viewType).includes('claudeVSCodePanel');
   const claudeLabels = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs.filter(isClaudeTab).map((t) => t.label));
@@ -1157,7 +1158,22 @@ function start(context, log, renamed, handing = false) {
       else if (waiting.length) log.appendLine(`Not reopened, still running in another window: ${waiting.map((t) => `"${t.title}"`).join(', ')}`);
     }, DROPPED_RECHECK_MS);
   }, 5000);
+  /* claudeCodePlus.loadRestoredTabs (src/load-tabs.js): run once per window start, a few seconds after the check for
+     dropped tabs above. */
+  let loadTries = 0, loadTimer = setTimeout(function loadRestored() {
+    loadTimer = undefined;
+    if (!Array.isArray(globalThis.__cceTabsAtStart)) {
+      if (++loadTries < 45) loadTimer = setTimeout(loadRestored, 2000);
+      return;
+    }
+    if (!enabled() || removed() || cfg().get(LOAD_TABS_SETTING, false) !== true) return;
+    loadTabs.loadAll({ groups: vscode.window.tabGroups.all, front: vscode.window.tabGroups.activeTabGroup, isClaudeTab,
+      exec: (...a) => vscode.commands.executeCommand(...a), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) })
+      .then((n) => { if (n) log.appendLine(`Loaded ${n} Claude Code tab(s) VS Code restored without loading them`); },
+        (e) => log.appendLine('loading restored Claude Code tabs: ' + (e && e.message)));
+  }, 8000);
   context.subscriptions.push({ dispose: () => {
+    if (loadTimer) clearTimeout(loadTimer);
     if (droppedTimer) clearTimeout(droppedTimer);
     if (globalThis.__cceTabsAtStart) delete globalThis.__cceTabsAtStart;
     if (globalThis.__cceSessionsShown) delete globalThis.__cceSessionsShown;

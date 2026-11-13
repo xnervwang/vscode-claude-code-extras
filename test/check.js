@@ -8199,6 +8199,37 @@ console.log('\nconversations whose background sessions are busy');
   } else bad('extension.js does not mark conversations whose background sessions are busy');
 }
 
+/* src/load-tabs.js against stand-in tab groups. */
+console.log('\nloading restored tabs');
+{
+  const lt = require('../src/load-tabs');
+  const tab = (claude, active) => ({ claude, isActive: active });
+  const groups = [
+    { viewColumn: 1, tabs: [tab(true, false), tab(false, true), tab(true, false)] },
+    { viewColumn: 2, tabs: [tab(false, false), tab(true, true)] },
+    { viewColumn: 3, tabs: [tab(true, false), tab(true, true)] },
+  ];
+  const ran = [];
+  const ok1 = (async () => {})();
+  void ok1;
+  const exec = async (...a) => { ran.push(a.join(' ')); };
+  const done = { n: null };
+  lt.loadAll({ groups, front: groups[1], isClaudeTab: (t) => t.claude, exec, sleep: async () => {}, stepMs: 0 }).then((n) => { done.n = n; });
+  setImmediate(() => {
+    const want = ['workbench.action.focusFirstEditorGroup', 'workbench.action.openEditorAtIndex 0', 'workbench.action.openEditorAtIndex 2',
+      'workbench.action.openEditorAtIndex 1', 'workbench.action.focusThirdEditorGroup', 'workbench.action.openEditorAtIndex 0',
+      'workbench.action.openEditorAtIndex 1', 'workbench.action.focusSecondEditorGroup'];
+    if (done.n === 3 && JSON.stringify(ran) === JSON.stringify(want)) {
+      ok('each background Claude Code tab is shown once, group by group, then each group shows its old front tab and focus goes back where it was');
+    } else bad(`loading restored tabs ran ${JSON.stringify(ran)} and showed ${done.n}`);
+  });
+  const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const decl = require('../package.json').contributes.configuration.properties['claudeCodePlus.loadRestoredTabs'];
+  if (decl && decl.default === false && /cfg\(\)\.get\(LOAD_TABS_SETTING, false\) !== true\) return;/.test(ext)) {
+    ok('it runs only with claudeCodePlus.loadRestoredTabs on, which is off by default');
+  } else bad('claudeCodePlus.loadRestoredTabs is not declared off by default, or extension.js does not check it before loading tabs');
+}
+
 /* ── the Steward panel ──
    Which conversations a steward manages is kept in stewards.json (src/stewards.js), written only by the panel
    (src/steward-view.js); the plugin's steward.py tells the steward at each turn, steward-peek.py reads one conversation

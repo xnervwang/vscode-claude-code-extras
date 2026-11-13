@@ -893,6 +893,37 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       if (!wasOn) await focus.click();
     });
 
+    /* VS Code creates a restored tab's page only when the tab is first shown. With claudeCodePlus.loadRestoredTabs on, a
+       reload loads the Claude Code tab behind the one in front without a click. */
+    await step('restored tabs', async () => {
+      const [front, behind] = threads;
+      const setLoad = (v) => call(`await vscode.workspace.getConfiguration('claudeCodePlus').update('loadRestoredTabs', arg, vscode.ConfigurationTarget.Global); return true;`, v);
+      const loaded = (t) => conversation(t, 1000).then((f) => !!f, () => false);
+      const reloadAndWait = async () => {
+        await w.reload();
+        await until(async () => { const st = await patchState(); return st && st.active && st; }, 60000, 1000);
+        await until(() => loaded(front), 60000, 1000);
+      };
+      await exec('workbench.action.closeAllEditors');
+      await exec('workbench.action.closeAuxiliaryBar');
+      await exec('claude-vscode.editor.open', behind.id);
+      await sleep(1500);
+      await exec('claude-vscode.editor.open', front.id);
+      await sleep(1500);
+      await reloadAndWait();
+      await sleep(10000);
+      const without = await loaded(behind);
+      await setLoad(true);
+      await reloadAndWait();
+      const withIt = await until(() => loaded(behind), 60000, 1000);
+      const inFront = (await claudeTabs()).find((t) => t.active);
+      check(!without && !!withIt && !!inFront && titled(inFront.label, front.title),
+        'a reload leaves a Claude Code tab behind another unloaded; with claudeCodePlus.loadRestoredTabs on it is loaded, and the tab in front stays in front',
+        { without, withIt: !!withIt, tabs: await claudeTabs() });
+      await shot('restored-tabs-loaded');
+      await setLoad(undefined);
+    });
+
     await step('commands', async () => {
       await exec('notifications.clearAll');
       await exec('claudeCodePlus.status');
