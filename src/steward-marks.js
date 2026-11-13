@@ -18,8 +18,9 @@ const stewards = require('./stewards');
 const BELL = '\u{1F6CE}\uFE0F';
 const ENDS = [' ' + BELL, ' \u{1F6CE}'];
 
+/* n: how many conversations it manages, or 'all'. */
 function label(n) {
-  return `Steward of ${n} conversation${n === 1 ? '' : 's'}`;
+  return n === 'all' ? 'Steward of all conversations' : `Steward of ${n} conversation${n === 1 ? '' : 's'}`;
 }
 
 /** `title` without a bell this module put at its end. */
@@ -34,6 +35,9 @@ function stewardTitle(custom, n) {
   const own = withoutBell(String(custom || '').trim()).trim();
   return (own || label(n)) + ' ' + BELL;
 }
+
+/* The count label() shows for a table entry: 'all', or how many it manages. */
+const size = (t) => (t.all ? 'all' : t.manages.length);
 
 /* After a conversation stops being a steward, its own title is sent for this long, so every panel restores it. */
 const UNDO_MS = 10 * 60000;
@@ -55,7 +59,7 @@ function marked(entries, table, marks = new Map(), now = Date.now(), named = () 
     const t = id && table && table[id];
     if (t) {
       marks.set(id, 0);
-      return Object.assign({}, e, { customTitle: stewardTitle(named(id), t.manages.length) });
+      return Object.assign({}, e, { customTitle: stewardTitle(named(id), size(t)) });
     }
     if (!id || !marks.has(id)) return e;
     if (!marks.get(id)) marks.set(id, now);
@@ -78,7 +82,7 @@ function tableReader(dir) {
 
 /*
  * Computes a tab's title. current: the title shown now. kept: what this function last set ({ original, shown }), or
- * null. custom: the user's name for the conversation. n: how many conversations it manages, 0 if none. own: the
+ * null. custom: the user's name for the conversation. n: what size() gives, 0 if it is not a steward. own: the
  * conversation's own title. Returns { title, kept }. A current title other than the one last set came from Claude Code
  * and becomes the one to restore, unless it is a steward title itself: the panel can copy the list's title to the tab.
  */
@@ -90,4 +94,4 @@ function tabTitle(current, kept, custom, n, own) {
   return { title: shown, kept: { original, shown } };
 }
 
-module.exports = { BELL, label, withoutBell, stewardTitle, marked, tableReader, tabTitle };
+module.exports = { BELL, label, size, withoutBell, stewardTitle, marked, tableReader, tabTitle };

@@ -8296,8 +8296,25 @@ console.log('\nthe Steward panel');
         require('fs').writeFileSync(mine, JSON.stringify({ session: ${JSON.stringify(S(2))}, at: Date.now() - 60000 }));
         const stale = await v._takeRequest();
         const jump = { opened, asked: askedFor.session, took, stale, left: require('fs').existsSync(mine), focused, revealed };
+        const D2 = ${JSON.stringify(path.join(root, 'plans2'))}, S1 = ${JSON.stringify(S(1))};
+        await v._onMessage({ type: 'every', on: true });
+        const everyOn = st.read(D2)[S1];
+        const lockedPage = latest();
+        await v._onMessage({ type: 'toggle', id: ${JSON.stringify(S(2))}, on: false });
+        await v._onMessage({ type: 'none' });
+        const locked = st.read(D2)[S1].manages.slice().sort();
+        records = records.concat([{ sessionId: ${JSON.stringify(S(8))}, kind: 'interactive', cwd: '/w/h', name: 'Eight', status: 'idle' }]);
+        require('fs').writeFileSync(wdir + '/4242.json', JSON.stringify({ pid: 4242, at: Date.now(), name: 'proj-b', folders: ['/w/c'],
+          sessions: [${JSON.stringify(S(3))}, ${JSON.stringify(S(8))}] }));
+        st.setManaged(${JSON.stringify(S(3))}, [${JSON.stringify(S(2))}], {}, { dir: D2 });
+        await v._pass();
+        const grown = st.read(D2)[S1].manages.slice().sort();
+        await v._onMessage({ type: 'every', on: false });
+        const everyOff = st.read(D2)[S1];
+        const freedPage = latest();
+        const every = { on: everyOn, lockedPage, locked, grown, off: everyOff, freedPage };
         v.dispose();
-        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump }));
+        process.stdout.write(JSON.stringify({ first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump, every }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`;
     if (process.env.CCE_DUMP_PANEL) fs.writeFileSync(process.env.CCE_DUMP_PANEL, PANEL_SCRIPT);
     const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', PANEL_SCRIPT], { encoding: 'utf8', timeout: 30000 }));
@@ -8344,6 +8361,17 @@ console.log('\nthe Steward panel');
           && j.focused === 1 && j.revealed.join() === [S(1), S(2)].join()) {
         ok('opening a conversation shows it here when this window has it, else asks the window that has it, which brings it up and comes to the front; a stale request is dropped');
       } else bad(`opening conversations gave ${JSON.stringify(j)}`);
+      const e = out.every, rowBoxes = (h) => [...h.matchAll(/<input type="checkbox" data-id="[^"]+"[^>]*>/g)].map((m) => m[0]);
+      if (e.on && e.on.all === true && JSON.stringify(e.on.manages.slice().sort()) === JSON.stringify([S(2), S(3), S(6)].sort())
+          && /data-every="1" checked/.test(e.lockedPage) && rowBoxes(e.lockedPage).length && rowBoxes(e.lockedPage).every((b) => /\bchecked\b/.test(b) && /\bdisabled\b/.test(b))
+          && JSON.stringify(e.locked) === JSON.stringify([S(2), S(3), S(6)].sort())) {
+        ok('the All box ticks everything listed and locks it: unticking a row or pressing Clear does nothing');
+      } else bad(`turning All on gave ${JSON.stringify([e.on, e.locked, rowBoxes(e.lockedPage)])}`);
+      if (JSON.stringify(e.grown) === JSON.stringify([S(2), S(6), S(8)].sort()) && e.off && e.off.all === false
+          && JSON.stringify(e.off.manages.slice().sort()) === JSON.stringify([S(2), S(6), S(8)].sort())
+          && !/data-every="1" checked/.test(e.freedPage) && rowBoxes(e.freedPage).every((b) => !/\bdisabled\b/.test(b))) {
+        ok('then a conversation opened later is added and one that became a steward is dropped; turning All off keeps the ticks and frees the boxes');
+      } else bad(`with All on, later: ${JSON.stringify([e.grown, e.off])}`);
     }
 
     /* Which managed conversations a steward's plan is waiting on: named in an open row, by title or by id. */
@@ -8386,6 +8414,18 @@ console.log('\nthe Steward panel');
         ok('a steward\'s tab says so, follows the count, goes back to its own title when nothing is ticked, also when the panel '
           + 'put the steward\'s title there, and a new title from Claude Code is the one it goes back to');
       } else bad(`the tab titles were ${JSON.stringify([a, b, c, d, e])}`);
+      const allDir = path.join(root, 'plans-all');
+      st.setManaged(S(1), [], {}, { dir: allDir, every: true });
+      const kept = st.read(allDir)[S(1)];
+      st.setManaged(S(1), [S(2)], {}, { dir: allDir });
+      const still = st.read(allDir)[S(1)].all;
+      const whole = sm.marked([{ sessionId: S(1), summary: 'x' }], st.read(allDir), new Map(), 0)[0].customTitle;
+      const allTab = sm.tabTitle('x', null, '', sm.size(st.read(allDir)[S(1)]));
+      st.setManaged(S(1), [], {}, { dir: allDir, every: false });
+      if (kept && kept.all === true && kept.manages.length === 0 && still === true && whole === 'Steward of all conversations ' + sm.BELL
+          && allTab.title === whole && st.read(allDir)[S(1)] === undefined) {
+        ok('a steward with "all" set stays in the table with nothing open, keeps "all" when its list is rewritten, and is titled "Steward of all conversations"');
+      } else bad(`managing all: ${JSON.stringify([kept, still, whole, allTab, st.read(allDir)])}`);
     }
 
     /* The plugin's two scripts. */

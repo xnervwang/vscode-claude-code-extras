@@ -960,7 +960,7 @@ function start(context, log, renamed, handing = false) {
       if (typeof sessionId === 'string' && sessionId) {
         const t = enabled() && !removed() ? stewardTable()[sessionId.toLowerCase()] : null;
         const named = t || stewardMarks.withoutBell(panel.title) !== panel.title ? readTitles.titles({ sessionId }) || {} : {};
-        const next = stewardMarks.tabTitle(panel.title, stewardTabs.get(panel) || null, named.custom, t ? t.manages.length : 0,
+        const next = stewardMarks.tabTitle(panel.title, stewardTabs.get(panel) || null, named.custom, t ? stewardMarks.size(t) : 0,
           named.custom || named.ai);
         if (next.kept) stewardTabs.set(panel, next.kept); else stewardTabs.delete(panel);
         if (panel.title !== next.title) panel.title = next.title;

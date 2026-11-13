@@ -796,6 +796,21 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         await frame.locator('button[data-act="none"]').click();
         const back = await until(async () => (await claudeTabs()).find((x) => x.active && titled(x.label, front.title)), 10000, 300);
         check(!!back, 'and clearing gives the tab its own title back', await claudeTabs());
+        await frame.locator('input[data-every]').click();
+        const every = await until(() => {
+          try { const t = JSON.parse(fs.readFileSync(file, 'utf8')).stewards[front.id]; return t && t.all === true && t.manages.length ? t : null; } catch (_) { return null; }
+        }, 10000, 300);
+        const locked = frame ? await until(() => frame.evaluate(() => {
+          const rows = [...document.querySelectorAll('input[data-id]')];
+          return rows.length && rows.every((b) => b.checked && b.disabled) ? rows.length : 0;
+        }), 10000, 300) : 0;
+        const allTab = await until(async () => (await claudeTabs()).find((x) => x.label === 'Steward of all conversations \u{1F6CE}\uFE0F'), 10000, 300);
+        check(!!every && !!locked && !!allTab, 'the All box in the panel page reaches the extension: rows locked on, tab renamed for all',
+          { every, locked, tabs: await claudeTabs() });
+        await frame.locator('input[data-every]').click();
+        await until(() => frame.evaluate(() => [...document.querySelectorAll('input[data-id]')].every((b) => !b.disabled)), 10000, 300);
+        await frame.locator('button[data-act="none"]').click();
+        await until(async () => (await claudeTabs()).find((x) => x.active && titled(x.label, front.title)), 10000, 300);
       }
       /* The link a steward writes for a conversation: clicked in a panel, it reaches this extension, which brings that
          conversation's tab to the front. */

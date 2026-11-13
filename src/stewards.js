@@ -12,7 +12,11 @@
  * change what it manages. One conversation can be managed by several stewards.
  *
  *   { "version": 1, "stewards": { "<steward session id>": { "manages": ["<session id>", ...],
- *                                                          "names": { "<session id>": "title" }, "at": <ms> } } }
+ *                                                          "names": { "<session id>": "title" }, "at": <ms>,
+ *                                                          "all": true } } }
+ *
+ * "all" is there only when the user ticked "All, including new ones": the panel in the steward's window then keeps
+ * "manages" equal to every conversation open in a VS Code window except other stewards (src/steward-view.js).
  *
  * The titles are the ones the panel showed when the file was last written; the hook prints them, since it has no other
  * cheap way to name a conversation that is not running.
@@ -31,7 +35,8 @@ const POST_TIMEOUT_MS = 3000;
 const ids = (list, not) => [...new Set((Array.isArray(list) ? list : [])
   .filter((x) => typeof x === 'string' && SESSION.test(x) && x !== not).map((x) => x.toLowerCase()))].slice(0, MAX_MANAGED);
 
-/** steward id -> { manages, names, at }, leaving out anything malformed and stewards that manage nothing. */
+/** steward id -> { manages, names, at, all }, leaving out anything malformed and stewards that manage nothing and are
+    not set to manage all. */
 function read(dir = planDir()) {
   let d = null;
   try { d = JSON.parse(fs.readFileSync(path.join(dir, FILE), 'utf8')); } catch (_) { /* none yet, or caught mid-write */ }
@@ -39,36 +44,42 @@ function read(dir = planDir()) {
   const all = d && d.stewards && typeof d.stewards === 'object' ? d.stewards : {};
   for (const [id, v] of Object.entries(all)) {
     if (!SESSION.test(id) || !v || typeof v !== 'object') continue;
-    const manages = ids(v.manages, id.toLowerCase());
-    if (!manages.length) continue;
+    const manages = ids(v.manages, id.toLowerCase()), every = v.all === true;
+    if (!manages.length && !every) continue;
     const names = {};
     for (const m of manages) if (v.names && typeof v.names[m] === 'string') names[m] = v.names[m].slice(0, MAX_NAME);
-    out[id.toLowerCase()] = { manages, names, at: typeof v.at === 'number' && isFinite(v.at) ? v.at : 0 };
+    out[id.toLowerCase()] = { manages, names, at: typeof v.at === 'number' && isFinite(v.at) ? v.at : 0, all: every };
   }
   return out;
 }
 
-function write(all, dir) {
+function write(table, dir) {
+  const out = {};
+  for (const [id, v] of Object.entries(table)) {
+    out[id] = { manages: v.manages, names: v.names, at: v.at };
+    if (v.all) out[id].all = true;
+  }
   fs.mkdirSync(dir, { recursive: true });
-  writeAtomic(path.join(dir, FILE), JSON.stringify({ version: 1, stewards: all }, null, 1) + '\n');
+  writeAtomic(path.join(dir, FILE), JSON.stringify({ version: 1, stewards: out }, null, 1) + '\n');
 }
 
 /**
- * Sets what `steward` manages to `list`, with the titles in `names`; an empty list removes it from the table. Returns
- * the whole table as written.
+ * Sets what `steward` manages to `list`, with the titles in `names`. `every` turns "all" on or off; without it the
+ * setting stays. An empty list removes the steward from the table unless "all" is on. Returns the table as written.
  */
-function setManaged(steward, list, names = {}, { dir = planDir(), now = Date.now() } = {}) {
+function setManaged(steward, list, names = {}, { dir = planDir(), now = Date.now(), every } = {}) {
   const all = read(dir);
   if (typeof steward !== 'string' || !SESSION.test(steward)) return all;
   const id = steward.toLowerCase();
   const manages = ids(list, id);
-  if (manages.length) {
+  const keepAll = typeof every === 'boolean' ? every : !!(all[id] && all[id].all);
+  if (manages.length || keepAll) {
     const kept = {};
     for (const m of manages) {
       const t = names && typeof names[m] === 'string' ? names[m] : all[id] && all[id].names[m];
       if (typeof t === 'string' && t) kept[m] = t.slice(0, MAX_NAME);
     }
-    all[id] = { manages, names: kept, at: now };
+    all[id] = { manages, names: kept, at: now, all: keepAll };
   } else delete all[id];
   write(all, dir);
   return all;

@@ -144,7 +144,7 @@ function body(model) {
   const now = Date.now();
   const row = (c) => `
     <li class="row ${c.managed ? 'managed' : ''}">
-      <input type="checkbox" data-id="${esc(c.sessionId)}" ${c.managed ? 'checked' : ''} title="Managed by this conversation">
+      <input type="checkbox" data-id="${esc(c.sessionId)}" ${c.managed ? 'checked' : ''} ${model.every ? 'disabled' : ''} title="Managed by this conversation">
       <span class="dot ${esc(c.state)}" title="${esc(STATE_TEXT[c.state] || c.state)}"></span>
       <a href="#" class="name" data-open="${esc(c.sessionId)}" title="${esc(c.cwd)}">${esc(c.title)}</a>
       ${c.managed ? `<span class="doing">${esc(c.doing.join(' · ') || (c.running ? STATE_TEXT[c.state] : 'stopped'))}</span>
@@ -155,7 +155,7 @@ function body(model) {
     const on = g.rows.filter((c) => c.managed).length;
     return `
     <div class="group">
-      <label class="ghead"><input type="checkbox" data-group="${esc(g.key)}" ${on && on === g.rows.length ? 'checked' : ''}
+      <label class="ghead"><input type="checkbox" data-group="${esc(g.key)}" ${on && on === g.rows.length ? 'checked' : ''} ${model.every ? 'disabled' : ''}
         ${on && on < g.rows.length ? 'data-mixed="1"' : ''} title="Every conversation in ${esc(g.name)}">
         <span class="gname">${esc(g.name)}</span><span class="count">${on}/${g.rows.length}</span></label>
       <ul>${g.rows.map(row).join('')}</ul>
@@ -167,7 +167,9 @@ function body(model) {
   return !model.front
     ? '<p class="empty">Open a Claude Code conversation. The conversations ticked here are the ones it manages.</p>'
     : `<div class="head"><span>Managed by <b>${esc(model.front.title)}</b>: ${model.managed}</span>
-         <button data-act="all">Select all</button><button data-act="none">Clear</button></div>${away}
+         <label class="every" title="Also ticks conversations opened later. Other stewards are never ticked.">
+           <input type="checkbox" data-every="1" ${model.every ? 'checked' : ''}> All, including new ones</label>
+         <button data-act="all" ${model.every ? 'disabled' : ''}>Select all</button><button data-act="none" ${model.every ? 'disabled' : ''}>Clear</button></div>${away}
        ${model.groups.length ? model.groups.map(group).join('') : '<p class="empty">No other Claude Code conversation is open in a VS Code window.</p>'}`;
 }
 
@@ -184,6 +186,8 @@ function shell(list, nonce) {
   .head span { flex: 1 1 auto; opacity: 0.85; }
   button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 2px 8px; cursor: pointer; }
   button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .every { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   ul { list-style: none; margin: 0; padding: 0; }
   .row { display: flex; align-items: center; gap: 6px; padding: 2px 0; white-space: nowrap; }
   .row:not(.managed) { opacity: 0.7; }
@@ -212,7 +216,8 @@ function shell(list, nonce) {
   vscode.postMessage({ type: 'ready' });
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (t.matches('input[data-group]')) vscode.postMessage({ type: 'group', key: t.dataset.group, on: t.checked });
+    if (t.matches('input[data-every]')) vscode.postMessage({ type: 'every', on: t.checked });
+    else if (t.matches('input[data-group]')) vscode.postMessage({ type: 'group', key: t.dataset.group, on: t.checked });
     else if (t.matches('input[type=checkbox]')) vscode.postMessage({ type: 'toggle', id: t.dataset.id, on: t.checked });
     else if (t.dataset.open) { e.preventDefault(); vscode.postMessage({ type: 'open', id: t.dataset.open }); }
     else if (t.dataset.act) vscode.postMessage({ type: t.dataset.act });
@@ -237,6 +242,7 @@ function create(vscode, deps) {
   const model = (all, front) => {
     const table = stewards.read(deps.dir);
     const mine = new Set(front && table[front] ? table[front].manages : []);
+    const every = !!(front && table[front] && table[front].all);
     const wins = windows();
     const open = (id) => wins.some((w) => w.sessions.includes(id));
     const rows = [...all.values()].filter((c) => c.sessionId !== front && open(c.sessionId))
@@ -248,7 +254,8 @@ function create(vscode, deps) {
     // The conversation in front may not be in the list yet: `claude agents --json` is read at most every half minute.
     const title = self ? self.title : front ? conversations.claudeTitle({ sessionId: front, name: '', cwd: '' },
       deps.titles({ sessionId: front }), () => deps.readPlan(front)) : '';
-    return { front: front ? { id: front, title } : null, rows, groups, managed: mine.size, hidden: hidden.length, hiddenIds: hidden };
+    return { front: front ? { id: front, title } : null, rows, groups, managed: mine.size, hidden: hidden.length, hiddenIds: hidden,
+      every };
   };
 
   /* This window's entry in the windows folder, written when what it shows changes and once a minute besides. */
@@ -280,6 +287,30 @@ function create(vscode, deps) {
         sessions: Array.isArray(d.sessions) ? d.sessions : [] });
     }
     return out;
+  };
+
+  /* The list for a steward with "all" set: every conversation open in a window, except itself and other stewards. */
+  const everyIds = (steward, table) => {
+    const wins = windows();
+    return [...last.keys()].filter((id) => id !== steward && !table[id] && wins.some((w) => w.sessions.includes(id)));
+  };
+  const titlesOf = (list) => {
+    const names = {};
+    for (const id of list) if (last.get(id)) names[id] = last.get(id).title;
+    return names;
+  };
+  /* For each steward with "all" set whose conversation is open in this window, rewrites its list to match everyIds. */
+  const syncEvery = () => {
+    const table = stewards.read(deps.dir);
+    let changed = false;
+    for (const [steward, t] of Object.entries(table)) {
+      if (!t.all || !deps.shownHere(steward)) continue;
+      const want = everyIds(steward, table);
+      if (want.length === t.manages.length && want.every((id) => t.manages.includes(id))) continue;
+      stewards.setManaged(steward, want, titlesOf(want), { dir: deps.dir, every: true });
+      changed = true;
+    }
+    if (changed) deps.changed();
   };
 
   /* `shown` is the list the page has, or null when it needs the whole page. */
@@ -386,6 +417,7 @@ function create(vscode, deps) {
         const names = {};
         for (const [id, c] of last) names[id] = c.title;
         stewards.rename(names, { dir: deps.dir });
+        syncEvery();
       }
       render();
       await notify();
@@ -404,6 +436,15 @@ function create(vscode, deps) {
     if (!m || !front || !deps.canWrite()) return;
     const table = stewards.read(deps.dir);
     const mine = new Set(table[front] ? table[front].manages : []);
+    if (m.type === 'every') {
+      const list = m.on ? everyIds(front, table) : [...mine];
+      stewards.setManaged(front, list, titlesOf(list), { dir: deps.dir, every: m.on === true });
+      render();
+      deps.changed();
+      return;
+    }
+    // While it manages all, nothing can be unticked or ticked by hand.
+    if (table[front] && table[front].all) return;
     if (m.type === 'toggle' && typeof m.id === 'string') { if (m.on) mine.add(m.id); else mine.delete(m.id); }
     else if (m.type === 'group' && typeof m.key === 'string') {
       const g = model(last, front).groups.find((x) => x.key === m.key);
@@ -413,9 +454,7 @@ function create(vscode, deps) {
     else if (m.type === 'none') mine.clear();
     else if (m.type === 'drop-hidden') for (const id of model(last, front).hiddenIds) mine.delete(id);
     else return;
-    const names = {};
-    for (const id of mine) if (last.get(id)) names[id] = last.get(id).title;
-    stewards.setManaged(front, [...mine], names, { dir: deps.dir });
+    stewards.setManaged(front, [...mine], titlesOf(mine), { dir: deps.dir });
     render();
     deps.changed();
   };
@@ -446,7 +485,7 @@ function create(vscode, deps) {
     },
     refresh() { render(); },
     open,
-    _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage, _takeRequest: takeRequest,
+    _gather: gather, _model: model, _notify: notify, _pass: pass, _onMessage: onMessage, _takeRequest: takeRequest, _syncEvery: syncEvery,
   };
 }
 
