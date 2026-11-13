@@ -414,17 +414,17 @@ function liveRecords(dir = path.join(claudeDir(), 'sessions'), isAlive = alive, 
  * A session whose detached command (src/detached.js) still runs is busy as well.
  */
 const BUSY = new Set(['busy', 'shell']);
-function busyOf(records, outside = new Set()) {
+function busyOf(records, shells = new Set()) {
   const out = new Set();
   for (const d of records) {
     if (d.kind !== 'bg' || typeof d.jobId !== 'string' || !SHORT_ID.test(d.jobId)) continue;
-    const own = typeof d.sessionId === 'string' && outside.has(d.sessionId.toLowerCase());
+    const own = typeof d.sessionId === 'string' && shells.has(d.sessionId.toLowerCase());
     if (BUSY.has(d.status) || own) out.add(d.jobId);
   }
   return out;
 }
-function busyJobs(dir, isAlive = alive, outside) {
-  return busyOf(liveRecords(dir, isAlive), outside);
+function busyJobs(dir, isAlive = alive, shells) {
+  return busyOf(liveRecords(dir, isAlive), shells);
 }
 
 /* A `claude -p` worker's record. An idle one is an SDK session waiting for input. */
@@ -450,29 +450,28 @@ function noteWorkers(launchedBy, dir) {
 }
 
 /*
- * Session ids of the conversations with work still running after their turn: a busy `claude --bg` session it started,
- * a `claude -p` worker it started, or a command of its own still running outside every claude process. While the
- * conversation's process runs, a worker is tied to it by CLAUDE_PID in the worker's environment. After that the link
- * file holds the tie, along with the workers named in the conversation's transcript.
+ * Session ids of the conversations with work running: a busy `claude --bg` session it started, a `claude -p` worker it
+ * started, or a command it left running. While the conversation's process runs, a worker is tied to it
+ * by CLAUDE_PID in the worker's environment; after that, by the link file and the workers its transcript names.
  *
- * `outside` and `launchers` are what src/detached.js found. `write` false leaves the link files alone, for a window
+ * `shells` and `launchers` are what src/detached.js found. `write` false leaves the link files alone, for a window
  * that must not write shared files.
  */
 function working(opts = {}) {
   const dir = opts.dir || planDir();
   const records = opts.records || liveRecords(opts.sessions);
-  const outside = opts.outside || new Set();
+  const shells = opts.shells || new Set();
   const launchedBy = opts.launchers || new Map();
-  const busy = opts.busy || busyOf(records, outside);
+  const busy = opts.busy || busyOf(records, shells);
   if (opts.write !== false && launchedBy.size) noteWorkers(launchedBy, dir);
   const live = new Set(records.filter((d) => isWorker(d) && d.status !== 'idle').map((d) => d.sessionId.toLowerCase()));
-  const out = new Set(outside);
+  const out = new Set(shells);
   for (const [w, l] of launchedBy) if (live.has(w)) out.add(l);
   let names;
   try { names = fs.readdirSync(dir).filter((n) => LINK_FILE.test(n)); } catch (_) { return out; }
   for (const n of names) {
     const link = readLink(path.join(dir, n));
-    if (link.ids.some((id) => busy.has(id)) || link.workers.some((w) => live.has(w) || outside.has(w))) {
+    if (link.ids.some((id) => busy.has(id)) || link.workers.some((w) => live.has(w) || shells.has(w))) {
       out.add(n.slice(0, -SUFFIX.length));
     }
   }
@@ -493,13 +492,15 @@ async function sharedSnapshot(records, opts) {
   const file = path.join(opts.dir || planDir(), SNAPSHOT_FILE), now = Date.now();
   try {
     const d = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (d.at <= now && now - d.at < SHARE_MS && Array.isArray(d.outside) && Array.isArray(d.launchers)) {
-      return { outside: new Set(d.outside), launchers: new Map(d.launchers) };
+    // A build that counted only detached commands wrote the set as `outside`.
+    const list = Array.isArray(d.shells) ? d.shells : d.outside;
+    if (d.at <= now && now - d.at < SHARE_MS && Array.isArray(list) && Array.isArray(d.launchers)) {
+      return { shells: new Set(list), launchers: new Map(d.launchers) };
     }
   } catch (_) { /* none yet, or caught mid-write */ }
   const snap = await detached.snapshot({ records });
   if (opts.write !== false) {
-    try { writeAtomic(file, JSON.stringify({ at: Date.now(), outside: [...snap.outside], launchers: [...snap.launchers] }) + '\n'); }
+    try { writeAtomic(file, JSON.stringify({ at: Date.now(), shells: [...snap.shells], launchers: [...snap.launchers] }) + '\n'); }
     catch (_) { /* the next window reads /proc itself */ }
   }
   return snap;
@@ -508,8 +509,8 @@ async function sharedSnapshot(records, opts) {
 /* Reads /proc, or what another window read from it a moment ago, then calls working(). */
 async function workingNow(opts = {}) {
   const records = liveRecords(opts.sessions);
-  const { outside, launchers } = await sharedSnapshot(records, opts);
-  return working(Object.assign({}, opts, { records, outside, launchers }));
+  const { shells, launchers } = await sharedSnapshot(records, opts);
+  return working(Object.assign({}, opts, { records, shells, launchers }));
 }
 
 module.exports = {

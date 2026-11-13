@@ -4,21 +4,23 @@
 
 'use strict';
 /*
- * Finds, in /proc, the commands a conversation started that are still running after its turn ended. Without /proc it
- * finds nothing, and only the `claude --bg` sessions and the transcript links of src/background.js remain.
+ * A conversation can leave a command running: in the background, or detached, which outlives the turn. Both are found
+ * in /proc. Where there is no /proc nothing is found, and only the `claude --bg` sessions and the transcript links of
+ * src/background.js remain.
  *
- * The Bash tool gives each command CLAUDE_CODE_SESSION_ID and CLAUDE_PID, the conversation and its claude process, and
- * a process keeps the environment it started with in /proc/<pid>/environ. A command started with `setsid`, or with
+ * The Bash tool puts the conversation in CLAUDE_CODE_SESSION_ID and its claude process in CLAUDE_PID, and a process
+ * keeps the environment it started with in /proc/<pid>/environ. A command started with `setsid`, or with
  * `nohup ... &` from a shell that has since exited, is under no claude process any more but still carries both.
  *
  * Only shells and `timeout` are counted, going by argv[0] rather than the name in stat: `setsid nohup bash -c '...'`,
- * a script, a Bash tool shell whose claude process has gone. Programs that detach themselves, such as Brazil's Java
- * server, the OpenTelemetry server Codex starts, Xvfb, a database server or a `tail -F` nobody stopped, stay running
- * long after the work that started them, and mfns names its namespace holders mfns-holder rather than bash.
+ * a script, a Bash tool shell. Programs that detach themselves, such as Brazil's Java server, the OpenTelemetry server
+ * Codex starts, Xvfb, a database server or a `tail -F` nobody stopped, stay running long after the work that started
+ * them, and mfns names its namespace holders mfns-holder rather than bash.
  *
- * Nothing below a claude process is counted. That is where its MCP servers and hooks run, the command of the current
- * turn, and the background commands Claude Code already shows as running. A `claude -p` worker is found from its own
- * session record instead.
+ * Below a claude process, where the MCP servers and hooks also run, only the Bash tool's own shell counts. The CLI
+ * has every Bash command run a shell snapshot first, so that shell's command line names one. It lives as long as the
+ * background command it holds; a foreground command is gone once the turn ends. A `claude -p` worker is found from its
+ * own session record instead.
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,6 +29,8 @@ const { SESSION } = require('./claude-files');
 const SESSION_KEY = Buffer.from('CLAUDE_CODE_SESSION_ID=', 'latin1');
 const PID_KEY = Buffer.from('CLAUDE_PID=', 'latin1');
 const STARTERS = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh', 'timeout']);
+/* In the command of a Bash tool shell: the snapshot of the user's shell that Claude Code has it run first. */
+const SNAPSHOT = /shell-snapshots/i;
 const MAX_DEPTH = 64;
 /* How many /proc files are read at once. */
 const BATCH = 128;
@@ -100,7 +104,7 @@ function claudeTest(procs, claudePids) {
 
 /*
  * What is running now, given the live session records (src/background.js):
- * - outside: session ids of the conversations with a shell or `timeout` running outside every claude process;
+ * - shells: session ids of the conversations with a shell or `timeout` of their own still running;
  * - launchers: worker session id -> launching session id, for the live `claude -p` workers whose launcher still runs.
  *   A worker's CLAUDE_PID names the claude process whose Bash tool started it. A pid can be reused, so the process now
  *   holding it counts only if it started before the worker.
@@ -111,25 +115,27 @@ function claudeTest(procs, claudePids) {
 const startedBy = new Map();
 
 async function snapshot({ proc = '/proc', records = [] } = {}) {
-  const outside = new Set(), launchers = new Map();
+  const shells = new Set(), launchers = new Map();
   const procs = await processes(proc);
-  if (!procs.size) return { outside, launchers };
+  if (!procs.size) return { shells, launchers };
   const { isClaude, under } = claudeTest(procs, new Set(records.map((r) => r.pid)));
-  const candidates = [...procs].filter(([pid, p]) => p.state !== 'Z' && p.state !== 'X' && !isClaude(pid) && !under(p.ppid));
+  const candidates = [...procs].filter(([pid, p]) => p.state !== 'Z' && p.state !== 'X' && !isClaude(pid));
   const keep = new Map();
   await inBatches(candidates, async ([pid, p]) => {
-    const key = proc + '\0' + pid + ':' + p.start + ':' + p.comm;
+    // Whether it is below a claude process is part of the key: a process reparented to init is read again.
+    const below = under(p.ppid);
+    const key = proc + '\0' + pid + ':' + p.start + ':' + p.comm + (below ? ':c' : '');
     let id = startedBy.get(key);
     if (id === undefined) {
       id = '';
       const found = envValue(await read(path.join(proc, String(pid), 'environ')), SESSION_KEY);
       if (SESSION.test(found)) {
-        const args = await read(path.join(proc, String(pid), 'cmdline'), 'latin1');
-        if (STARTERS.has(path.basename(args ? args.split('\0')[0] : ''))) id = found.toLowerCase();
+        const args = (await read(path.join(proc, String(pid), 'cmdline'), 'latin1')) || '';
+        if (STARTERS.has(path.basename(args.split('\0')[0])) && (!below || SNAPSHOT.test(args))) id = found.toLowerCase();
       }
     }
     keep.set(key, id);
-    if (id) outside.add(id);
+    if (id) shells.add(id);
   });
   startedBy.clear();
   for (const [k, v] of keep) startedBy.set(k, v);
@@ -142,7 +148,7 @@ async function snapshot({ proc = '/proc', records = [] } = {}) {
     if (!a || !b || !(Number(a.start) <= Number(b.start))) return;
     launchers.set(r.sessionId.toLowerCase(), launcher.sessionId.toLowerCase());
   });
-  return { outside, launchers };
+  return { shells, launchers };
 }
 
-module.exports = { snapshot, processes, STARTERS };
+module.exports = { snapshot, processes, STARTERS, SNAPSHOT };

@@ -8052,9 +8052,9 @@ console.log('\nconversations whose background sessions are busy');
       run({ records: [rec(W, { entrypoint: 'claude-vscode' })] }), run({})];
     if (none.every((r) => !r.length)) ok('an idle SDK session, a bg session, an editor conversation, or no record at all, does not');
     else bad(`a worker that is not running counted: ${JSON.stringify(none)}`);
-    if (JSON.stringify(run({ outside: new Set([W]) })) === JSON.stringify([L, W])) {
-      ok('nor does a finished worker, except while a shell it detached still runs');
-    } else bad(`a detached shell of a worker gave ${JSON.stringify(run({ outside: new Set([W]) }))}`);
+    if (JSON.stringify(run({ shells: new Set([W]) })) === JSON.stringify([L, W])) {
+      ok('nor does a finished worker, except while a shell of its own still runs');
+    } else bad(`a shell of a worker gave ${JSON.stringify(run({ shells: new Set([W]) }))}`);
     const launchers = new Map([[W2, L2], [W3, L2]]);
     const seen = [...bgr.working({ dir: plans, records: [rec(W2)], launchers, write: false })];
     if (JSON.stringify(seen) === JSON.stringify([L2]) && !fs.existsSync(path.join(plans, L2 + bgr.SUFFIX))) {
@@ -8112,8 +8112,12 @@ console.log('\nconversations whose background sessions are busy');
       fs.writeFileSync(path.join(d, 'environ'), Object.entries(Object.assign({ HOME: '/h' }, env)).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
     };
     put(100, { comm: 'claude' });
-    put(101, { comm: 'node', ppid: 100, argv: ['node', 'mcp.js'], env: { CLAUDE_CODE_SESSION_ID: S(1) } });       // an MCP server
-    put(102, { comm: 'bash', ppid: 100, argv: ['/bin/bash', '-c', 'sleep 9'], env: { CLAUDE_CODE_SESSION_ID: S(1) } }); // a turn's command
+    put(101, { comm: 'node', ppid: 100, argv: ['node', 'mcp.js'], env: { CLAUDE_CODE_SESSION_ID: S(9) } });       // an MCP server
+    // The Bash tool's shell, which holds a command running in the background, and another shell of claude's, which does not.
+    put(102, { comm: 'bash', ppid: 100, env: { CLAUDE_CODE_SESSION_ID: S(1) },
+      argv: ['/bin/bash', '-c', 'source /h/.claude/shell-snapshots/snapshot-bash-1-a.sh && sleep 9'] });
+    put(103, { comm: 'bash', ppid: 100, argv: ['/bin/bash', '-c', 'exec node mcp.js'], env: { CLAUDE_CODE_SESSION_ID: S(9) } });
+    put(104, { comm: 'timeout', ppid: 102, argv: ['timeout', '60', 'sleep', '9'], env: { CLAUDE_CODE_SESSION_ID: S(1) } });
     put(200, { comm: 'bash', argv: ['bash', '-c', 'timeout 1800 codex exec -'], env: { CLAUDE_CODE_SESSION_ID: S(2) } });
     put(201, { comm: 'codex', ppid: 200, env: { CLAUDE_CODE_SESSION_ID: S(2) } });
     put(300, { comm: 'tail', argv: ['tail', '-F', 'x.log'], env: { CLAUDE_CODE_SESSION_ID: S(3) } });
@@ -8132,21 +8136,21 @@ console.log('\nconversations whose background sessions are busy');
     const snap = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
       require(${JSON.stringify(path.join(__dirname, '..', 'src', 'detached.js'))})
         .snapshot(${JSON.stringify({ proc: root3, records })})
-        .then((r) => process.stdout.write(JSON.stringify({ outside: [...r.outside].sort(), launchers: [...r.launchers] })))
+        .then((r) => process.stdout.write(JSON.stringify({ shells: [...r.shells].sort(), launchers: [...r.launchers] })))
         .catch((e) => process.stdout.write(JSON.stringify({ error: e.message })));`], { encoding: 'utf8' }));
-    if (JSON.stringify(snap.outside) === JSON.stringify([S(2), S(4), S(5)])) {
-      ok('a detached shell, a script and a timeout count as work left running, under the conversation they carry');
-    } else bad(`outside every claude process: ${JSON.stringify(snap)}`);
-    if (snap.outside && !snap.outside.includes(S(1)) && !snap.outside.includes(S(3))) {
-      ok('a claude process\'s MCP server and turn command, a forgotten tail -F, a Java server, an mfns holder, a zombie and Claude\'s own helper do not');
-    } else bad(`something that is not left-running work counted: ${JSON.stringify(snap.outside)}`);
+    if (JSON.stringify(snap.shells) === JSON.stringify([S(1), S(2), S(4), S(5)])) {
+      ok('a Bash tool shell under a claude process, a detached shell, a script and a timeout count as work running, under the conversation they carry');
+    } else bad(`shells still running: ${JSON.stringify(snap)}`);
+    if (snap.shells && !snap.shells.includes(S(9)) && !snap.shells.includes(S(3))) {
+      ok('a claude process\'s MCP server, whether or not a shell started it, a forgotten tail -F, a Java server, an mfns holder, a zombie and Claude\'s own helper do not');
+    } else bad(`something that is not work running counted: ${JSON.stringify(snap.shells)}`);
     if (JSON.stringify(snap.launchers) === JSON.stringify([[S(6), S(7)]])) {
       ok('a worker is tied to the claude process named by its CLAUDE_PID, and not to one that started after it');
     } else bad(`workers were tied as ${JSON.stringify(snap.launchers)}`);
     const noProc = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
       require(${JSON.stringify(path.join(__dirname, '..', 'src', 'detached.js'))})
         .snapshot(${JSON.stringify({ proc: path.join(root3, 'none'), records })})
-        .then((r) => process.stdout.write(JSON.stringify([r.outside.size, r.launchers.size])));`], { encoding: 'utf8' }));
+        .then((r) => process.stdout.write(JSON.stringify([r.shells.size, r.launchers.size])));`], { encoding: 'utf8' }));
     if (JSON.stringify(noProc) === '[0,0]') ok('where there is no /proc, nothing is found');
     else bad(`without /proc the snapshot gave ${JSON.stringify(noProc)}`);
     /* The environment cache, and the snapshot of the real /proc the windows share through the plan directory. */
@@ -8173,22 +8177,27 @@ console.log('\nconversations whose background sessions are busy');
         const third = await d.snapshot({ proc, records });
         const plans = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cce-share-'));
         const sessions = path.join(plans, 'sessions');
-        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now(), outside: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
+        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now(), shells: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
         const shared = await bg.workingNow({ dir: plans, sessions });
-        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now() - 60000, outside: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
+        // A file from a build that wrote the set under the old key.
+        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now(), outside: ['ffffffff-0000-4000-8000-000000000008'], launchers: [] }));
+        const older = await bg.workingNow({ dir: plans, sessions });
+        fs.writeFileSync(path.join(plans, bg.SNAPSHOT_FILE), JSON.stringify({ at: Date.now() - 60000, shells: ['ffffffff-0000-4000-8000-000000000009'], launchers: [] }));
         const fresh = await bg.workingNow({ dir: plans, sessions });
         const rewritten = JSON.parse(fs.readFileSync(path.join(plans, bg.SNAPSHOT_FILE), 'utf8'));
         fs.rmSync(plans, { recursive: true, force: true });
-        process.stdout.write(JSON.stringify({ reread, second: [...second.outside].sort(), third: [...third.outside].sort(),
-          shared: [...shared], fresh: fresh.has('ffffffff-0000-4000-8000-000000000009'), rewrittenAge: Date.now() - rewritten.at }));
+        process.stdout.write(JSON.stringify({ reread, second: [...second.shells].sort(), third: [...third.shells].sort(),
+          shared: [...shared], older: [...older], fresh: fresh.has('ffffffff-0000-4000-8000-000000000009'),
+          rewrittenAge: Date.now() - rewritten.at }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 60000 }));
-    if (cachedRun.reread === 0 && JSON.stringify(cachedRun.second) === JSON.stringify([S(2), S(4), S(5)])
-        && JSON.stringify(cachedRun.third) === JSON.stringify([S(4), S(5)])) {
+    if (cachedRun.reread === 0 && JSON.stringify(cachedRun.second) === JSON.stringify([S(1), S(2), S(4), S(5)])
+        && JSON.stringify(cachedRun.third) === JSON.stringify([S(1), S(4), S(5)])) {
       ok('a process\'s environment is read on the first snapshot only, and again when its pid is reused');
     } else bad(`reading environments again: ${JSON.stringify(cachedRun)}`);
     if (JSON.stringify(cachedRun.shared) === JSON.stringify(['ffffffff-0000-4000-8000-000000000009']) && cachedRun.fresh === false
+        && JSON.stringify(cachedRun.older) === JSON.stringify(['ffffffff-0000-4000-8000-000000000008'])
         && cachedRun.rewrittenAge >= 0 && cachedRun.rewrittenAge < 30000) {
-      ok('a /proc snapshot under 9 s old from another window is reused; an older one is replaced with a new reading');
+      ok('a /proc snapshot under 9 s old from another window is reused, under either the key this build writes or the one before it; an older one is replaced with a new reading');
     } else bad(`the shared /proc snapshot: ${JSON.stringify(cachedRun)}`);
   } finally { fs.rmSync(root3, { recursive: true, force: true }); }
   const ext = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
@@ -9209,6 +9218,26 @@ console.log('\nthe built-in to-do tools');
     const wrong = lists.filter((r) => r.error || gate.currentOn(r.models).length);
     if (!wrong.length) ok(`in the ${real.length} installed CLI(s) no current model gets the built-in to-do tools`);
     else bad(`installed CLI: ${JSON.stringify(wrong)}`);
+  }
+}
+
+/* What a Bash command starts with (test/shell-snapshot-shape.js), on a stand-in and on any CLI installed here: the
+   shell holding a background command is known by it. */
+{
+  const shape = require('./shell-snapshot-shape');
+  const stand = Buffer.from('x'.repeat(100) + 'let H=join(cfg(),"shell-snapshots"),X=join(H,`snapshot-${r}-${k}-${v}.sh`);'
+    + '"Snapshot file missing, falling back to login shell:"', 'latin1');
+  if (!shape.missing(stand).length && shape.missing(Buffer.from('nothing of the sort')).length === shape.NEEDLES.length) {
+    ok('the shell-snapshot check passes a CLI that builds the path and fails one with none of it');
+  } else bad(`the shell-snapshot check on stand-ins: ${JSON.stringify(shape.missing(stand))}`);
+  const clis = Array.from(new Set(extensionsDirs())).flatMap((d) => webview.findInstalls(d))
+    .map((d) => path.join(d, 'resources', 'native-binary', process.platform === 'win32' ? 'claude.exe' : 'claude'))
+    .filter((f) => fs.existsSync(f));
+  if (!clis.length) note('no Claude Code CLI installed here to read the shell-snapshot shape from');
+  else {
+    const bad2 = clis.filter((f) => shape.missing(fs.readFileSync(f)).length);
+    if (!bad2.length) ok(`in the ${clis.length} installed CLI(s) a Bash command still starts with a shell snapshot`);
+    else bad(`installed CLI without the shell snapshot: ${JSON.stringify(bad2)}`);
   }
 }
 
