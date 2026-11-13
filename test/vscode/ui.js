@@ -486,6 +486,16 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       if (toc) {
         const masks = toc.times.filter(Boolean).map((b) => ({ x: frameBox.x + b.x, y: frameBox.y + b.y, width: b.width, height: b.height }));
         await compareAt('rail-list', conv.locator('#cce-toc'), { masks });
+        /* A helper of the same name in another fragment would replace the one that draws this preview (see the
+           duplicate-name check in check.js). */
+        await conv.locator('#cce-toc > div:nth-child(2) > div').first().hover();
+        const full = await until(() => conv.evaluate(() => {
+          const t = document.getElementById('cce-toc-tip');
+          return t && t.style.display === 'block' ? t.textContent : null;
+        }), 3000, 200);
+        check(!!full && full.endsWith(tab0.turns[0][0].slice(0, 220)), 'resting on a message in the list shows it in full', full);
+        await page.mouse.move(5, 5);
+        await sleep(300);
       }
       await conv.locator('#cce-toc-handle').click();
 
@@ -511,11 +521,11 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       check(Object.entries(hovers).every(([k, v]) => v === LABELS[k]), 'resting on each of them shows what it does', hovers);
       await shot('conversation-footer-hover');
 
-      /* Hovering the usage meter, exactly one box is visible at a time: the panel's tooltip, its copy with extra lines,
-         or the breakdown. */
+      /* Hovering the usage meter, exactly one box is visible at a time: the panel's own tooltip, and after two seconds the
+         breakdown in its place. */
       const meter = conv.locator('button[class*="usageButtonV2"]').first();
       if (await meter.count()) {
-        const boxesNow = () => conv.evaluate(() => [...document.querySelectorAll('[data-footer-overlay], #cce-ctx-note, #cce-ctx')]
+        const boxesNow = () => conv.evaluate(() => [...document.querySelectorAll('[data-footer-overlay], #cce-ctx')]
           .filter((e) => { const st = getComputedStyle(e), r = e.getBoundingClientRect(); return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0 && r.width > 0; })
           .map((e) => `${e.id || 'panel tooltip'}: ${String(e.textContent).slice(0, 80)}`));
         await meter.hover();
@@ -525,8 +535,9 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         await sleep(2600);
         const later = await boxesNow();
         await shot('conversation-meter-hover-later');
-        check(soon.length === 1 && later.length === 1, 'resting on the usage meter shows one box, before and after the breakdown is due', { soon, later });
-        const inside = await conv.evaluate(() => ['cce-ctx-note', 'cce-ctx'].map((id) => document.getElementById(id))
+        check(soon.length === 1 && soon[0].indexOf('panel tooltip') === 0 && later.length === 1,
+          'hovering the usage meter shows only the panel\'s tooltip at first, and one box after two seconds', { soon, later });
+        const inside = await conv.evaluate(() => ['cce-ctx'].map((id) => document.getElementById(id))
           .filter((e) => e && e.style.display === 'block').map((e) => { const r = e.getBoundingClientRect(); return { id: e.id, left: r.left, right: r.right, page: innerWidth }; }));
         check(inside.every((b) => b.left >= 0 && b.right <= b.page), 'and that box lies inside the page', inside);
         await page.mouse.move(5, 5);
@@ -695,7 +706,9 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         { sidebar: await auxiliaryVisible(), tabs: await tabs() });
       await shot('resumed-in-sidebar');
       /* The sidebar is narrower than a reply's stamp: it wraps between its parts rather than running past its column. */
-      const stampsFit = () => side.evaluate(() => [...document.querySelectorAll('[data-testid="assistant-message"] [data-cce-ts]')].map((e) => {
+      // A reply hidden as quiet keeps its stamp attribute but takes no room, so only rows on screen are measured.
+      const stampsFit = () => side.evaluate(() => [...document.querySelectorAll('[data-testid="assistant-message"] [data-cce-ts]')]
+        .filter((e) => e.getClientRects().length).map((e) => {
         const b = getComputedStyle(e, '::before');
         return { stamp: e.getAttribute('data-cce-ts'), width: Math.round(parseFloat(b.width)), column: e.clientWidth,
           past: e.scrollWidth - e.clientWidth, wrapped: parseFloat(b.height) > 2 * parseFloat(b.fontSize) };
@@ -816,6 +829,26 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
         await shot('steward-link-jump');
       }
       await exec('workbench.action.closePanel');
+    });
+
+    /* In Focus view Claude Code folds a message from another conversation into a row of its own ("1 hidden step"). */
+    await step('a quiet reply to another conversation', async () => {
+      const t = threads.find((x) => x.quietPeer);
+      await exec('claude-vscode.editor.open', t.id);
+      const conv = await conversation(t);
+      if (!conv) throw new Error('the conversation did not open');
+      const focus = conv.locator('[data-cce-focus-btn]').first();
+      const wasOn = await focus.getAttribute('data-cce-fold') === 'folded';
+      if (!wasOn) await focus.click();
+      const folds = () => conv.evaluate(() => [...document.querySelectorAll('[data-testid="focus-fold-row"]')]
+        .map((r) => ({ label: r.textContent.trim(), shown: getComputedStyle(r).display !== 'none' })));
+      const seen = await until(async () => { const f = await folds(); return f.length && f.every((x) => !x.shown) ? f : null; }, 15000, 300);
+      const replies = await conv.evaluate(() => [...document.querySelectorAll('[data-testid="assistant-message"]')]
+        .map((m) => (m.innerText || '').trim()).filter(Boolean));
+      check(!!seen && replies.indexOf('-') === -1, 'a peer message answered with a dash: its fold row and the dash are both hidden',
+        { folds: seen || await folds(), replies });
+      await shot('quiet-peer-reply');
+      if (!wasOn) await focus.click();
     });
 
     await step('commands', async () => {

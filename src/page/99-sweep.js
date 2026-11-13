@@ -154,11 +154,15 @@
       }
       fullMsgs++;
       var rows = msgs[j].children, ownerDone = false, own = 'main', uus = [], effHere = '', figured = false, tools = null;
+      var quietN = 0, loudN = 0;
       blocks += rows.length;
       for (var r = 0; r < rows.length; r++) {
         var row = rows[r], cx = ctxOf(row), v = '';
         var blk = cx.block && cx.block.content;
-        quietRow(row, !!(blk && blk.type === 'text' && QUIET_REPLY.test(String(blk.text || ''))));
+        var hush = !!(blk && blk.type === 'text' && QUIET_REPLY.test(String(blk.text || '')));
+        quietRow(row, hush);
+        if (hush) quietN++;
+        else if (blk && blk.type !== 'thinking' && blk.type !== 'redacted_thinking') loudN++;
         if (!ownerDone && cx.message) {
           own = agentOf(cx.message) || 'main';
           applyOwner(msgs[j], own);
@@ -198,6 +202,7 @@
         }
         set(row, lead(v), annot && (t === 'tool_use' || t === 'server_tool_use'));
       }
+      quietFold(msgs[j], quietN > 0 && loudN === 0);
       if (uus.length) UUIDS_OF.set(msgs[j], uus);
       if (ownerDone && j < msgs.length - LIVE_TAIL) settleNext = true;
       if (tools) {
@@ -378,6 +383,30 @@
     if (quiet) {
       if (row.getAttribute('data-cce-quiet') !== '1') { row.setAttribute('data-cce-quiet', '1'); row.style.display = 'none'; }
     } else if (row.getAttribute('data-cce-quiet') === '1') { row.removeAttribute('data-cce-quiet'); row.style.display = ''; }
+  };
+  /* A message from another conversation, or a notice, is not shown as a prompt: Claude Code folds it, with whatever was
+     done in answer, into a row that reads "1 hidden step" or "2 tool calls". When the answer is only a quiet reply,
+     that row is hidden too. A fold that starts with an assistant message belongs to a turn the user began, and stays. */
+  var FOLD_ROW = '[data-testid="focus-fold-row"]';
+  var foldBefore = function(msg){
+    for (var a = msg, i = 0; a && i < 4; a = a.parentElement, i++) {
+      var p = a.previousElementSibling;
+      if (p) return p.matches && p.matches(FOLD_ROW) ? p : null;
+    }
+    return null;
+  };
+  var foldOf = function(el){
+    for (var f = fiber(el), i = 0; f && i < 8; f = f.return, i++) {
+      var pr = f.memoizedProps;
+      if (pr && pr.fold && Array.isArray(pr.fold.messages)) return pr.fold;
+    }
+    return null;
+  };
+  var quietFold = function(msg, quiet){
+    var row = foldBefore(msg);
+    if (!row) return;
+    var fold = quiet ? foldOf(row) : null, first = fold && fold.messages[0];
+    quietRow(row, !!(fold && fold.progress === 'settled' && first && first.msg && first.msg.type === 'user'));
   };
 
   var onMutations = function(records){

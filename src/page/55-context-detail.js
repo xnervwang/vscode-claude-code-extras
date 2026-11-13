@@ -93,6 +93,12 @@
       top.style.whiteSpace = 'pre-wrap'; top.style.opacity = '0.8'; top.style.marginBottom = '6px';
       CTX.appendChild(top);
     }
+    if (u.status) {
+      var st = document.createElement('div');
+      st.textContent = u.status;
+      CTX.appendChild(st);
+      return;
+    }
     var cats = (u.categories || []).filter(function(c){ return c && c.tokens > 0 && !c.isDeferred; });
     var head = document.createElement('div');
     head.style.display = 'flex'; head.style.justifyContent = 'space-between';
@@ -162,10 +168,10 @@
     CTX.addEventListener('mouseleave', function(){ ctxOver = false; hideCtx(); });
     document.body.appendChild(CTX);
   };
-  // The panel puts its own tooltip on this button, carrying the summary figure. No node is ever added inside it: one
-  // added inside a node the panel renders can break that rendering, and then the page stops taking clicks and keys.
-  // To add lines, the script hides the tooltip with an inline style (the panel's rendering keeps inline styles) and
-  // shows a copy of it, with the lines appended, at the same spot.
+  // The panel draws its own tooltip for this button, with the summary figure. This script leaves it alone until the
+  // breakdown opens, then hides it with an inline style (the panel's rendering keeps inline styles) and puts its text
+  // at the top of the breakdown. No node is ever added inside it: one added inside a node the panel renders can break
+  // that rendering, and then the page stops taking clicks and keys.
   var nativeTip = function(){
     if (!ctxBtn || !ctxBtn.parentElement) return null;
     var kids = ctxBtn.parentElement.children;
@@ -195,13 +201,14 @@
     for (var i = 0; i < kids.length; i++) { var t = String(kids[i].textContent || '').trim(); if (t) out.push(t); }
     return out.join('\n');
   };
-  var NOTEBOX = null, noteKey = '', noteFrom = null, noteStatus = '', hiddenTip = null, hiddenText = '';
-  var showTip = function(){
+  // Not named showTip and hideTip: 45-toc.js has those, and all fragments are concatenated into one closure.
+  var hiddenTip = null, hiddenText = '', ctxShown = null;
+  var uncoverTip = function(){
     if (hiddenTip) { try { hiddenTip.style.visibility = ''; } catch (e) {} hiddenTip = null; }
   };
-  var hideTip = function(tip){
+  var coverTip = function(tip){
     if (tip === hiddenTip) return;
-    showTip();
+    uncoverTip();
     hiddenText = tipText(tip);
     try { tip.style.visibility = 'hidden'; hiddenTip = tip; } catch (e) {}
   };
@@ -210,85 +217,13 @@
     var tip = nativeTip();
     return tip && tip !== hiddenTip ? tipText(tip) : hiddenTip ? hiddenText : '';
   };
-  var dropNote = function(){
-    if (NOTEBOX) NOTEBOX.style.display = 'none';
-  };
-  var noteLine = function(text){
-    noteStatus = text || '';
-    paintNote();
-  };
-  /*
-   * Builds the replacement box: a clone of the tooltip, so the panel's CSS styles it, with each extra line given the
-   * class of the tooltip's last line. With no tooltip to clone, it builds a plain box in the hover widget colors.
-   */
-  var makeNote = function(tip, base, lines, fresh){
-    var box = null;
-    if (tip && typeof tip.cloneNode === 'function') {
-      try {
-        box = tip.cloneNode(true);
-        var inner = box.firstElementChild || box, last = inner.lastElementChild;
-        for (var i = 0; i < lines.length; i++) {
-          var d = document.createElement('div');
-          if (last && last.className) d.className = last.className;
-          d.textContent = lines[i];
-          inner.appendChild(d);
-        }
-        if (box.removeAttribute) box.removeAttribute('data-footer-overlay');
-        // Taking over a tooltip already on screen must not replay its fade-in.
-        if (!fresh) box.style.animation = 'none';
-        box.style.whiteSpace = 'normal'; box.style.overflowWrap = 'anywhere';
-      } catch (e) { box = null; }
-    }
-    if (!box) {
-      box = document.createElement('div');
-      var s = box.style;
-      s.padding = '4px 8px'; s.borderRadius = '4px';
-      s.fontSize = '11px'; s.lineHeight = '1.4'; s.whiteSpace = 'pre-wrap'; s.boxSizing = 'border-box';
-      s.background = 'var(--vscode-editorHoverWidget-background, rgba(30,30,30,0.99))';
-      s.color = 'var(--vscode-editorHoverWidget-foreground, #ddd)';
-      s.border = '1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.18))';
-      box.textContent = [base].concat(lines).filter(Boolean).join('\n');
-    }
-    box.id = 'cce-ctx-note';
-    box.style.position = 'fixed'; box.style.zIndex = '32'; box.style.margin = '0';
-    box.style.visibility = 'visible'; box.style.pointerEvents = 'none';
-    box.style.left = 'auto'; box.style.top = 'auto';
-    return box;
-  };
-  /* fresh: the tooltip was just added to the page and has not been painted yet, so the clone keeps its fade-in. */
-  var paintNote = function(fresh){
-    var open = !!(CTX && CTX.style.display === 'block');
-    var p = planNow();
-    var ours = ctxOver && !open ? [p && p.text ? 'Work plan: ' + p.text : '', noteStatus].filter(Boolean) : [];
+  /* A tooltip the panel adds while the breakdown is open is hidden as well, and the breakdown redrawn with its text. */
+  var coverLateTip = function(){
     var tip = nativeTip();
-    if (!ours.length) {
-      dropNote();
-      // A tooltip that appears after the breakdown opened is hidden too, and the breakdown redrawn with its text.
-      if (open && ctxOver && tip) {
-        var was = hiddenTip;
-        hideTip(tip);
-        if (was !== tip && ctxCache && ctxBtn) { renderCtx(ctxCache); placeCtx(ctxBtn); }
-      } else if (!open) showTip();
-      return;
-    }
-    var r = tip ? tip.getBoundingClientRect() : null;
-    if (tip) hideTip(tip);
-    var base = tip ? hiddenText : '';
-    var key = base + '\n' + ours.join('\n');
-    if (!NOTEBOX || !NOTEBOX.isConnected || noteKey !== key || noteFrom !== tip) {
-      var box = makeNote(tip, base, ours, fresh === true);
-      if (NOTEBOX && NOTEBOX.parentNode) NOTEBOX.parentNode.removeChild(NOTEBOX);
-      document.body.appendChild(box);
-      NOTEBOX = box; noteKey = key; noteFrom = tip;
-    }
-    var b = ctxBtn && ctxBtn.getBoundingClientRect();
-    var ref = r || b;
-    if (!ref) return;
-    NOTEBOX.style.maxWidth = Math.max(160, Math.min(420, window.innerWidth - 16)) + 'px';
-    if (r && b && r.top >= b.bottom) { NOTEBOX.style.top = r.top + 'px'; NOTEBOX.style.bottom = 'auto'; }
-    else NOTEBOX.style.bottom = Math.max(8, window.innerHeight - (r ? r.bottom : ref.top - 6)) + 'px';
-    NOTEBOX.style.display = 'block';
-    inPage(NOTEBOX, ref.right);
+    if (!tip || !ctxOver || !ctxShown || !CTX || CTX.style.display !== 'block') return;
+    var was = hiddenTip;
+    coverTip(tip);
+    if (was !== tip && ctxBtn) { renderCtx(ctxShown); placeCtx(ctxBtn); }
   };
   /* Aligns the box's right edge with `right`, then shifts it right if its left edge would be less than 8 px from the page edge. */
   var inPage = function(el, right){
@@ -310,7 +245,8 @@
     ctxHideTimer = setTimeout(function(){
       ctxHideTimer = null;
       if (CTX) CTX.style.display = 'none';
-      noteLine('');
+      ctxShown = null;
+      uncoverTip();
     }, 200);
   };
   var ctxUsedKey = function(){
@@ -320,17 +256,20 @@
   var ctxFresh = function(){
     return ctxCache !== null && ctxUsedKey() === ctxKey && (Date.now() - ctxAt) < CTX_TTL;
   };
-  var showCtx = function(usage){
+  /* `shown` is a breakdown, or { status } when there is none to show. */
+  var showCtx = function(shown){
     if (!ctxOver || !ctxBtn) return;
     ensureCtx();
-    renderCtx(usage);
+    var tip = nativeTip();
+    if (tip) coverTip(tip);
+    ctxShown = shown;
+    renderCtx(shown);
     CTX.style.display = 'block';
     // Positioned after showing it: a box with display:none has no width to measure.
     placeCtx(ctxBtn);
-    noteLine('');
   };
   // The breakdown crosses into the command-line side and is recomputed there, so it is requested only after the
-  // pointer settles. If it cannot be had, nothing of ours appears and the panel's own summary is left standing.
+  // pointer settles. Until it arrives the panel's own tooltip stands alone.
   var canAskCtx = function(){ return !!sessionRef && typeof sessionRef.getContextUsage === 'function'; };
   var fetchCtx = function(){
     var asked = sessionRef;
@@ -341,25 +280,24 @@
       if (ctxBusy === asked) ctxBusy = null;
       // An answer for a conversation the panel has since left, or one nobody is hovering any more, says nothing.
       if (sessionRef !== asked || !ctxOver) return;
-      if (!res || !res.usage) { noteLine('Breakdown unavailable' + (res && res.error ? ': ' + res.error : '')); return; }
+      if (!res || !res.usage) { showCtx({ status: 'Breakdown unavailable' + (res && res.error ? ': ' + res.error : '') }); return; }
       ctxCache = res.usage; ctxKey = key; ctxAt = Date.now();
       showCtx(res.usage);
     }, function(){
       if (ctxBusy === asked) ctxBusy = null;
-      if (sessionRef === asked && ctxOver) noteLine('Breakdown request failed');
+      if (sessionRef === asked && ctxOver) showCtx({ status: 'Breakdown request failed' });
     });
   };
-  /* Called when the work plan's figures arrive. Redraws the hover if the pointer is still on that conversation's meter. */
+  /* Called when the work plan's figures arrive. Redraws the breakdown if it is open on that conversation's meter. */
   var planArrived = function(sid){
     if (!ctxOver || sigValue('sessionId') !== sid) return;
-    if (CTX && CTX.style.display === 'block' && ctxCache) renderCtx(ctxCache);
-    else paintNote();
+    if (CTX && CTX.style.display === 'block' && ctxShown && !ctxShown.status) renderCtx(ctxShown);
   };
   /* The breakdown shown and kept belongs to the conversation it was asked for. */
   var forgetCtx = function(){
-    ctxCache = null; ctxKey = ''; ctxAt = 0;
+    ctxCache = null; ctxKey = ''; ctxAt = 0; ctxShown = null;
     if (CTX) CTX.style.display = 'none';
-    noteLine('');
+    uncoverTip();
   };
   var wireCtxButton = function(){
     var btn = document.querySelector('button[class*="usageButtonV2"]');
@@ -372,39 +310,29 @@
       ctxOver = true;
       if (ctxHideTimer) { clearTimeout(ctxHideTimer); ctxHideTimer = null; }
       askPlanSoon();
-      if (ctxFresh()) showCtx(ctxCache);
-      // The panel adds its tooltip after this event, and ctxTipWatch handles it then. This delayed paint covers a
-      // build that has no such tooltip.
-      setTimeout(function(){ if (ctxOver) paintNote(); }, 150);
       if (ctxOpenTimer) clearTimeout(ctxOpenTimer);
-      // Two seconds resting on the button before anything happens: reading the panel's own summary, or passing over
-      // on the way somewhere else, then costs nothing at all.
+      // Nothing of ours appears until the pointer has rested on the button for two seconds, so a quick look at the
+      // panel's tooltip, or passing over the button, sends no request.
       ctxOpenTimer = setTimeout(function(){
         ctxOpenTimer = null;
         if (!ctxOver) return;
-        /* Show the loading note only when a request is sent, since nothing but a reply takes it away. */
-        if (ctxFresh()) { showCtx(ctxCache); return; }
-        if (!(sessionRef && ctxBusy === sessionRef) && !canAskCtx()) return;
-        noteLine('Loading breakdown...');
-        fetchCtx();
+        if (ctxFresh()) showCtx(ctxCache);
+        else fetchCtx();
       }, 2000);
     });
     btn.addEventListener('mouseleave', function(){
       ctxOver = false;
       if (ctxOpenTimer) { clearTimeout(ctxOpenTimer); ctxOpenTimer = null; }
-      // The panel removes its tooltip on mouseleave, so the replacement goes too.
-      dropNote();
-      showTip();
       hideCtx();
     });
   };
   /* Called with each batch of records from the document observer (src/page/99-sweep.js). Mutation callbacks run before
-     the next paint, so the tooltip is hidden before it is ever drawn. */
+     the next paint, so a tooltip added while the breakdown is open is hidden before it is ever drawn. */
   var ctxTipWatch = function(records){
-    if (!ctxOver || !ctxBtn || !ctxBtn.parentElement) return;
+    if (!ctxOver || !ctxShown || !ctxBtn || !ctxBtn.parentElement) return;
     for (var i = 0; i < records.length; i++) {
       if (records[i].target === ctxBtn.parentElement && records[i].addedNodes && records[i].addedNodes.length) {
-        paintNote(true);
+        coverLateTip();
         return;
       }
     }

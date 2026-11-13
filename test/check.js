@@ -314,6 +314,10 @@ console.log('\nwhat the page costs, in a browser');
       const hush = harness.run(browser, { turns: SHORT, focus: true, quietReply: true });
       if (!hush.error && JSON.stringify(hush.quietRows) === JSON.stringify(['none'])) ok('a dash-only reply is hidden; the other replies stay visible');
       else bad('a reply that is only a dash: ' + (hush.error || JSON.stringify(hush.quietRows)));
+      const folds = harness.run(browser, { turns: SHORT, focus: true, quietFold: true });
+      if (!folds.error && JSON.stringify(folds.quietFolds) === JSON.stringify(['none', 'shown', 'shown'])) {
+        ok('a message from another conversation answered only with a dash leaves no folded row; the user\'s own turn and a reply in words keep theirs');
+      } else bad('folded rows ahead of quiet replies: ' + (folds.error || JSON.stringify(folds.quietFolds)));
       const churn = harness.run(browser, { turns: SHORT, focus: true, headChurn: true });
       if (!churn.error && churn.idleSweeps === 0 && churn.idleChild > 0) {
         ok(`stylesheets coming and going in the head start no sweep (${churn.idleChild} changes, 0 sweeps)`);
@@ -1086,8 +1090,8 @@ console.log('\nthe usage meter, kept on screen or left to Claude Code');
   } else bad(`the meter on and then off: ${JSON.stringify(drawn)} -> ${JSON.stringify(left)}`);
 }
 
-/* The breakdown's loading note appears only while a request is in flight; only a reply removes it, so a note with
-   nothing pending would stay as long as the pointer does. */
+/* Hovering the usage meter shows the panel's tooltip unchanged. After two seconds the breakdown replaces it; the
+   breakdown starts with the tooltip's text and has a Work plan section. */
 console.log('\nthe context breakdown on the usage meter');
 {
   const fragment = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '55-context-detail.js'), 'utf8');
@@ -1097,14 +1101,11 @@ console.log('\nthe context breakdown on the usage meter');
     const e = { style: {}, children: [], isConnected: false, parentElement: null, parentNode: null,
       // As in a page: setting the text replaces what the element held.
       get textContent() { return text; }, set textContent(v) { text = String(v); this.children = []; },
-      get firstElementChild() { return this.children[0] || null; },
-      get lastElementChild() { return this.children[this.children.length - 1] || null; },
       appendChild(c) { this.children.push(c); c.parentElement = this; return c; },
       addEventListener(t, f) { (this.on = this.on || {})[t] = f; },
-      removeAttribute(n) { delete (this.attrs || {})[n]; },
-      // Stand-in layout for the two boxes: right edge from style.right, width from style.width or 200 px.
+      // Stand-in layout for the breakdown: right edge from style.right, width from style.width or 200 px.
       getBoundingClientRect() {
-        if (this.id !== 'cce-ctx-note' && this.id !== 'cce-ctx') return { top: 500, bottom: 520, left: 280, right: 300 };
+        if (this.id !== 'cce-ctx') return { top: 500, bottom: 520, left: 280, right: 300 };
         const right = 400 - parseFloat(this.style.right || '0'), width = parseFloat(this.style.width || '200');
         return { top: 0, bottom: 0, left: right - width, right };
       } };
@@ -1133,134 +1134,107 @@ console.log('\nthe context breakdown on the usage meter');
     .runInNewContext(env);
   env.out.wire();
   const run = () => { const due = timers.splice(0); due.forEach((f) => f()); };
-  const hover = () => { btn.on.mouseenter(); run(); };
-  const leave = () => { btn.on.mouseleave(); run(); };
-  const loading = () => made.some((e) => e.id === 'cce-ctx-note' && e.isConnected && e.style.display === 'block' && e.textContent === 'Loading breakdown...');
-  const usage = { totalTokens: 5 };
-  const usageFigures = { categories: [], totalTokens: 5, rawMaxTokens: 100, percentage: 5, model: 'opus' };
-
-  env.sessionRef = { usageData: { value: usage } };
-  hover();
-  const unaskable = loading();
-  leave();
-  env.sessionRef = { usageData: { value: usage }, getContextUsage: () => new Promise(() => {}) };
-  env.out.keep(usageFigures, '5');
-  hover();
-  const inHand = loading();
-  leave();
-  env.out.keep(null, '');
-  hover();
-  const onItsWay = loading();
-  if (!unaskable && !inHand && onItsWay) {
-    ok('no loading note with no way to ask or with the breakdown already in hand, and one while it is being asked for');
-  } else bad(`the loading note: with no way to ask ${unaskable}, with the breakdown in hand ${inHand}, while asking ${onItsWay}`);
-  leave();
-
-  /* The work plan's part of the context: asked for as the pointer arrives, shown at once above the panel's own tooltip,
-     and as a section of the breakdown once that opens. */
-  const note = () => made.filter((e) => e.id === 'cce-ctx-note' && e.isConnected).pop();
+  const leave = () => { btn.on.mouseleave(); unmount(); run(); };
   const box = () => made.find((e) => e.id === 'cce-ctx');
-  const askedOnce = asked.length === 1 && asked[0] === 'S1';
-  btn.on.mouseenter();
-  const notAgain = asked.length === 1;
-  const line = 'injected 2 times since the last compaction: 9412 characters, about 2353 tokens, 3% of the 80000 in context';
-  env.PLANS.S1 = { text: line, plan: { count: 2, chars: 9412, tokens: 2353, context: 80000, since: 'since the last compaction' },
-    mode: 'All features', at: Date.now() };
-  env.out.arrived('S1');
-  const first = note() && note().style.display === 'block' ? note().textContent : '';
-  if (askedOnce && notAgain && first === 'Work plan: ' + line) {
-    ok('hovering the meter asks once for the work plan\'s figures, and shows them over the panel\'s tooltip as they come');
-  } else bad(`asked ${JSON.stringify(asked)}, the line over the tooltip read ${JSON.stringify(first)}`);
-  leave();
-  const wide = Object.assign({}, usageFigures, { rawMaxTokens: 100000 });
-  env.out.keep(wide, '5');
-  hover();
+  const open = () => !!(box() && box().style.display === 'block');
   const texts = (e) => (e ? [e.textContent].concat(...(e.children || []).map(texts)) : []);
-  const shown = box() && box().style.display === 'block' ? texts(box()).join('|') : '';
-  if (/Work plan\|since the last compaction/.test(shown) && /Injected 2 times\|2\.4k\|2\.4%/.test(shown) && note().style.display === 'none') {
-    ok('the breakdown carries a Work plan section with its share of the window, and the line over the tooltip gives way to it');
-  } else bad(`the breakdown read ${JSON.stringify(shown)}`);
-  leave();
-  /* With the tooltip present, its text and the work plan line form one box in its place. The tooltip is hidden in the
-     same task that adds it, so the two are never drawn together. */
+  const usage = { totalTokens: 5 };
+  const wide = { categories: [], totalTokens: 5, rawMaxTokens: 100000, percentage: 5, model: 'opus' };
+  const line = 'injected 2 times since the last compaction: 9412 characters, about 2353 tokens, 3% of the 80000 in context';
   const tip = el();
   tip.textContent = '13% of context remaining until auto-compact.';
   tip.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 120, right: 300 });
+
+  let pending = 0;
+  env.sessionRef = { usageData: { value: usage }, getContextUsage: () => { pending++; return { then() {} }; } };
+  env.out.keep(wide, '5');
+  btn.on.mouseenter();
+  mount(tip);
+  env.PLANS.S1 = { text: line, plan: { count: 2, chars: 9412, tokens: 2353, context: 80000, since: 'since the last compaction' },
+    mode: 'All features', at: Date.now() };
+  env.out.arrived('S1');
+  const early = [open(), tip.style.visibility || 'visible', asked.join()];
+  run();
+  const said = open() ? texts(box()).join('|') : '';
+  const atRest = [tip.style.visibility, box() && box().style.bottom, box() && box().style.right];
+  leave();
+  const after = [open(), tip.style.visibility || 'visible'];
+  if (early.join() === 'false,visible,S1' && said.indexOf('|13% of context remaining until auto-compact.|') === 0
+      && /Work plan\|since the last compaction/.test(said) && /Injected 2 times\|2\.4k\|2\.4%/.test(said)
+      && atRest.join() === 'hidden,304px,40px' && after.join() === 'false,visible' && !/Work plan: /.test(said)) {
+    ok('the breakdown opens after two seconds, in the tooltip\'s place: tooltip text, then figures and a Work plan section');
+  } else bad(`early ${JSON.stringify(early)}, the breakdown read ${JSON.stringify(said)}, placed ${JSON.stringify(atRest)}, after leaving ${JSON.stringify(after)}`);
+
   env.out.keep(null, '');
   btn.on.mouseenter();
   mount(tip);
-  const together = note() && note().style.display === 'block' ? note().textContent : '';
-  const hiddenWhileShown = tip.style.visibility;
-  const placed = [note().style.bottom, note().style.right, note().style.maxWidth, note().style.whiteSpace];
-  btn.on.mouseleave();
-  unmount();
-  const gone = [tip.style.visibility, note() ? note().style.display : 'none'];
   run();
-  if (together === '13% of context remaining until auto-compact.\nWork plan: ' + line && hiddenWhileShown === 'hidden'
-      && gone[0] === '' && gone[1] === 'none' && placed.join() === '304px,100px,384px,pre-wrap') {
-    ok('the panel\'s tooltip and the work plan\'s line are one box where the tooltip was, no wider than the page, gone with the tooltip');
-  } else bad(`one box read ${JSON.stringify(together)}, tooltip ${JSON.stringify([hiddenWhileShown, gone])}, placed ${JSON.stringify(placed)}`);
+  const waiting = [pending, open(), tip.style.visibility || 'visible'];
+  leave();
+  let answer = null;
+  // Stand-ins for the promise getContextUsage returns, resolved by hand or right away, so these checks need no await.
+  env.sessionRef = { usageData: { value: usage }, getContextUsage: () => ({ then: (f) => { answer = f; } }) };
+  btn.on.mouseenter();
+  mount(tip);
+  run();
+  answer({ usage: wide });
+  const answered = open() && /Work plan/.test(texts(box()).join('|'));
+  leave();
+  env.out.keep(null, '');
+  env.sessionRef = { usageData: { value: usage }, getContextUsage: () => ({ then: (f) => f({ error: 'no session' }) }) };
+  btn.on.mouseenter();
+  mount(tip);
+  run();
+  const failed = open() ? texts(box()).join('|') : '';
+  leave();
+  if (waiting.join() === '1,false,visible' && answered
+      && failed === '|13% of context remaining until auto-compact.|Breakdown unavailable: no session') {
+    ok('uncached, nothing extra shows while it loads; then the breakdown, or the error, appears');
+  } else bad(`while asking ${JSON.stringify(waiting)}, answered ${answered}, unavailable ${JSON.stringify(failed)}`);
 
-  /* Tooltip at the page's left edge: the box is shifted right to start 8 px inside. */
+  env.sessionRef = { usageData: { value: usage }, getContextUsage: () => ({ then() {} }) };
+  env.out.keep(wide, '5');
+  btn.on.mouseenter();
+  run();
+  const before = open() ? texts(box())[1] : null;
+  mount(tip);
+  const late = [tip.style.visibility, open() ? texts(box())[1] : ''];
+  leave();
+  if (before !== tip.textContent && late.join() === 'hidden,13% of context remaining until auto-compact.') {
+    ok('a late tooltip is hidden and its text moved into the open breakdown');
+  } else bad(`before the tooltip the breakdown began ${JSON.stringify(before)}; after, ${JSON.stringify(late)}`);
+
   const nearLeft = el();
   nearLeft.textContent = '13% of context remaining until auto-compact.';
   nearLeft.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 0, right: 60 });
+  env.window.innerWidth = 300;
   btn.on.mouseenter();
   mount(nearLeft);
-  const shifted = note() ? [note().style.right, note().getBoundingClientRect().left] : [];
-  btn.on.mouseleave();
-  unmount();
   run();
-  if (shifted.join() === '192px,8') ok('with the tooltip at the page\'s left edge, the box is moved right to start 8 px inside the page');
-  else bad(`near the left edge the box was placed at ${JSON.stringify(shifted)}`);
-
-  /* The box is a clone of the tooltip, and the added line gets the class of the tooltip's last line. */
-  const piece = (cls, text) => { const e = el(); e.className = cls; if (text) e.textContent = text; return e; };
-  const copyOf = (src) => {
-    const c = piece(src.className, src.children.length ? '' : src.textContent);
-    c.style = Object.assign({}, src.style);
-    c.cloneNode = () => copyOf(c);
-    src.children.forEach((k) => c.appendChild(copyOf(k)));
-    return c;
-  };
-  const real = piece('popup_x');
-  const inner = real.appendChild(piece('content_x'));
-  inner.appendChild(piece('text_x', '13% of context remaining until auto-compact.'));
-  inner.appendChild(piece('hint_x', 'Click to compact now.'));
-  real.cloneNode = () => copyOf(real);
-  real.getBoundingClientRect = () => ({ top: 460, bottom: 496, left: 120, right: 300 });
-  btn.on.mouseenter();
-  mount(real);
-  const copy = note();
-  const lines = copy && copy.children[0] ? copy.children[0].children.map((k) => `${k.className}:${k.textContent}`) : [];
-  const copied = [copy && copy.className, copy && copy.style.position, copy && copy.style.visibility, copy && copy.style.animation, real.style.visibility];
-  btn.on.mouseleave();
-  unmount();
-  run();
-  if (JSON.stringify(lines) === JSON.stringify(['text_x:13% of context remaining until auto-compact.', 'hint_x:Click to compact now.', 'hint_x:Work plan: ' + line])
-      && copied.join() === 'popup_x,fixed,visible,,hidden') {
-    ok('the box is a copy of the panel\'s tooltip with the work plan\'s line in the style of its last line, keeping its fade-in when taken over on arrival');
-  } else bad(`the copy held ${JSON.stringify(lines)}, ${JSON.stringify(copied)}`);
-
-  /* With the breakdown open, it sits where the tooltip was and starts with the tooltip's text; the tooltip stays hidden,
-     even if it is added after the breakdown. */
-  env.out.keep(Object.assign({}, usageFigures, { rawMaxTokens: 100000 }), '5');
-  btn.on.mouseenter();
-  mount(tip);
-  const opening = box() && box().children[0] ? box().children[0].textContent : '';
-  const under = [tip.style.visibility, box().style.bottom, box().style.display, note() ? note().style.display : 'none'];
-  btn.on.mouseleave();
-  unmount();
-  run();
-  if (opening === '13% of context remaining until auto-compact.' && under.join() === 'hidden,304px,block,none' && tip.style.visibility === '') {
-    ok('the open breakdown stands in the tooltip\'s place, begins with its text, and keeps it hidden until the pointer leaves');
-  } else bad(`the breakdown began ${JSON.stringify(opening)}, with ${JSON.stringify(under)}, tooltip after ${JSON.stringify(tip.style.visibility)}`);
+  const shifted = open() ? [box().style.right, box().getBoundingClientRect().left] : [];
+  leave();
+  env.window.innerWidth = 400;
+  if (shifted[1] >= 8 && shifted[1] < 9) ok('with the tooltip at the page\'s left edge, the breakdown is moved right to start 8 px inside the page');
+  else bad(`near the left edge the breakdown was placed at ${JSON.stringify(shifted)}`);
 
   delete env.PLANS.S1;
-  env.out.keep(wide, '5');
-  hover();
-  if (box() && !/Work plan/.test(texts(box()).join('|'))) ok('and has no such section while the work plan sent nothing');
+  btn.on.mouseenter();
+  run();
+  if (open() && !/Work plan/.test(texts(box()).join('|'))) ok('a breakdown has no Work plan section when the work plan sent no figures');
   else bad('a breakdown with no work plan figures still had a Work plan section');
+  leave();
+}
+
+/* Every fragment of the page script shares one scope, so a name declared in two of them silently replaces the first
+   one's. Turning each top-level `var` into `let` makes V8 itself reject such a pair while compiling. */
+{
+  const dir = path.join(__dirname, '..', 'src', 'page');
+  const src = fs.readdirSync(dir).filter((n) => n.endsWith('.js')).sort()
+    .map((n) => fs.readFileSync(path.join(dir, n), 'utf8').replace(/^  var /gm, '  let ')).join('\n');
+  try {
+    new vm.Script(`(function(){\n${src}\n})`, { filename: 'page.js' });
+    ok('no two fragments of the page script declare the same name');
+  } catch (e) { bad(`the page script's fragments: ${e.message}`); }
 }
 
 /* ── the effort each reply was sent with ──

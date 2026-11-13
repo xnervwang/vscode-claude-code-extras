@@ -235,6 +235,27 @@ const SETUP = String.raw`
     for (var k = 0; k < 3; k++) reply(ts + 1000 * (k + 1), CFG.subagent && i === agentAt && k === 1 ? SUB : '');
   };
   for (var i = 0; i < CFG.turns; i++) turn(i);
+  // With quietFold, three folded rows after the last turn, each followed by a reply of one text block: a message from
+  // another conversation answered with a dash, a stretch of the user's own turn answered with a dash, and that message
+  // answered in words.
+  if (CFG.quietFold) {
+    var tsq = t0 + CFG.turns * 600000;
+    [['user', '-'], ['assistant', '-'], ['user', 'noted']].forEach(function(c, n){
+      var fr = document.createElement('div');
+      fr.setAttribute('data-testid', 'focus-fold-row');
+      fr.textContent = '1 hidden step';
+      fr[FIBER] = { memoizedProps: { fold: { messages: [{ idx: n, msg: { type: c[0] } }], progress: 'settled' } }, return: sessionFiber };
+      list.appendChild(fr);
+      var qm = document.createElement('div');
+      qm.setAttribute('data-testid', 'assistant-message');
+      var qr = document.createElement('div');
+      qr.className = 'timelineMessage_ab12';
+      qr.textContent = c[1];
+      hang(qr, { content: { type: 'text', text: c[1] } }, { uuid: replyId(++replies), timestamp: tsq + n * 1000, model: 'claude-opus-5-5' });
+      qm.appendChild(qr);
+      list.appendChild(qm);
+    });
+  }
   var addTurn = function(){ turn(CFG.turns); };
   /* Switch conversations in place, as New and Resume do: a new session object, its own messages, and the footer given
      the new session. */
@@ -326,6 +347,7 @@ const PHASES = String.raw`
       R.clockWrites = CLOCK.writes; R.clockLayouts = CLOCK.layouts;
       /* For each reply, which child carries the figures - the reply's duration is the one figure every reply has. */
       R.quietRows = Array.prototype.map.call(document.querySelectorAll('[data-cce-quiet="1"]'), function(e){ return e.style.display; });
+    R.quietFolds = Array.prototype.map.call(document.querySelectorAll('[data-testid="focus-fold-row"]'), function(e){ return e.style.display || 'shown'; });
       R.figuresAt = [];
       var replyEls = document.querySelectorAll('[data-testid="assistant-message"]');
       for (var fi = 0; fi < replyEls.length; fi++) {
