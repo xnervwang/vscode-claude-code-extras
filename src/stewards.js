@@ -116,25 +116,30 @@ function changes(before, after, manages) {
 }
 
 /*
- * Said to the steward, which reads it as a note from this extension rather than from the user. `details` gives, by
- * session id, { state, doing, asks }: carrying them saves the steward a tool call per conversation, and each call
- * makes it read its whole context again.
+ * The notice text, which opens by saying it is from this extension and not from the user. `details` gives, by session
+ * id, { state, doing, asks, waitingOn }: carrying them saves the steward a tool call per conversation, and each call
+ * makes it read its whole context again. `asks` holds only questions new to the steward. On an "ended" entry of
+ * `list`, `why` is the notice's words for the work that stopped.
  */
 function noticeText(list, names, details = {}) {
+  const said = new Set();
   const line = (c) => {
     const name = names[c.id] ? `"${names[c.id]}"` : 'a conversation';
-    const head = c.what === 'waiting' ? `- ${name} (${c.id}) is waiting for the user.`
-      : `- ${name} (${c.id}) finished its turn.`;
     const d = details[c.id];
-    if (!d) return head;
+    const head = c.what === 'waiting' ? `- ${name} (${c.id}) is waiting for the user.`
+      : c.what === 'ended' ? `- ${name} (${c.id}): its ${c.why}.`
+        : `- ${name} (${c.id}) finished its turn.`;
+    if (!d || said.has(c.id)) return head;
+    said.add(c.id);
     const more = [`  Now: ${d.state}${d.doing && d.doing.length ? '; doing: ' + d.doing.join(' · ') : ''}`];
+    if (d.waitingOn) more.push(`  Waiting on ${d.waitingOn}`);
     for (const q of d.asks || []) more.push(`  Question for the user: ${q}`);
     return [head].concat(more).join('\n');
   };
   return 'Steward notice from Claude Code Plus, not a message from the user. Conversations you manage changed:\n'
     + list.map(line).join('\n')
     + '\nRead one with the steward skill\'s steward-peek.py only if you need its latest reply. If none of it needs the'
-    + ' user, reply with exactly [[quiet]].';
+    + ' user, reply with exactly [[quiet]] or a single dash.';
 }
 
 /*

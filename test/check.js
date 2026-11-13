@@ -8607,6 +8607,131 @@ console.log('\nthe Steward panel');
       } else bad(`steward-relay.py: ${JSON.stringify(ran)}`);
     }
 
+    /* What a steward's notices add (src/steward-watch.js): what a waiting conversation waits on, background work that
+       ended without finishing, and only questions not given before. */
+    {
+      const watch = require('../src/steward-watch');
+      const bgm = require('../src/background');
+      const wdir = path.join(root, 'watch'), tdir = path.join(wdir, 'transcripts');
+      fs.mkdirSync(tdir, { recursive: true });
+      const at = new Date().toISOString();
+      const rec = (type, content, extra) => JSON.stringify(Object.assign({ type, timestamp: at, message: { role: type, content } }, extra || {}));
+      const use = (id, name, input) => ({ type: 'tool_use', id, name, input });
+      const result = (id) => ({ type: 'tool_result', tool_use_id: id, content: 'ok' });
+      const write = (name, lines) => { const f = path.join(tdir, name + '.jsonl'); fs.writeFileSync(f, lines.join('\n') + '\n'); return f; };
+      const asking = write('perm', [rec('user', 'Run the tests'), rec('assistant', [use('t1', 'Bash', { command: 'ls' })]), rec('user', [result('t1')]),
+        rec('assistant', [use('t2', 'Bash', { command: 'make test\n  && make check' })]), rec('assistant', [use('t3', 'Read', { file_path: '/x' })])]);
+      const answeredAll = write('done', [rec('user', 'Go'), rec('assistant', [use('t1', 'Bash', { command: 'ls' })]), rec('user', [result('t1')]),
+        rec('assistant', [{ type: 'text', text: 'Done.' }])]);
+      const newPrompt = write('newprompt', [rec('assistant', [use('t9', 'Bash', { command: 'old' })]), rec('user', 'Something else')]);
+      const question = write('ask', [rec('user', 'Go'), rec('assistant', [use('q1', 'AskUserQuestion', { questions: [{ question: 'Which branch?' }] })])]);
+      const viaAgent = write('agent', [rec('user', 'Go'), rec('assistant', [use('a1', 'Agent', { description: 'look around' })])]);
+      fs.mkdirSync(path.join(tdir, 'agent', 'subagents'), { recursive: true });
+      fs.writeFileSync(path.join(tdir, 'agent', 'subagents', 'agent-x.jsonl'), [rec('user', 'Look'), rec('assistant', [use('s1', 'Bash', { command: 'rm -rf build' })])].join('\n') + '\n');
+      const said = [asking, answeredAll, newPrompt, question, viaAgent].map((f) => watch.waitingOn(f));
+      if (said[0] === "the user's answer to a permission prompt for Bash: make test && make check" && said[1] === '' && said[2] === ''
+          && said[3] === 'an answer to a question it asked the user: Which branch?'
+          && said[4] === "the user's answer to a permission prompt for a subagent's Bash: rm -rf build") {
+        ok('a conversation waiting for the user is waiting on the earliest of its latest tool calls with no result: a permission prompt and its command, a question it asked, or a subagent\'s prompt');
+      } else bad(`waiting on: ${JSON.stringify(said)}`);
+      /* Background work: a `claude --bg` session and a `claude -p` worker from the link file beside the plan. */
+      const C = (n) => `c0c0c0c0-0000-4000-8000-00000000000${n}`;
+      const W = (n) => `abababa${n}-0000-4000-8000-000000000000`;
+      fs.writeFileSync(path.join(wdir, C(1) + bgm.SUFFIX), JSON.stringify({ ids: ['11111111', '22222222', '33333333', '44444444'],
+        workers: [W(1), W(2), W(3), '11111111-0000-4000-8000-000000000000'], scannedTo: 0 }));
+      const live = [{ kind: 'bg', jobId: '11111111', sessionId: '11111111-0000-4000-8000-000000000000' }, { kind: 'bg', jobId: '33333333' },
+        { kind: 'interactive', sessionId: W(1) }];
+      const run = watch.runningWork(C(1), live, wdir);
+      const states = { '22222222': { state: 'done' }, '33333333': { state: 'stopped', name: 'mutants' }, '44444444': { state: 'failed' } };
+      const transcripts = { [C(1)]: write('conv', [rec('assistant', [use('k', 'Bash', { command: 'claude stop 44444444' })])]),
+        [W(1)]: write('w1', [rec('user', 'Task'), rec('assistant', [use('w', 'Bash', { command: 'x' })]), rec('user', [result('w')])]),
+        [W(2)]: write('w2', [rec('user', 'Task'), rec('assistant', [{ type: 'text', text: 'Finished.' }])]) };
+      const how = (key) => watch.howEnded(key, C(1), { transcriptOf: (id) => transcripts[id] || '', readState: (id) => states[id] || null });
+      const ends = ['job:22222222', 'job:33333333', 'job:44444444', 'job:55555555', 'worker:' + W(1), 'worker:' + W(2), 'worker:' + W(3)].map(how);
+      if (JSON.stringify(run) === JSON.stringify(['job:11111111', 'job:33333333', 'worker:' + W(1)])
+          && ends[0] === '' && ends[1] === 'background session "mutants" (33333333) ended without finishing: its state is stopped'
+          && ends[2] === '' && ends[3] === 'background session (55555555) ended without finishing: it left no record'
+          && ends[4] === '`claude -p` worker (abababa1) ended in the middle of a turn' && ends[5] === '' && ends[6] === null) {
+        ok('background work that stops running ended without finishing unless its state says done or waiting, the conversation stopped it itself, or the worker\'s last reply ends its turn; a worker with no transcript cannot be told');
+      } else bad(`running ${JSON.stringify(run)}, ended ${JSON.stringify(ends)}`);
+      const ST = path.join(root, 'watch-notices');
+      watch.save(ST, C(9), { running: { [C(1)]: ['job:1'] }, asked: { [C(1)]: ['Q'] } });
+      const back = watch.load(ST, C(9)), none = watch.load(ST, C(8));
+      if (back.running[C(1)][0] === 'job:1' && back.asked[C(1)][0] === 'Q' && JSON.stringify(none) === '{"running":{},"asked":{}}') {
+        ok('what a steward has been told is kept in a file of its own beside the plans, so a reload does not tell it again');
+      } else bad(`kept ${JSON.stringify([back, none])}`);
+
+      /* The panel's notices with them, against a stand-in editor. */
+      const P = (n) => `5e5e5e5e-0000-4000-8000-00000000000${n}`;
+      const pdir = path.join(root, 'watch-plans');
+      fs.mkdirSync(pdir, { recursive: true });
+      fs.writeFileSync(path.join(pdir, P(3) + bgm.SUFFIX), JSON.stringify({ ids: ['77777777'], workers: [], scannedTo: 0 }));
+      const permFile = asking;
+      const out = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
+        const sv = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'steward-view.js'))});
+        const st = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'stewards.js'))});
+        const P = (n) => '5e5e5e5e-0000-4000-8000-00000000000' + n, dir = ${JSON.stringify(pdir)};
+        let records = [{ sessionId: P(1), pid: 11, kind: 'interactive', cwd: '/w/a', name: 'steward', status: 'idle' },
+          { sessionId: P(2), pid: 12, kind: 'interactive', cwd: '/w/b', name: 'Two', status: 'busy' },
+          { sessionId: P(2), pid: 13, kind: 'interactive', cwd: '/w/b', name: 'Two', status: 'idle' },
+          { sessionId: P(3), pid: 14, kind: 'interactive', cwd: '/w/c', name: 'Three', status: 'busy' }];
+        let liveRecs = [{ sessionId: P(1), messagingSocketPath: 'uds:/x' }, { kind: 'bg', jobId: '77777777' }];
+        const plans = { [P(2)]: { nodes: [{ title: 'Ask', state: 'waiting', waitingOn: 'user', question: 'First?' }] } };
+        st.setManaged(P(1), [P(2), P(3)], { [P(2)]: 'Two', [P(3)]: 'Three' }, { dir });
+        const posts = [];
+        let view = null;
+        const vscode = { window: { registerWebviewViewProvider: (id, p) => { view = p; return { dispose() {} }; }, showInformationMessage() {} } };
+        const v = sv.create(vscode, { activeChat: () => P(1), freshAgents: async () => ({ records }), readPlan: (id) => plans[id] || null,
+          titles: () => ({ custom: '', ai: '' }), since: () => 0, live: () => new Map(), unread: () => new Set(), reveal: async () => true,
+          shownHere: (id) => id === P(1), canWrite: () => true, canShare: () => true, enabled: () => true, log: () => {}, home: '/', dir,
+          isBackground: () => false, records: () => liveRecs, post: async (a, t) => { posts.push(t); return true; },
+          windowName: () => 'w', windowFolders: () => ['/w'], shownList: () => [P(1), P(2), P(3)],
+          transcriptOf: (id) => (id === P(3) ? ${JSON.stringify(permFile)} : ''),
+          readState: (id) => (id === '77777777' ? { state: 'stopped', name: 'bench' } : null) });
+        const T0 = Date.now();
+        (async () => {
+          const bodies = [];
+          const pageView = { visible: true, webview: { options: {}, html: '', onDidReceiveMessage() {}, postMessage: (m) => { if (m.type === 'body') bodies.push(m.html); } },
+            onDidChangeVisibility() {}, onDidDispose() {} };
+          view.resolveWebviewView(pageView);
+          await v._pass();
+          const page = bodies.pop() || pageView.webview.html;
+          await v._notify(T0 + 1 * sv.NOTICE_GAP_MS);
+          // Two finishes its turn with its old question; Three's job stops; Three waits on a permission prompt.
+          records = records.map((r) => r.sessionId === P(2) ? Object.assign({}, r, { status: 'idle' }) : r.sessionId === P(3) ? Object.assign({}, r, { status: 'waiting' }) : r);
+          liveRecs = liveRecs.filter((r) => r.kind !== 'bg');
+          plans[P(1)] = { nodes: [{ title: 'Two: wait', state: 'waiting', waitingOn: 'session' }] };
+          await v._pass();
+          await v._notify(T0 + 3 * sv.NOTICE_GAP_MS);
+          plans[P(2)].nodes.push({ title: 'Ask again', state: 'waiting', waitingOn: 'user', question: 'Second?' });
+          records = records.map((r) => r.sessionId === P(2) ? Object.assign({}, r, { status: 'busy' }) : r);
+          await v._pass();
+          records = records.map((r) => r.sessionId === P(2) ? Object.assign({}, r, { status: 'idle' }) : r);
+          await v._pass();
+          await v._notify(T0 + 5 * sv.NOTICE_GAP_MS);
+          v.dispose();
+          process.stdout.write(JSON.stringify({ page, posts }));
+        })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
+      if (out.error) bad('the steward notices threw: ' + out.error);
+      else {
+        const first = out.posts.find((t) => t.includes('First?')) || '', later = out.posts.slice(out.posts.indexOf(first) + 1).join('\n');
+        const job = out.posts.find((t) => t.includes('ended without finishing')) || '';
+        if (/<span class="twice"[^>]*>2 processes<\/span>/.test(out.page) && (out.page.match(/class="twice"/g) || []).length === 1) {
+          ok('a row in the Steward panel says so when Claude Code runs its conversation in two processes at once');
+        } else bad(`the panel showed ${JSON.stringify(out.page.slice(0, 200))}`);
+        if (job.includes(`"Three" (${P(3)}): its background session "bench" (77777777) ended without finishing: its state is stopped.`)
+            && out.posts.some((t) => t.includes("Waiting on the user's answer to a permission prompt for Bash: make test && make check"))) {
+          ok('a steward is told which command a conversation\'s permission prompt is for, and of background work of a conversation it manages that ended without finishing');
+        } else bad(`the notices were ${JSON.stringify(out.posts)}`);
+        if (first && later.includes('Question for the user: Second?') && !later.includes('First?')) {
+          ok('a question is given to a steward once: a later notice lists only the questions that are new');
+        } else bad(`the questions in the notices: ${JSON.stringify(out.posts)}`);
+      }
+      const q = require('../src/stewards').noticeText([], {}, {});
+      if (q.endsWith('reply with exactly [[quiet]] or a single dash.')) ok('a notice tells the steward it may answer with [[quiet]] or a single dash');
+      else bad(`the notice ends ${JSON.stringify(q.slice(-80))}`);
+    }
+
     /* The plugin's two scripts. */
     const hooks = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks');
     const data = path.join(root, 'data'), conf = path.join(root, 'conf');

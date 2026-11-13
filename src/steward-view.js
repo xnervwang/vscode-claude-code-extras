@@ -21,12 +21,13 @@ const fs = require('fs');
 const path = require('path');
 const stewards = require('./stewards');
 const relay = require('./relay');
+const watch = require('./steward-watch');
 const waiting = require('./waiting');
 const conversations = require('./conversations');
 const bgSessions = require('./bgsessions');
 const { planQuestions } = require('./folders');
 const { writeAtomic, SESSION, transcriptOf } = require('./claude-files');
-const { liveRecords } = require('./background');
+const { liveRecords, readState } = require('./background');
 const { OPEN_STATES } = require('./workplan');
 
 const VIEW = 'claudeCodePlus.steward';
@@ -34,6 +35,8 @@ const VIEW = 'claudeCodePlus.steward';
    (freshAgents in src/claude-source.js), so most passes only reread plans. */
 const REFRESH_MS = 5000;
 const NOTICE_GAP_MS = 60000;
+/* How often the background work of the conversations a steward manages is looked at. */
+const WORK_CHECK_MS = 15000;
 /* <plan dir>/windows/<pid>.json: what each window shows, ignored once older than this or once its process is gone. */
 const WINDOWS_DIR = 'windows';
 const WINDOW_STALE_MS = 120000;
@@ -83,6 +86,7 @@ function gather(records, deps) {
       cwd: s.cwd,
       state: on ? conversations.stateOf(s, live, unread) : 'idle',
       running: on,
+      processes: on ? waiting.pidsOf(records, s.sessionId).length : 0,
       lastActiveAt: deps.since(s) || 0,
       doing: doingRows(nodes),
       questions: qs.length,
@@ -155,6 +159,7 @@ function body(model) {
       <input type="checkbox" data-id="${esc(c.sessionId)}" ${c.managed ? 'checked' : ''} ${model.every ? 'disabled' : ''} title="Managed by this conversation">
       <span class="dot ${esc(c.state)}" title="${esc(STATE_TEXT[c.state] || c.state)}"></span>
       <a href="#" class="name" data-open="${esc(c.sessionId)}" title="${esc(c.cwd)}">${esc(c.title)}</a>
+      ${c.processes > 1 ? `<span class="twice" title="Claude Code runs this conversation in ${c.processes} processes at once, and what is sent to it can reach any of them. Close it everywhere but one.">${c.processes} processes</span>` : ''}
       ${c.managed ? `<span class="doing">${esc(c.doing.join(' · ') || (c.running ? STATE_TEXT[c.state] : 'stopped'))}</span>
       ${c.questions ? `<span class="questions">${c.questions} question${c.questions === 1 ? '' : 's'} for you</span>` : ''}
       <span class="when">${esc(ago(c.lastActiveAt, now))}</span>` : `<span class="when">${esc(ago(c.lastActiveAt, now))}</span>`}
@@ -202,6 +207,7 @@ function shell(list, nonce) {
   .name { color: var(--vscode-textLink-foreground); text-decoration: none; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
   .doing { overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; opacity: 0.85; }
   .questions { color: var(--vscode-editorWarning-foreground, #cca700); }
+  .twice { color: var(--vscode-errorForeground, #f14c4c); }
   .when { opacity: 0.6; margin-left: auto; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--vscode-disabledForeground, #888); }
   .dot.working { background: #22c55e; } .dot.unread { background: #ef4444; } .dot.prompt { background: #3b82f6; }
@@ -242,10 +248,11 @@ function shell(list, nonce) {
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
  * the live session records, alive(pid), post(address, text) in place of stewards.post, changed(), called once the
  * table of stewards has been rewritten here, focusWindow(), which brings this window to the front, transcriptOf(id), and
- * deliver(id, text), which types text into the conversation's message input here (src/relay.js).
+ * deliver(id, text), which types text into the conversation's message input here (src/relay.js), and readState(id) for
+ * a `claude --bg` session's state (src/background.js).
  */
 function create(vscode, deps) {
-  deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive,
+  deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive, readState,
     windowName: () => '', windowFolders: () => [], shownList: () => [], changed: () => {}, focusWindow: () => {}, transcriptOf,
     canShare: () => deps.canWrite(),
     deliver: () => Promise.resolve({ outcome: 'notReceived', reason: 'this window cannot type into a conversation' }) }, deps);
@@ -354,14 +361,21 @@ function create(vscode, deps) {
 
   /*
    * Notices for the stewards whose panel this window shows. A notice starts a turn in an idle steward, so it is sent
-   * only if a conversation began waiting for the user, has more questions for the user than at the last pass, or ended
-   * a turn while the steward's plan names it. A steward gets at most one notice per NOTICE_GAP_MS; conversations often
-   * stop within a minute of each other.
+   * only if a conversation began waiting for the user, has more questions for the user than at the last pass, ended a
+   * turn while the steward's plan names it, or has background work that ended without finishing. A steward gets at
+   * most one notice per NOTICE_GAP_MS; conversations often stop within a minute of each other. What a steward has been
+   * told (src/steward-watch.js) is read from its file once and written back as it changes.
    */
-  const pending = new Map(), sentAt = new Map(), asked = new Map();
+  const pending = new Map(), sentAt = new Map(), asked = new Map(), told = new Map(), workAt = new Map();
+  const toldOf = (steward) => {
+    if (!told.has(steward)) told.set(steward, watch.load(deps.dir, steward));
+    return told.get(steward);
+  };
   const notify = async (now = Date.now()) => {
     const table = stewards.read(deps.dir);
     const after = new Map([...last].map(([id, c]) => [id, c.state]));
+    let records = null;
+    const live = () => records || (records = deps.records());
     for (const steward of Object.keys(table)) {
       if (!deps.shownHere(steward)) { pending.delete(steward); continue; }
       const manages = table[steward].manages;
@@ -369,25 +383,52 @@ function create(vscode, deps) {
       const waited = waitedOn(readPlan(steward), manages, table[steward].names);
       const list = stewards.changes(states, after, manages)
         .filter((c) => c.what === 'waiting' || more(c.id) || waited.has(c.id));
-      if (list.length) pending.set(steward, (pending.get(steward) || []).filter((c) => !list.some((x) => x.id === c.id)).concat(list));
+      if (now - (workAt.get(steward) || 0) >= WORK_CHECK_MS) {
+        workAt.set(steward, now);
+        const t = toldOf(steward), running = {};
+        for (const id of manages) {
+          const cur = watch.runningWork(id, live(), deps.dir);
+          for (const key of t.running[id] || []) {
+            if (cur.includes(key)) continue;
+            const why = watch.howEnded(key, id, { transcriptOf: deps.transcriptOf, readState: deps.readState });
+            if (why) list.push({ id, what: 'ended', why });
+          }
+          if (cur.length) running[id] = cur;
+        }
+        t.running = running;
+        watch.save(deps.dir, steward, t);
+      }
+      if (list.length) {
+        // Keep every ended job; of a conversation's state changes, keep only the newest.
+        pending.set(steward, (pending.get(steward) || [])
+          .filter((c) => !list.some((x) => x.id === c.id && (c.what !== 'ended' || x.why === c.why))).concat(list));
+      }
     }
     states.clear();
     for (const [id, s] of after) states.set(id, s);
     asked.clear();
     for (const [id, c] of last) asked.set(id, c.questions);
-    let records = null;
     for (const [steward, list] of pending) {
       if (!table[steward] || now - (sentAt.get(steward) || 0) < NOTICE_GAP_MS) continue;
-      if (!records) records = deps.records();
-      const rec = records.find((r) => r && r.sessionId === steward && typeof r.messagingSocketPath === 'string');
-      const names = Object.assign({}, table[steward].names), details = {};
+      const rec = live().find((r) => r && r.sessionId === steward && typeof r.messagingSocketPath === 'string');
+      const t = toldOf(steward), names = Object.assign({}, table[steward].names), details = {}, asks = {};
       for (const c of list) {
         const now = last.get(c.id);
-        if (!now) continue;
+        if (!now || details[c.id]) continue;
         names[c.id] = now.title;
-        details[c.id] = { state: NOTICE_STATE[now.state] || now.state, doing: now.doing, asks: now.asks || [] };
+        // Leave out questions this steward was given before.
+        const before = t.asked[c.id] || [];
+        asks[c.id] = (now.asks || []).slice();
+        details[c.id] = { state: NOTICE_STATE[now.state] || now.state, doing: now.doing,
+          asks: asks[c.id].filter((q) => !before.includes(q)),
+          waitingOn: now.state === 'prompt' ? watch.waitingOn(deps.transcriptOf(c.id)) : '' };
       }
       const sent = rec ? await deps.post(rec.messagingSocketPath, stewards.noticeText(list, names, details)) : false;
+      if (sent) {
+        Object.assign(t.asked, asks);
+        for (const id of Object.keys(t.asked)) if (!table[steward].manages.includes(id)) delete t.asked[id];
+        watch.save(deps.dir, steward, t);
+      }
       pending.delete(steward);
       sentAt.set(steward, now);
       deps.log(`steward ${steward}: ${list.length} change(s) ${sent ? 'sent' : 'not sent, no inbox reached'}`);
@@ -549,4 +590,4 @@ function create(vscode, deps) {
   };
 }
 
-module.exports = { create, gather, grouped, doingRows, waitedOn, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS, WINDOWS_DIR };
+module.exports = { create, gather, grouped, doingRows, waitedOn, body, shell, VIEW, REFRESH_MS, NOTICE_GAP_MS, WORK_CHECK_MS, WINDOWS_DIR };

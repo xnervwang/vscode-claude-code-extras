@@ -513,6 +513,6 @@ async function workingNow(opts = {}) {
 }
 
 module.exports = {
-  scan, collect, readState, busyJobs, liveRecords, working, workingNow,
+  scan, collect, readState, readLink, busyJobs, liveRecords, working, workingNow,
   SUFFIX, LINK_FILE, MAX_SESSIONS, MAX_PER_SESSION, MAX_ENTRIES, PERSIST_EVERY, SNAPSHOT_FILE, SHARE_MS,
 };
