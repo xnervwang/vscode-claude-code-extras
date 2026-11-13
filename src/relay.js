@@ -70,19 +70,24 @@ function userMessages(file, now = Date.now()) {
   } catch (_) { return []; } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch (_) { /* closed */ } }
   const out = [];
   for (const line of text.split('\n')) {
-    if (!line || line.indexOf('"type":"user"') === -1) continue;
+    if (!line || (line.indexOf('"type":"user"') === -1 && line.indexOf('"queued_command"') === -1)) continue;
     let r;
     try { r = JSON.parse(line); } catch (_) { continue; }
-    if (!r || r.type !== 'user' || r.isMeta || r.isSidechain || (r.origin && r.origin.kind !== 'human')) continue;
+    if (!r || r.isMeta || r.isSidechain) continue;
+    // A message typed while a turn was running is recorded as a queued_command attachment, with its own origin.
+    const queued = r.type === 'attachment' && r.attachment && r.attachment.type === 'queued_command' ? r.attachment : null;
+    if (r.type !== 'user' && !queued) continue;
+    const origin = queued ? queued.origin : r.origin;
+    if (origin && origin.kind !== 'human') continue;
     const at = Date.parse(r.timestamp);
     if (!(now - at <= RECENT_MS) || at > now + 60000) continue;
-    const c = r.message && r.message.content;
+    const c = queued ? queued.prompt : r.message && r.message.content;
     const parts = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter((b) => b && b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text).filter((t) => !/^\s*</.test(t)) : [];
     const said = parts.join('\n').trim();
     // A transcript written by a Claude Code build that records no `origin`: a message from another session is then
     // known by its first line.
-    if (!r.origin && (!said || NOT_TYPED.test(said))) continue;
+    if (!origin && (!said || NOT_TYPED.test(said))) continue;
     if (said) out.push({ uuid: String(r.uuid || ''), text: said, at });
   }
   return out.reverse();

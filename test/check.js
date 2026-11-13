@@ -8499,13 +8499,16 @@ console.log('\nthe Steward panel');
         { type: 'user', uuid: 'u1', timestamp: iso(now - 60000), origin: { kind: 'human' },
           message: { role: 'user', content: [{ type: 'text', text: '<ide_opened_file>x</ide_opened_file>' }, { type: 'text', text: '告诉 Two 可以改，但先别推。不可以删\ndon\'t push it\nTell it:  Go ahead' }] } },
         { type: 'user', uuid: 'p1', timestamp: iso(now - 30000), isMeta: true, origin: { kind: 'peer' }, message: { role: 'user', content: 'Another Claude session sent a message:\n可以推' } },
+        { type: 'attachment', uuid: 'q1', timestamp: iso(now - 20000), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: '先停一下，等我看完' }],
+          origin: { kind: 'human' }, humanTurn: true } },
+        { type: 'attachment', uuid: 'q2', timestamp: iso(now - 10000), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: '可以合并' }], origin: { kind: 'peer' } } },
       ].map((r) => JSON.stringify(r)).join('\n') + '\n');
       const msgs = relay.userMessages(transcript, now);
       const said = (w) => !!relay.saidBy(w, msgs);
-      const clauses = ['可以改', '但先别推', '不可以删', "don't push it", '告诉 Two 可以改', '可以改，但先别推', 'Go ahead'].every(said)
-        && !['可以删', 'push it', 'Two', '可以推', '改，但', 'x'].some(said);
-      if (msgs.length === 1 && msgs[0].uuid === 'u1' && clauses) {
-        ok('only what the user typed in the last 30 minutes counts, and only a whole sentence or clause of it: not "可以删" out of "不可以删", not "push it" out of "don\'t push it"');
+      const clauses = ['可以改', '但先别推', '不可以删', "don't push it", '告诉 Two 可以改', '可以改，但先别推', 'Go ahead', '先停一下'].every(said)
+        && !['可以删', 'push it', 'Two', '可以推', '改，但', 'x', '可以合并'].some(said);
+      if (msgs.length === 2 && msgs[0].uuid === 'q1' && msgs[1].uuid === 'u1' && clauses) {
+        ok('only what the user typed in the last 30 minutes counts, also while a turn was running, and only a whole sentence or clause of it: not "可以删" out of "不可以删", not "push it" out of "don\'t push it"');
       } else bad(`the user's words read ${JSON.stringify(msgs)}, clauses ${clauses}`);
       /* In a child process, since take() is asynchronous and this script is not. */
       const R = (n) => `aaaaaaaa-0000-4000-8000-00000000000${n}`;
