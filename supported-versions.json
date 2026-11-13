@@ -6,6 +6,12 @@
         "Claude Code panel / tool result": "2.1.285 and later: setToolResult takes options",
         "Claude Code panel / context meter always visible": "2.1.317 and later: the checks stand alone"
       }
+    },
+    "2.1.323": {
+      "shapes": {
+        "Claude Code panel / tool result": "2.1.285 and later: setToolResult takes options",
+        "Claude Code panel / context meter always visible": "2.1.317 and later: the checks stand alone"
+      }
     }
   }
 }
