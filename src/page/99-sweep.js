@@ -154,7 +154,7 @@
       }
       fullMsgs++;
       var rows = msgs[j].children, ownerDone = false, own = 'main', uus = [], effHere = '', figured = false, tools = null;
-      var quietN = 0, loudN = 0;
+      var quietN = 0, loudN = 0, thinkN = 0;
       blocks += rows.length;
       for (var r = 0; r < rows.length; r++) {
         var row = rows[r], cx = ctxOf(row), v = '';
@@ -162,7 +162,8 @@
         var hush = !!(blk && blk.type === 'text' && QUIET_REPLY.test(String(blk.text || '')));
         quietRow(row, hush);
         if (hush) quietN++;
-        else if (blk && blk.type !== 'thinking' && blk.type !== 'redacted_thinking') loudN++;
+        else if (blk && (blk.type === 'thinking' || blk.type === 'redacted_thinking')) thinkN++;
+        else if (blk) loudN++;
         if (!ownerDone && cx.message) {
           own = agentOf(cx.message) || 'main';
           applyOwner(msgs[j], own);
@@ -202,7 +203,11 @@
         }
         set(row, lead(v), annot && (t === 'tool_use' || t === 'server_tool_use'));
       }
-      quietFold(msgs[j], quietN > 0 && loudN === 0);
+      var quietMsg = quietN > 0 && loudN === 0, silentMsg = !quietN && !loudN && thinkN > 0;
+      if (silentMsg !== (msgs[j].getAttribute(SILENT_ATTR) === '1')) {
+        if (silentMsg) msgs[j].setAttribute(SILENT_ATTR, '1'); else msgs[j].removeAttribute(SILENT_ATTR);
+      }
+      if (!silentMsg) { quietMsgMark(msgs[j], quietMsg ? 'reply' : ''); quietFold(msgs[j], quietMsg); }
       if (uus.length) UUIDS_OF.set(msgs[j], uus);
       if (ownerDone && j < msgs.length - LIVE_TAIL) settleNext = true;
       if (tools) {
@@ -210,6 +215,9 @@
         if (agentView && own === VIEW) acts.push.apply(acts, tools);
       }
     }
+    // Claude Code can redraw a fold row when it groups a later turn, and a settled reply is not visited above.
+    var quietOnes = document.querySelectorAll('[' + QUIET_MSG_ATTR + '="reply"]');
+    for (var qo = 0; qo < quietOnes.length; qo++) quietFold(quietOnes[qo], true);
     // Compaction blocks belong to the main thread, so a sub-agent view hides them too.
     var cps = document.querySelectorAll(COMPACT);
     for (var cq = 0; cq < cps.length; cq++) applyOwner(cps[cq], 'main');
@@ -380,6 +388,19 @@
   /* Replies that are empty, a single dash, or [[quiet]] (what a steward writes for a notice that needed nothing from
      the user) are hidden. Rows are checked again on every sweep, so a reply still streaming shows once it has text. */
   var QUIET_REPLY = /^\s*(?:[-\u2013\u2014\u00b7\u2022]|\[\[quiet\]\])?\s*$/;
+  /* A quiet reply is hidden as a whole element, since with only its rows hidden it still took up a line and drew its
+     dot. The rule is !important because the view filter sets the element's display inline (applyOwner). */
+  var QUIET_MSG_ATTR = 'data-cce-quiet-msg';
+  var quietStyle = null;
+  var quietMsgMark = function(msg, how){
+    if (how && !(quietStyle && quietStyle.isConnected)) {
+      quietStyle = document.createElement('style');
+      quietStyle.textContent = ASSIST + '[' + QUIET_MSG_ATTR + ']{display:none !important}';
+      (document.head || document.documentElement).appendChild(quietStyle);
+    }
+    if ((msg.getAttribute(QUIET_MSG_ATTR) || '') === how) return;
+    if (how) msg.setAttribute(QUIET_MSG_ATTR, how); else msg.removeAttribute(QUIET_MSG_ATTR);
+  };
   var quietRow = function(row, quiet){
     if (quiet) {
       if (row.getAttribute('data-cce-quiet') !== '1') { row.setAttribute('data-cce-quiet', '1'); row.style.display = 'none'; }
@@ -389,10 +410,23 @@
      done in answer, into a row that reads "1 hidden step" or "2 tool calls". When the answer is only a quiet reply,
      that row is hidden too. A fold that starts with an assistant message belongs to a turn the user began, and stays. */
   var FOLD_ROW = '[data-testid="focus-fold-row"]';
+  /* Marks a reply that holds only thinking, which Claude Code draws as a dot even when the thinking has no text. */
+  var SILENT_ATTR = 'data-cce-silent';
+  /* el's replies when each is thinking-only, otherwise null. */
+  var silentIn = function(el){
+    var inner = el.matches && el.matches(ASSIST) ? [el] : el.querySelectorAll ? el.querySelectorAll(ASSIST) : [];
+    if (!inner.length) return null;
+    for (var i = 0; i < inner.length; i++) if (inner[i].getAttribute(SILENT_ATTR) !== '1') return null;
+    return inner;
+  };
+  /* The fold row ahead of msg, with any thinking-only replies in between, or null. */
   var foldBefore = function(msg){
     for (var a = msg, i = 0; a && i < 4; a = a.parentElement, i++) {
       var p = a.previousElementSibling;
-      if (p) return p.matches && p.matches(FOLD_ROW) ? p : null;
+      if (!p) continue;
+      var between = [], s;
+      while (p && !(p.matches && p.matches(FOLD_ROW)) && (s = silentIn(p))) { between.push.apply(between, s); p = p.previousElementSibling; }
+      return p && p.matches && p.matches(FOLD_ROW) ? { row: p, between: between, level: a } : null;
     }
     return null;
   };
@@ -404,10 +438,16 @@
     return null;
   };
   var quietFold = function(msg, quiet){
-    var row = foldBefore(msg);
-    if (!row) return;
-    var fold = quiet ? foldOf(row) : null, first = fold && fold.messages[0];
-    quietRow(row, !!(fold && fold.progress === 'settled' && first && first.msg && first.msg.type === 'user'));
+    var at = foldBefore(msg);
+    if (!at) return;
+    var fold = quiet ? foldOf(at.row) : null, first = fold && fold.messages[0];
+    /* During a turn Claude Code marks every fold since the user's last prompt "live", and just after it
+       "provisionallySettled". A live fold is done once its quiet reply is no longer the last element. */
+    var done = fold && (fold.progress === 'settled' || fold.progress === 'provisionallySettled'
+      || (fold.progress === 'live' && !!at.level.nextElementSibling));
+    var hide = !!(done && first && first.msg && first.msg.type === 'user');
+    quietRow(at.row, hide);
+    for (var b = 0; b < at.between.length; b++) quietMsgMark(at.between[b], hide ? 'with' : '');
   };
 
   var onMutations = function(records){

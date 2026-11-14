@@ -235,25 +235,35 @@ const SETUP = String.raw`
     for (var k = 0; k < 3; k++) reply(ts + 1000 * (k + 1), CFG.subagent && i === agentAt && k === 1 ? SUB : '');
   };
   for (var i = 0; i < CFG.turns; i++) turn(i);
-  // With quietFold, three folded rows after the last turn, each followed by a reply of one text block: a message from
-  // another conversation answered with a dash, a stretch of the user's own turn answered with a dash, and that message
-  // answered in words.
+  // With quietFold, eight folded rows after the last turn, each with its reply. Only the second fold is part of the
+  // user's own turn and only the third is answered in words. In the fourth, an empty thinking block (Bedrock's) is a
+  // reply ahead of the dash; in the fifth, it shares the dash's reply. The last three are marked as Claude Code marks
+  // folds while the conversation is working: provisionallySettled, then live twice, the second one last.
   if (CFG.quietFold) {
     var tsq = t0 + CFG.turns * 600000;
-    [['user', '-'], ['assistant', '-'], ['user', 'noted']].forEach(function(c, n){
+    var quietReply = function(rowsOf, n){
+      var qm = document.createElement('div');
+      qm.setAttribute('data-testid', 'assistant-message');
+      rowsOf.forEach(function(b){
+        var qr = document.createElement('div');
+        qr.className = 'timelineMessage_ab12';
+        qr.textContent = b.type === 'text' ? b.text : '';
+        if (b.type === 'thinking') qr.setAttribute('data-harness-thinking', '1');
+        hang(qr, { content: b }, { uuid: replyId(++replies), timestamp: tsq + n * 1000, model: 'claude-opus-5-5' });
+        qm.appendChild(qr);
+      });
+      list.appendChild(qm);
+    };
+    var think = { type: 'thinking', thinking: '' }, dash = { type: 'text', text: '-' };
+    [['user', [[dash]]], ['assistant', [[dash]]], ['user', [[{ type: 'text', text: 'noted' }]]], ['user', [[think], [dash]]],
+      ['user', [[think, dash]]], ['user', [[dash]], 'provisionallySettled'], ['user', [[dash]], 'live'], ['user', [[dash]], 'live']]
+      .forEach(function(c, n){
       var fr = document.createElement('div');
       fr.setAttribute('data-testid', 'focus-fold-row');
       fr.textContent = '1 hidden step';
-      fr[FIBER] = { memoizedProps: { fold: { messages: [{ idx: n, msg: { type: c[0] } }], progress: 'settled' } }, return: sessionFiber };
+      fr[FIBER] = { memoizedProps: { fold: { messages: [{ idx: n, msg: { type: c[0] } }], progress: c[2] || 'settled' } }, return: sessionFiber };
       list.appendChild(fr);
-      var qm = document.createElement('div');
-      qm.setAttribute('data-testid', 'assistant-message');
-      var qr = document.createElement('div');
-      qr.className = 'timelineMessage_ab12';
-      qr.textContent = c[1];
-      hang(qr, { content: { type: 'text', text: c[1] } }, { uuid: replyId(++replies), timestamp: tsq + n * 1000, model: 'claude-opus-5-5' });
-      qm.appendChild(qr);
-      list.appendChild(qm);
+      c[1].forEach(function(m){ quietReply(m, n); });
     });
   }
   var addTurn = function(){ turn(CFG.turns); };
@@ -348,6 +358,13 @@ const PHASES = String.raw`
       /* For each reply, which child carries the figures - the reply's duration is the one figure every reply has. */
       R.quietRows = Array.prototype.map.call(document.querySelectorAll('[data-cce-quiet="1"]'), function(e){ return e.style.display; });
     R.quietFolds = Array.prototype.map.call(document.querySelectorAll('[data-testid="focus-fold-row"]'), function(e){ return e.style.display || 'shown'; });
+    // How many thinking rows and replies of the quiet answers are still drawn.
+    R.thinkingShown = Array.prototype.filter.call(document.querySelectorAll('[data-harness-thinking]'), function(e){
+      return e.getClientRects().length > 0;
+    }).length;
+    R.quietShown = Array.prototype.filter.call(document.querySelectorAll('[data-testid="assistant-message"]'), function(m){
+      return m.getClientRects().length > 0 && /^\s*-?\s*$/.test(m.textContent);
+    }).length;
       R.figuresAt = [];
       var replyEls = document.querySelectorAll('[data-testid="assistant-message"]');
       for (var fi = 0; fi < replyEls.length; fi++) {

@@ -884,11 +884,27 @@ async function run({ exe, profile, env, playwright, model, threads, out, check, 
       if (!wasOn) await focus.click();
       const folds = () => conv.evaluate(() => [...document.querySelectorAll('[data-testid="focus-fold-row"]')]
         .map((r) => ({ label: r.textContent.trim(), shown: getComputedStyle(r).display !== 'none' })));
-      const seen = await until(async () => { const f = await folds(); return f.length && f.every((x) => !x.shown) ? f : null; }, 15000, 300);
+      /* Everything after the first fold row is the answer to the peer messages, which ends in a dash, so none of it
+         may be on screen. */
+      const after = () => conv.evaluate(() => {
+        const fold = document.querySelector('[data-testid="focus-fold-row"]');
+        if (!fold) return null;
+        const out = [];
+        for (let e = fold; e; e = e.nextElementSibling) {
+          const box = e.getBoundingClientRect();
+          out.push({ testid: e.getAttribute('data-testid') || '', cls: String(e.className || '').split(' ')[0].replace(/_[a-z0-9]+$/i, ''),
+            shown: getComputedStyle(e).display !== 'none' && box.height > 0, height: Math.round(box.height),
+            text: (e.innerText || '').trim().slice(0, 40) });
+        }
+        return out;
+      });
+      const seen = await until(async () => { const f = await after(); return f && f.length && f.every((x) => !x.shown) ? f : null; }, 15000, 300);
+      // innerText of an element that is not drawn is all its text, so only replies on screen are read.
       const replies = await conv.evaluate(() => [...document.querySelectorAll('[data-testid="assistant-message"]')]
-        .map((m) => (m.innerText || '').trim()).filter(Boolean));
-      check(!!seen && replies.indexOf('-') === -1, 'a peer message answered with a dash: its fold row and the dash are both hidden',
-        { folds: seen || await folds(), replies });
+        .filter((m) => m.getClientRects().length).map((m) => (m.innerText || '').trim()).filter(Boolean));
+      check(!!seen && replies.indexOf('-') === -1,
+        'a peer message answered with a dash after thinking with no text and a tool call: nothing of it is left on screen, fold row and dots included',
+        { after: seen || await after(), folds: await folds(), replies });
       await shot('quiet-peer-reply');
       if (!wasOn) await focus.click();
     });

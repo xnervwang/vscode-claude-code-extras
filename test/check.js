@@ -315,9 +315,12 @@ console.log('\nwhat the page costs, in a browser');
       if (!hush.error && JSON.stringify(hush.quietRows) === JSON.stringify(['none'])) ok('a dash-only reply is hidden; the other replies stay visible');
       else bad('a reply that is only a dash: ' + (hush.error || JSON.stringify(hush.quietRows)));
       const folds = harness.run(browser, { turns: SHORT, focus: true, quietFold: true });
-      if (!folds.error && JSON.stringify(folds.quietFolds) === JSON.stringify(['none', 'shown', 'shown'])) {
-        ok('a message from another conversation answered only with a dash leaves no folded row; the user\'s own turn and a reply in words keep theirs');
+      if (!folds.error && JSON.stringify(folds.quietFolds) === JSON.stringify(['none', 'shown', 'shown', 'none', 'none', 'none', 'none', 'shown'])) {
+        ok('a message from another conversation answered only with a dash leaves no folded row, also when thinking with no text comes before the dash and while the conversation works on; the user\'s own turn, a reply in words, and the fold still running at the end keep theirs');
       } else bad('folded rows ahead of quiet replies: ' + (folds.error || JSON.stringify(folds.quietFolds)));
+      if (!folds.error && folds.thinkingShown === 0 && folds.quietShown === 0) {
+        ok('a quiet answer takes no room: neither the dash\'s reply nor its thinking, in a reply of its own or beside the dash');
+      } else bad('quiet answers left on the page: ' + (folds.error || JSON.stringify([folds.thinkingShown, folds.quietShown])));
       const churn = harness.run(browser, { turns: SHORT, focus: true, headChurn: true });
       if (!churn.error && churn.idleSweeps === 0 && churn.idleChild > 0) {
         ok(`stylesheets coming and going in the head start no sweep (${churn.idleChild} changes, 0 sweeps)`);
