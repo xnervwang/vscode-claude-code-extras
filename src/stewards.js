@@ -25,6 +25,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { planDir, SESSION, writeAtomic } = require('./claude-files');
+const duplicates = require('./duplicates');
 
 const FILE = 'stewards.json';
 const MAX_MANAGED = 100;
@@ -128,7 +129,12 @@ function noticeText(list, names, details = {}) {
     const d = details[c.id];
     const head = c.what === 'waiting' ? `- ${name} (${c.id}) is waiting for the user.`
       : c.what === 'ended' ? `- ${name} (${c.id}): its ${c.why}.`
-        : `- ${name} (${c.id}) finished its turn.`;
+        : c.what === 'twice' ? `- ${name} (${c.id}) is run by ${c.procs.length} processes at once: `
+          + `${c.procs.map(duplicates.describe).join('; ')}. The Stop the old process button in the Steward panel stops `
+          + `pid ${duplicates.oldOne(c.procs).pid}, and so does kill ${duplicates.oldOne(c.procs).pid}.`
+          : c.what === 'stopped' ? `- ${name} (${c.id}): Claude Code Plus stopped its process ${duplicates.describe(c.stop)}, `
+            + `${c.stop.how === 'auto' ? 'as it was idle and its window was gone' : 'from the Stop the old process button'}.`
+            : `- ${name} (${c.id}) finished its turn.`;
     if (!d || said.has(c.id)) return head;
     said.add(c.id);
     const more = [`  Now: ${d.state}${d.doing && d.doing.length ? '; doing: ' + d.doing.join(' · ') : ''}`];

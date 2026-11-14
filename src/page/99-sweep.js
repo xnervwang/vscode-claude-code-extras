@@ -387,6 +387,7 @@
   };
   /* Replies that are empty, a single dash, or [[quiet]] (what a steward writes for a notice that needed nothing from
      the user) are hidden. Rows are checked again on every sweep, so a reply still streaming shows once it has text. */
+  var ALIVE_MS = 60000;
   var QUIET_REPLY = /^\s*(?:[-\u2013\u2014\u00b7\u2022]|\[\[quiet\]\])?\s*$/;
   /* A quiet reply is hidden as a whole element, since with only its rows hidden it still took up a line and drew its
      dot. The rule is !important because the view filter sets the element's display inline (applyOwner). */
@@ -526,6 +527,10 @@
     try { window.addEventListener('pagehide', function(){ forget(lastProbeUrl); }); } catch (e) {}
     try { listenForAnswers(); } catch (e) {}
     try { listenForFocus(); } catch (e) {}
+    // A heartbeat to the extension host; src/duplicates.js treats a host without one as having lost its window.
+    var alive = function(){ try { acquireVsCodeApi().postMessage({ type: 'cce_alive' }); } catch (e) {} };
+    alive();
+    setInterval(alive, ALIVE_MS);
     // The chime and the low-context outline must not depend on DOM churn: a turn can end without
     // any further mutation, which would leave the last sweep observing a still-busy state.
     setInterval(function(){ try { watchIdle(); } catch (e) {} try { fillWindow(); } catch (e) {} try { markCtxLow(); } catch (e) {} try { ensureMute(); } catch (e) {} try { ensureInfo(); } catch (e) {} try { ensureFocusControl(); } catch (e) {} try { paintToolClock(); } catch (e) {} try { orderControls(); } catch (e) {} }, 700);

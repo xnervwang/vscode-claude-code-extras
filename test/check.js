@@ -7862,6 +7862,26 @@ console.log('\ntext colors in the session list');
     ok('the stylesheet carries the colors in session ID order, and says the host acts on a choice even with nothing colored; with the switch off it carries nothing');
   } else bad(`the stylesheet carried ${JSON.stringify([full, empty, none, off])}`);
 
+  /* The mark on a conversation run by several processes (src/duplicates.js), carried the same way. */
+  {
+    const unpackDups = (css) => { const m = /--cce-dups:"([^"]+)"/.exec(css); return m ? JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')) : null; };
+    const carried = unpackDups(webview.liveCss({ dups: [[A, 2]] })), absent = unpackDups(webview.liveCss({ dups: [] }));
+    const denv = { window: {}, Buffer, TextDecoder, atob: (x) => Buffer.from(x, 'base64').toString('binary'), appended: [], prop: '' };
+    denv.getComputedStyle = () => ({ getPropertyValue: (n) => (n === '--cce-dups' ? denv.prop : '') });
+    denv.document = { documentElement: {}, createElement: (t) => ({ tag: t, textContent: '', setAttribute() {} }) };
+    denv.head = { appendChild: (el) => denv.appended.push(el) };
+    vm.createContext(denv);
+    vm.runInContext(frag('82-scheduled-tasks.js') + frag('84-session-twice.js') + ';this.reset = function(){ propCache = {}; };this.paint = function(){ paintTwice(); };', denv);
+    denv.paint();
+    const before = denv.appended.length;
+    denv.prop = '"' + Buffer.from(JSON.stringify([[A, 2], ['not an id', 3], [B, 1]]), 'utf8').toString('base64') + '"'; denv.reset(); denv.paint();
+    const rule = denv.appended[0] && denv.appended[0].textContent;
+    if (JSON.stringify(carried) === JSON.stringify([[A, 2]]) && absent === null && before === 0
+        && rule === `[class*="sessionItem_"][id$="${A}"] span[class*="sessionName_"]::after{content:" \u00b7 2 processes";color:var(--vscode-errorForeground,#f14c4c);font-weight:normal}`) {
+      ok('a conversation run by several processes is marked after its title in every session-list row that shows it, through the stylesheet');
+    } else bad(`the mark on a conversation run twice: ${JSON.stringify([carried, absent, before, rule])}`);
+  }
+
   const pack = (v) => '"' + Buffer.from(JSON.stringify(v), 'utf8').toString('base64') + '"';
   const env = { window: {}, Buffer, TextDecoder, atob: (x) => Buffer.from(x, 'base64').toString('binary'), prop: '', posted: [], timers: [], appended: [], offKey: '' };
   env.getComputedStyle = () => ({ getPropertyValue: (n) => (n === '--cce-colors' ? env.prop : '') });
@@ -8404,10 +8424,17 @@ console.log('\nthe Steward panel');
         st.setManaged(${JSON.stringify(S(3))}, [${JSON.stringify(S(2))}], {}, { dir: D2 });
         await v._pass();
         const grown = st.read(D2)[S1].manages.slice().sort();
+        // Eight leaves every window: it stays on the list for a while, as a window waking up publishes late.
+        require('fs').writeFileSync(wdir + '/4242.json', JSON.stringify({ pid: 4242, at: Date.now(), name: 'proj-b', folders: ['/w/c'],
+          sessions: [${JSON.stringify(S(3))}] }));
+        v._syncEvery();
+        const keptAway = st.read(D2)[S1].manages.includes(${JSON.stringify(S(8))});
+        v._syncEvery(Date.now() + 11 * 60000);
+        const goneLater = !st.read(D2)[S1].manages.includes(${JSON.stringify(S(8))});
         await v._onMessage({ type: 'every', on: false });
         const everyOff = st.read(D2)[S1];
         const freedPage = latest();
-        const every = { on: everyOn, lockedPage, locked, grown, off: everyOff, freedPage };
+        const every = { on: everyOn, lockedPage, locked, grown, off: everyOff, freedPage, keptAway, goneLater };
         v.dispose();
         process.stdout.write(JSON.stringify({ replacedTook, first, second, ticked, afterDone, held, posts, stillTicked, cleared, reloaded: shellAfter !== shellFirst, idle, ownWindow, groupOn, groupOff, allTicked, away, dropped, everyShown, jump, every }));
       })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`;
@@ -8469,10 +8496,13 @@ console.log('\nthe Steward panel');
         ok('the All box ticks everything listed and locks it: unticking a row or pressing Clear does nothing');
       } else bad(`turning All on gave ${JSON.stringify([e.on, e.locked, rowBoxes(e.lockedPage)])}`);
       if (JSON.stringify(e.grown) === JSON.stringify([S(2), S(6), S(8)].sort()) && e.off && e.off.all === false
-          && JSON.stringify(e.off.manages.slice().sort()) === JSON.stringify([S(2), S(6), S(8)].sort())
+          && JSON.stringify(e.off.manages.slice().sort()) === JSON.stringify([S(2), S(6)].sort())
           && !/data-every="1" checked/.test(e.freedPage) && rowBoxes(e.freedPage).every((b) => !/\bdisabled\b/.test(b))) {
         ok('then a conversation opened later is added and one that became a steward is dropped; turning All off keeps the ticks and frees the boxes');
       } else bad(`with All on, later: ${JSON.stringify([e.grown, e.off])}`);
+      if (e.keptAway === true && e.goneLater === true) {
+        ok('with All on, a conversation out of every window stays on the list for ten minutes before it goes');
+      } else bad(`a conversation leaving every window: ${JSON.stringify([e.keptAway, e.goneLater])}`);
     }
 
     /* Which managed conversations a steward's plan is waiting on: named in an open row, by title or by id. */
@@ -8557,13 +8587,16 @@ console.log('\nthe Steward panel');
       } else bad(`the steward's calls read ${JSON.stringify({ found, none })}`);
       /* In a child process, since take() is asynchronous and this script is not. */
       const R = (n) => `aaaaaaaa-0000-4000-8000-00000000000${n}`;
+      // A call that reaches the transcript only after the window first looks, as Claude Code's own write can.
+      const lateCall = JSON.stringify(call('a9', 'toolu_late', now, cmd(S(3), 'late call')));
       const relayed = JSON.parse(cp.execFileSync(process.execPath, ['-e', `
         const fs = require('fs'), path = require('path');
         const relay = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'relay.js'))});
         const rdir = ${JSON.stringify(rdir)}, S = (n) => '5e5e5e5e-0000-4000-8000-00000000000' + n, now = ${now};
         const R = (n) => 'aaaaaaaa-0000-4000-8000-00000000000' + n;
         const restarted = ${JSON.stringify(restarted)}, lines2 = ${JSON.stringify(lines2)};
-        const table = { [S(1)]: { manages: [S(2), S(3)], names: {}, at: 0, all: false } };
+        // S(6) manages all, with an empty list as it has just after waking up; S(1) is a steward too.
+        const table = { [S(1)]: { manages: [S(2), S(3)], names: {}, at: 0, all: false }, [S(6)]: { manages: [], names: {}, at: 0, all: true } };
         const put = (id, req) => fs.writeFileSync(path.join(rdir, relay.RELAY_DIR, id + '.json'),
           JSON.stringify(Object.assign({ id, steward: S(1), at: now }, req)));
         put(R(1), { to: S(2), text: restarted });
@@ -8572,24 +8605,36 @@ console.log('\nthe Steward panel');
         put(R(4), { to: S(3), text: lines2, at: now - relay.MAX_AGE_MS - 1 });
         put(R(5), { to: S(5), text: restarted });
         put(R(7), { to: S(3), text: lines2 });
+        put(R(8), { to: S(3), text: 'late call' });
+        put(R('a'), { steward: S(6), to: S(2), text: restarted });
+        put(R('b'), { steward: S(6), to: S(1), text: restarted });
         const typed = [];
-        const deps = { shownHere: (id) => id !== S(5), stewards: () => table, transcriptOf: (id) => (id === S(1) ? ${JSON.stringify(transcript)} : ''),
-          pid: 77, deliver: async (id, text) => { typed.push([id, text]); return { outcome: 'submitted' }; }, now: () => now };
+        let waits = 0, late = false;
+        const deps = { shownHere: (id) => id !== S(5), stewards: () => table,
+          transcriptOf: (id) => (id === S(1) || id === S(6) ? ${JSON.stringify(transcript)} : ''),
+          pid: 77, deliver: async (id, text) => { typed.push([id, text]); return { outcome: 'submitted' }; }, now: () => now,
+          sleep: async () => { waits++; if (!late) { late = true; fs.appendFileSync(${JSON.stringify(transcript)}, ${JSON.stringify(lateCall)} + String.fromCharCode(10)); } } };
         (async () => {
           const first = await relay.take(rdir, deps);
           put(R(6), { to: S(2), text: restarted });
           const again = await relay.take(rdir, deps);
           const left = fs.readdirSync(path.join(rdir, relay.RELAY_DIR)).sort();
           const results = Object.fromEntries(first.map((r) => [r.id, r.outcome]));
-          process.stdout.write(JSON.stringify({ typed, results, again, left }));
+          process.stdout.write(JSON.stringify({ typed, results, again, left, waits }));
         })().catch((e) => process.stdout.write(JSON.stringify({ error: e.stack })));`], { encoding: 'utf8', timeout: 30000 }));
       const { typed, results, again, left } = relayed;
-      if (typed && JSON.stringify(typed) === JSON.stringify([[S(2), restarted], [S(3), lines2]]) && results[R(1)] === 'submitted'
-          && results[R(7)] === 'submitted' && results[R(2)] === 'refused' && results[R(3)] === 'refused'
+      if (typed && JSON.stringify(typed) === JSON.stringify([[S(2), restarted], [S(3), lines2], [S(3), 'late call'], [S(2), restarted]])
+          && results[R(1)] === 'submitted' && results[R(7)] === 'submitted' && results[R(2)] === 'refused' && results[R(3)] === 'refused'
           && again.length === 1 && again[0].outcome === 'refused' && /already/.test(again[0].reason)
           && left.includes(R(5) + '.json') && !left.includes(R(4) + '.json') && !left.some((n) => n.includes('.taken-'))) {
         ok('a window types the steward\'s text into a conversation it shows when the steward manages it and sent it, refuses text the steward did not send, other conversations and a second request from one call, leaves a request for another window, and drops a stale one');
       } else bad(`relaying gave ${JSON.stringify(relayed)}`);
+      if (results && results[R(8)] === 'submitted' && relayed.waits > 0 && relayed.waits <= relay.RAN_WAITS_MS.length * 2) {
+        ok('a steward\'s call that reaches its transcript a moment after the request is found by reading the transcript again, not refused');
+      } else bad(`a call written late: ${JSON.stringify(relayed)}`);
+      if (results && results[R('a')] === 'submitted' && results[R('b')] === 'refused') {
+        ok('a steward of all conversations reaches one its list does not hold at the moment, but not another steward');
+      } else bad(`a steward of all: ${JSON.stringify(results)}`);
       /* The script the steward runs: it leaves the request and prints the answer a window writes back. */
       const script = path.join(__dirname, '..', 'claude-plugin', 'agent-work-plan', 'hooks', 'steward-relay.py');
       const sdir = path.join(root, 'relay-script');
@@ -8649,28 +8694,38 @@ console.log('\nthe Steward panel');
       /* Background work: a `claude --bg` session and a `claude -p` worker from the link file beside the plan. */
       const C = (n) => `c0c0c0c0-0000-4000-8000-00000000000${n}`;
       const W = (n) => `abababa${n}-0000-4000-8000-000000000000`;
-      fs.writeFileSync(path.join(wdir, C(1) + bgm.SUFFIX), JSON.stringify({ ids: ['11111111', '22222222', '33333333', '44444444'],
+      fs.writeFileSync(path.join(wdir, C(1) + bgm.SUFFIX), JSON.stringify({ ids: ['11111111', '22222222', '33333333', '44444444', '66666666', '77777777', '88888888', '99999999'],
         workers: [W(1), W(2), W(3), '11111111-0000-4000-8000-000000000000'], scannedTo: 0 }));
       const live = [{ kind: 'bg', jobId: '11111111', sessionId: '11111111-0000-4000-8000-000000000000' }, { kind: 'bg', jobId: '33333333' },
         { kind: 'interactive', sessionId: W(1) }];
       const run = watch.runningWork(C(1), live, wdir);
-      const states = { '22222222': { state: 'done' }, '33333333': { state: 'stopped', name: 'mutants' }, '44444444': { state: 'failed' } };
-      const transcripts = { [C(1)]: write('conv', [rec('assistant', [use('k', 'Bash', { command: 'claude stop 44444444' })])]),
+      const states = { '22222222': { state: 'done' }, '33333333': { state: 'stopped', name: 'mutants' }, '44444444': { state: 'failed' },
+        '77777777': { state: 'blocked', name: 'retry' }, '88888888': { state: 'stopped' }, '99999999': { state: 'stopped' } };
+      // Stopped by the conversation: by name, through a variable, and in a loop.
+      const transcripts = { [C(1)]: write('conv', [rec('assistant', [use('k', 'Bash', { command: 'claude stop 44444444' })]),
+        rec('assistant', [use('k2', 'Bash', { command: 'CC=/x/claude\n"$CC" stop 88888888' })]),
+        rec('assistant', [use('k3', 'Bash', { command: 'for j in 99999999 aaaaaaaa; do echo $j; "$CC" rm $j; done' })])]),
         [W(1)]: write('w1', [rec('user', 'Task'), rec('assistant', [use('w', 'Bash', { command: 'x' })]), rec('user', [result('w')])]),
         [W(2)]: write('w2', [rec('user', 'Task'), rec('assistant', [{ type: 'text', text: 'Finished.' }])]) };
-      const how = (key) => watch.howEnded(key, C(1), { transcriptOf: (id) => transcripts[id] || '', readState: (id) => states[id] || null });
-      const ends = ['job:22222222', 'job:33333333', 'job:44444444', 'job:55555555', 'worker:' + W(1), 'worker:' + W(2), 'worker:' + W(3)].map(how);
+      const last = { 'job:66666666': 'done', 'job:55555555': 'working' };
+      const how = (key) => watch.howEnded(key, C(1), { transcriptOf: (id) => transcripts[id] || '', readState: (id) => states[id] || null }, last[key]);
+      const ends = ['job:22222222', 'job:33333333', 'job:44444444', 'job:55555555', 'worker:' + W(1), 'worker:' + W(2), 'worker:' + W(3),
+        'job:66666666', 'job:77777777', 'job:88888888', 'job:99999999'].map(how);
       if (JSON.stringify(run) === JSON.stringify(['job:11111111', 'job:33333333', 'worker:' + W(1)])
           && ends[0] === '' && ends[1] === 'background session "mutants" (33333333) ended without finishing: its state is stopped'
           && ends[2] === '' && ends[3] === 'background session (55555555) ended without finishing: it left no record'
-          && ends[4] === '`claude -p` worker (abababa1) ended in the middle of a turn' && ends[5] === '' && ends[6] === null) {
-        ok('background work that stops running ended without finishing unless its state says done or waiting, the conversation stopped it itself, or the worker\'s last reply ends its turn; a worker with no transcript cannot be told');
+          && ends[4] === '`claude -p` worker (abababa1) ended in the middle of a turn' && ends[5] === '' && ends[6] === null
+          && ends[7] === '' && ends[8] === 'background session "retry" (77777777) ended without finishing: its state is blocked'
+          && ends[9] === '' && ends[10] === '') {
+        ok('background work that stops running ended without finishing unless it was done, also when its record went after that, the conversation stopped or removed it itself, by name, through a variable or in a loop, or the worker\'s last reply ends its turn; still blocked counts as not finished; a worker with no transcript cannot be told');
       } else bad(`running ${JSON.stringify(run)}, ended ${JSON.stringify(ends)}`);
       const ST = path.join(root, 'watch-notices');
-      watch.save(ST, C(9), { running: { [C(1)]: ['job:1'] }, asked: { [C(1)]: ['Q'] } });
-      const back = watch.load(ST, C(9)), none = watch.load(ST, C(8));
-      if (back.running[C(1)][0] === 'job:1' && back.asked[C(1)][0] === 'Q' && JSON.stringify(none) === '{"running":{},"asked":{}}') {
-        ok('what a steward has been told is kept in a file of its own beside the plans, so a reload does not tell it again');
+      watch.save(ST, C(9), { running: { [C(1)]: { 'job:1': 'working' } }, asked: { [C(1)]: ['Q'] } });
+      watch.save(ST, C(7), { running: { [C(1)]: ['job:2'] }, asked: {} });
+      const back = watch.load(ST, C(9)), older = watch.load(ST, C(7)), none = watch.load(ST, C(8));
+      if (back.running[C(1)]['job:1'] === 'working' && back.asked[C(1)][0] === 'Q' && older.running[C(1)]['job:2'] === ''
+          && JSON.stringify(none) === '{"running":{},"asked":{},"twice":{},"stoppedAt":0}') {
+        ok('what a steward has been told, with each running job\'s last state, is kept in a file of its own beside the plans, so a reload does not tell it again; a file listing keys alone still reads');
       } else bad(`kept ${JSON.stringify([back, none])}`);
 
       /* The panel's notices with them, against a stand-in editor. */
@@ -8699,6 +8754,8 @@ console.log('\nthe Steward panel');
           isBackground: () => false, records: () => liveRecs, post: async (a, t) => { posts.push(t); return true; },
           windowName: () => 'w', windowFolders: () => ['/w'], shownList: () => [P(1), P(2), P(3)],
           transcriptOf: (id) => (id === P(3) ? ${JSON.stringify(permFile)} : ''),
+          duplicates: () => new Map([[P(2), [{ pid: 12, startedAt: Date.UTC(2026, 10, 13, 2, 34), window: '', windowless: true, idle: false },
+            { pid: 13, startedAt: Date.UTC(2026, 10, 13, 18, 53), window: 'proj', windowless: false, idle: true }]]]),
           readState: (id) => (id === '77777777' ? { state: 'stopped', name: 'bench' } : null) });
         const T0 = Date.now();
         (async () => {
@@ -8728,8 +8785,15 @@ console.log('\nthe Steward panel');
       else {
         const first = out.posts.find((t) => t.includes('First?')) || '', later = out.posts.slice(out.posts.indexOf(first) + 1).join('\n');
         const job = out.posts.find((t) => t.includes('ended without finishing')) || '';
-        if (/<span class="twice"[^>]*>2 processes<\/span>/.test(out.page) && (out.page.match(/class="twice"/g) || []).length === 1) {
-          ok('a row in the Steward panel says so when Claude Code runs its conversation in two processes at once');
+        const two = out.posts.find((t) => t.includes('processes at once')) || '';
+        if (two.includes(`"Two" (${P(2)}) is run by 2 processes at once: pid 12, started 2026-11-13 02:34 UTC, in an extension host whose window is gone; `
+            + 'pid 13, started 2026-11-13 18:53 UTC, in window "proj". The Stop the old process button in the Steward panel stops pid 12, and so does kill 12.')
+            && out.posts.filter((t) => t.includes('processes at once')).length === 1) {
+          ok('a steward is told once which processes run a conversation it manages, when each started and in which window');
+        } else bad(`the notices about two processes: ${JSON.stringify(out.posts)}`);
+        if (/<span class="twice"[^>]*>2 processes<\/span>/.test(out.page) && (out.page.match(/class="twice"/g) || []).length === 1
+            && /data-stop-old="5e5e5e5e-0000-4000-8000-000000000002" title="Stops pid 12, started 2026-11-13 02:34 UTC, in an extension host whose window is gone/.test(out.page)) {
+          ok('a row in the Steward panel says so when Claude Code runs its conversation in two processes at once, with a button that stops the one whose window is gone');
         } else bad(`the panel showed ${JSON.stringify(out.page.slice(0, 200))}`);
         if (job.includes(`"Three" (${P(3)}): its background session "bench" (77777777) ended without finishing: its state is stopped.`)
             && out.posts.some((t) => t.includes("Waiting on the user's answer to a permission prompt for Bash: make test && make check"))) {
@@ -8738,6 +8802,56 @@ console.log('\nthe Steward panel');
         if (first && later.includes('Question for the user: Second?') && !later.includes('First?')) {
           ok('a question is given to a steward once: a later notice lists only the questions that are new');
         } else bad(`the questions in the notices: ${JSON.stringify(out.posts)}`);
+      }
+      /* src/duplicates.js on a made-up /proc: which processes run one conversation, and which may be stopped. */
+      {
+        const dup = require('../src/duplicates');
+        const proc = path.join(root, 'dup-proc'), ddir = path.join(root, 'dup-plans');
+        fs.mkdirSync(path.join(ddir, 'windows'), { recursive: true });
+        const put = (pid, comm, ppid, argv, start = 100) => {
+          fs.mkdirSync(path.join(proc, String(pid)), { recursive: true });
+          fs.writeFileSync(path.join(proc, String(pid), 'stat'), `${pid} (${comm}) S ${ppid} ${Array(17).fill(0).join(' ')} ${start} 0 0\n`);
+          fs.writeFileSync(path.join(proc, String(pid), 'cmdline'), argv.join('\0') + '\0');
+        };
+        const HOST = ['/srv/node', '/srv/out/bootstrap-fork', '--type=extensionHost'];
+        put(50, 'node', 1, HOST); put(60, 'node', 1, HOST);
+        put(51, 'claude-wrapper', 50, ['claude-wrapper']); put(100, 'claude', 51, ['claude', '--output-format', 'stream-json'], 111);
+        put(200, 'claude', 60, ['claude', '--output-format', 'stream-json'], 222);
+        put(70, 'bash', 1, ['bash', '-c', 'claude -p --resume x']); put(300, 'claude', 70, ['claude', '-p', '--resume', 'x'], 333);
+        put(400, 'claude', 60, ['claude'], 444); put(500, 'claude', 50, ['claude'], 555);
+        const now = Date.now(), old = now - 10 * 60000;
+        fs.writeFileSync(path.join(ddir, 'windows', '50.json'), JSON.stringify({ pid: 50, at: now, name: 'gone [SSH: h]', pageAt: now - 6 * 60000 }));
+        fs.writeFileSync(path.join(ddir, 'windows', '60.json'), JSON.stringify({ pid: 60, at: now, name: 'here [SSH: h]', pageAt: now - 30000 }));
+        const tr = path.join(root, 'dup-transcript.jsonl');
+        fs.writeFileSync(tr, '{}\n');
+        fs.utimesSync(tr, old / 1000, old / 1000);
+        const A = 'dddddddd-0000-4000-8000-000000000001', B = 'dddddddd-0000-4000-8000-000000000002';
+        const rec = (pid, sessionId, o) => Object.assign({ pid, sessionId, kind: 'interactive', status: 'idle', statusUpdatedAt: old,
+          startedAt: old + pid, procStart: String(pid === 100 ? 111 : pid === 200 ? 222 : pid === 300 ? 333 : pid === 400 ? 444 : 555) }, o);
+        const records = [rec(100, A), rec(200, A, { status: 'busy' }), rec(300, A), rec(400, B), rec(500, B, { kind: 'bg' })];
+        const groups = dup.find({ records, dir: ddir, proc, now, transcript: () => tr });
+        const g = groups.get(A) || [];
+        if (groups.size === 1 && JSON.stringify(g.map((p) => [p.pid, p.host, p.window, p.windowless, p.idle]))
+            === JSON.stringify([[100, 50, 'gone', true, true], [200, 60, 'here', false, false]])) {
+          ok('two editor processes running one conversation are found, each with its extension host and window; a claude -p --resume carrying it on and a --bg session are not counted');
+        } else bad(`the processes found: ${JSON.stringify([...groups])}`);
+        const auto = dup.autoStops(g).map((p) => p.pid), both = dup.autoStops(g.map((p) => Object.assign({}, p, { windowless: true })));
+        const busy = dup.autoStops(g.map((p) => Object.assign({}, p, { idle: false })));
+        if (JSON.stringify(auto) === '[100]' && !both.length && !busy.length && dup.oldOne(g).pid === 100
+            && dup.oldOne(g.map((p) => Object.assign({}, p, { windowless: false }))).pid === 100) {
+          ok('only an idle process whose window is gone is stopped without asking, and only while another one has a window; the button stops the one with no window, else the oldest');
+        } else bad(`what may be stopped: ${JSON.stringify([auto, both, busy])}`);
+        const killed = [];
+        const done = dup.stop(A, g[0], 'auto', { dir: ddir, proc, kill: (pid) => killed.push(pid), now });
+        const moved = dup.stop(A, Object.assign({}, g[1], { procStart: '999' }), 'button', { dir: ddir, proc, kill: (pid) => killed.push(pid), now });
+        const told = dup.stopped(ddir, 0, now);
+        if (done && !moved && JSON.stringify(killed) === '[100]' && told.length === 1 && told[0].session === A && told[0].how === 'auto'
+            && dup.stopped(ddir, told[0].at, now).length === 0) {
+          ok('a process is stopped only while its pid still names the same process, and the stop is recorded for the steward once');
+        } else bad(`stopping: ${JSON.stringify([done, moved, killed, told])}`);
+        const page = fs.readFileSync(path.join(__dirname, '..', 'src', 'page', '99-sweep.js'), 'utf8');
+        if (new RegExp('var ALIVE_MS = ' + dup.ALIVE_MS + ';').test(page)) ok('a panel page says it is there as often as src/duplicates.js counts on');
+        else bad('the page and src/duplicates.js disagree on how often a page says it is there');
       }
       const q = require('../src/stewards').noticeText([], {}, {});
       if (q.endsWith('reply with exactly [[quiet]] or a single dash.')) ok('a notice tells the steward it may answer with [[quiet]] or a single dash');

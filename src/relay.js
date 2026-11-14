@@ -31,6 +31,9 @@ const RAN_MS = 5 * 60000;
 const TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_TEXT = 4000;
 const SENT_FILE = 'sent.json';
+/* Claude Code writes a tool call to the transcript a moment after the command starts, and a window can read the
+   script's request before that; so the transcript is read again after each of these waits before refusing. */
+const RAN_WAITS_MS = [500, 1000, 2000, 3000];
 const SENT_KEEP_MS = 24 * 3600000;
 const SCRIPT = 'steward-relay.py';
 
@@ -78,7 +81,7 @@ function readSent(dir, now) {
 /*
  * Carries out the requests in `planDir` for conversations this window shows. deps: shownHere(id), stewards() -> the
  * stewards table (src/stewards.js), transcriptOf(id), deliver(id, text) -> Promise<{ outcome, reason }> (the Answer
- * view's delivery, src/claude-source.js), pid, now(). Returns the results it wrote.
+ * view's delivery, src/claude-source.js), pid, now(), and sleep(ms) for tests. Returns the results it wrote.
  */
 async function take(planDir, deps) {
   const dir = path.join(planDir, RELAY_DIR);
@@ -111,12 +114,20 @@ async function take(planDir, deps) {
 async function carryOut(req, to, dir, deps, now) {
   const steward = String(req.steward || '').toLowerCase();
   if (!SESSION.test(steward)) return { outcome: 'refused', reason: 'the request does not say which steward sent it' };
-  const t = (deps.stewards() || {})[steward];
-  if (!t || !t.manages.includes(to)) return { outcome: 'refused', reason: 'that conversation is not one this steward manages' };
+  const table = deps.stewards() || {}, t = table[steward];
+  // A steward of all conversations manages all but other stewards, even ones missing from its list for the moment.
+  if (!t || !(t.manages.includes(to) || (t.all && to !== steward && !table[to]))) {
+    return { outcome: 'refused', reason: 'that conversation is not one this steward manages' };
+  }
   const text = String(req.text || '').trim();
   if (!text || text.length > MAX_TEXT) return { outcome: 'refused', reason: `there is no text, or it is longer than ${MAX_TEXT} characters` };
   const file = deps.transcriptOf(steward);
-  const call = file ? ranBy(file, to, text, now) : null;
+  let call = file ? ranBy(file, to, text, now) : null;
+  const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let i = 0; file && !call && i < RAN_WAITS_MS.length; i++) {
+    await sleep(RAN_WAITS_MS[i]);
+    call = ranBy(file, to, text, deps.now ? deps.now() : Date.now());
+  }
   if (!call) {
     return { outcome: 'refused', reason: `the steward conversation has not run ${SCRIPT} for that conversation with this text `
       + 'in its command in the last 5 minutes; give the text in a here-document in the command itself' };
@@ -132,4 +143,4 @@ async function carryOut(req, to, dir, deps, now) {
   return { outcome: (r && r.outcome) || 'uncertain', reason: (r && r.reason) || '' };
 }
 
-module.exports = { take, ranBy, RELAY_DIR, MAX_AGE_MS, RAN_MS, SENT_FILE };
+module.exports = { take, ranBy, RELAY_DIR, MAX_AGE_MS, RAN_MS, RAN_WAITS_MS, SENT_FILE };

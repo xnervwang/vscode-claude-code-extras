@@ -19,8 +19,9 @@ const TAIL_BYTES = 512 * 1024;
 const MAX_SUMMARY = 300;
 /* Tools that run a subagent; the subagent's own calls are in its own transcript. */
 const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
-/* States of a `claude --bg` session that are not a failure: finished, or waiting for an answer. */
-const FINE = new Set(['done', 'blocked']);
+/* The state of a `claude --bg` session that finished. One whose process is gone while it is still "blocked" (waiting
+   for an answer) or "working" died: a 429 or a killed daemon leaves it like that. */
+const DONE = 'done';
 
 function tailRecords(file, bytes = TAIL_BYTES) {
   let text = '';
@@ -115,12 +116,18 @@ function runningWork(session, records, dir) {
     .concat(link.workers.filter((w) => sessions.has(w) && !link.ids.includes(w.slice(0, 8))).map((w) => 'worker:' + w));
 }
 
-/* Whether the conversation stopped job `id` itself with `claude stop`, as a tool call near the end of its transcript. */
+/*
+ * Whether the conversation stopped or removed job `id` itself, as a tool call near the end of its transcript. The CLI
+ * is often run through a variable ("$CC" stop <id>), and several jobs through a loop (for j in <id> ...; do "$CC" rm
+ * $j), so the command is read for the subcommand and the id rather than for "claude stop".
+ */
 function stoppedBy(file, id) {
+  const direct = new RegExp(`\\b(?:stop|rm)\\s+["']?${id}\\b`);
+  const loop = new RegExp(`\\bfor\\s+(\\w+)\\s+in\\s+[^;\\n]*\\b${id}\\b[\\s\\S]*?\\b(?:stop|rm)\\s+["']?\\$\\{?\\1\\b`);
   for (const r of file ? tailRecords(file, 2 * 1024 * 1024) : []) {
     for (const b of blocks(r)) {
       const c = b && b.type === 'tool_use' && b.input && typeof b.input.command === 'string' ? b.input.command : '';
-      if (c.includes('claude stop') && c.includes(id)) return true;
+      if (c.includes(id) && (direct.test(c) || loop.test(c))) return true;
     }
   }
   return false;
@@ -128,12 +135,13 @@ function stoppedBy(file, id) {
 
 /*
  * Returns '' for work that finished or that its own conversation stopped, null when the records do not say, and
- * otherwise the notice's words for it. deps: transcriptOf(id), readState(id) (src/background.js).
+ * otherwise the notice's words for it. `last` is the state the job had at the last look, which is all there is to go
+ * by when its record has been removed since. deps: transcriptOf(id), readState(id) (src/background.js).
  */
-function howEnded(key, session, deps) {
+function howEnded(key, session, deps, last = '') {
   if (key.startsWith('job:')) {
     const id = key.slice(4), st = deps.readState(id);
-    if (st && FINE.has(st.state)) return '';
+    if ((st ? st.state : last) === DONE) return '';
     if (stoppedBy(deps.transcriptOf(session), id)) return '';
     const name = st && st.name ? `"${st.name}" ` : '';
     return `background session ${name}(${id}) ended without finishing: ${st ? 'its state is ' + (st.state || 'not set') : 'it left no record'}`;
@@ -146,12 +154,20 @@ function howEnded(key, session, deps) {
   return finished ? '' : `\`claude -p\` worker (${id.slice(0, 8)}) ended in the middle of a turn`;
 }
 
-/* What this steward has been told: { running: { <session>: [keys] }, asked: { <session>: [questions] } }. */
+/*
+ * What this steward has been told: { running: { <session>: { <key>: <state at the last look> } }, asked: { <session>:
+ * [questions] }, twice: { <session>: <pids of the processes running it> }, stoppedAt: <time of the last stop told> }.
+ * A file from the build before states were kept lists the keys alone.
+ */
 function load(dir, steward) {
   let d = null;
   try { d = JSON.parse(fs.readFileSync(path.join(dir, NOTICES_DIR, steward + '.json'), 'utf8')); } catch (_) { /* none yet */ }
   const map = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
-  return { running: map(d && d.running), asked: map(d && d.asked) };
+  const running = {};
+  for (const [id, v] of Object.entries(map(d && d.running))) {
+    running[id] = Array.isArray(v) ? Object.fromEntries(v.filter((k) => typeof k === 'string').map((k) => [k, ''])) : map(v);
+  }
+  return { running, asked: map(d && d.asked), twice: map(d && d.twice), stoppedAt: Number(d && d.stoppedAt) || 0 };
 }
 
 function save(dir, steward, state) {

@@ -22,6 +22,7 @@ const path = require('path');
 const stewards = require('./stewards');
 const relay = require('./relay');
 const watch = require('./steward-watch');
+const duplicates = require('./duplicates');
 const waiting = require('./waiting');
 const conversations = require('./conversations');
 const bgSessions = require('./bgsessions');
@@ -35,6 +36,14 @@ const VIEW = 'claudeCodePlus.steward';
    (freshAgents in src/claude-source.js), so most passes only reread plans. */
 const REFRESH_MS = 5000;
 const NOTICE_GAP_MS = 60000;
+/* How long a conversation managed under "All, including new ones" may be out of every window before it leaves the
+   list (syncEvery). */
+const GONE_MS = 10 * 60000;
+/* Whether the newer notice entry x supersedes c. For a conversation's state only the newest change is kept; each ended
+   job and each stopped process is kept; for the processes running a conversation, the newest set. */
+const STATE_KINDS = new Set(['done', 'waiting']);
+const replaces = (x, c) => x.id === c.id && (STATE_KINDS.has(c.what) ? STATE_KINDS.has(x.what)
+  : x.what === c.what && (c.what === 'twice' || (c.what === 'ended' ? x.why === c.why : x.stop.pid === c.stop.pid)));
 /* How often the background work of the conversations a steward manages is looked at. */
 const WORK_CHECK_MS = 15000;
 /* <plan dir>/windows/<pid>.json: what each window shows, ignored once older than this or once its process is gone. */
@@ -67,6 +76,7 @@ function doingRows(nodes, out = []) {
  */
 function gather(records, deps) {
   const all = records ? waiting.merge(records) : new Map();
+  const twice = (deps.duplicates && deps.duplicates()) || new Map();
   const running = new Map();
   for (const [id, s] of all) {
     if (s.kind === 'background' || !s.cwd || deps.isBackground(id, s.cwd)) continue;
@@ -86,7 +96,7 @@ function gather(records, deps) {
       cwd: s.cwd,
       state: on ? conversations.stateOf(s, live, unread) : 'idle',
       running: on,
-      processes: on ? waiting.pidsOf(records, s.sessionId).length : 0,
+      processes: on && twice.get(s.sessionId) ? twice.get(s.sessionId).slice() : [],
       lastActiveAt: deps.since(s) || 0,
       doing: doingRows(nodes),
       questions: qs.length,
@@ -97,6 +107,10 @@ function gather(records, deps) {
   for (const s of stopped.values()) add(s, false);
   return out;
 }
+
+const twiceText = (procs) => `Claude Code runs this conversation in ${procs.length} processes at once, and what is sent to it can reach `
+  + `any of them: ${procs.map(duplicates.describe).join('; ')}.`;
+const stopText = (procs) => `Stops ${duplicates.describe(duplicates.oldOne(procs))}. The conversation stays in its transcript.`;
 
 const STATE_TEXT = { working: 'working', prompt: 'waiting for you', unread: 'finished, not read yet', idle: 'idle' };
 /* STATE_TEXT for the steward's notices, which speak of the user in the third person. */
@@ -159,7 +173,8 @@ function body(model) {
       <input type="checkbox" data-id="${esc(c.sessionId)}" ${c.managed ? 'checked' : ''} ${model.every ? 'disabled' : ''} title="Managed by this conversation">
       <span class="dot ${esc(c.state)}" title="${esc(STATE_TEXT[c.state] || c.state)}"></span>
       <a href="#" class="name" data-open="${esc(c.sessionId)}" title="${esc(c.cwd)}">${esc(c.title)}</a>
-      ${c.processes > 1 ? `<span class="twice" title="Claude Code runs this conversation in ${c.processes} processes at once, and what is sent to it can reach any of them. Close it everywhere but one.">${c.processes} processes</span>` : ''}
+      ${c.processes.length > 1 ? `<span class="twice" title="${esc(twiceText(c.processes))}">${c.processes.length} processes</span>
+      <button class="stop-old" data-stop-old="${esc(c.sessionId)}" title="${esc(stopText(c.processes))}">Stop the old process</button>` : ''}
       ${c.managed ? `<span class="doing">${esc(c.doing.join(' · ') || (c.running ? STATE_TEXT[c.state] : 'stopped'))}</span>
       ${c.questions ? `<span class="questions">${c.questions} question${c.questions === 1 ? '' : 's'} for you</span>` : ''}
       <span class="when">${esc(ago(c.lastActiveAt, now))}</span>` : `<span class="when">${esc(ago(c.lastActiveAt, now))}</span>`}
@@ -208,6 +223,7 @@ function shell(list, nonce) {
   .doing { overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; opacity: 0.85; }
   .questions { color: var(--vscode-editorWarning-foreground, #cca700); }
   .twice { color: var(--vscode-errorForeground, #f14c4c); }
+  .stop-old { padding: 0 6px; }
   .when { opacity: 0.6; margin-left: auto; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--vscode-disabledForeground, #888); }
   .dot.working { background: #22c55e; } .dot.unread { background: #ef4444; } .dot.prompt { background: #3b82f6; }
@@ -234,6 +250,7 @@ function shell(list, nonce) {
     else if (t.matches('input[data-group]')) vscode.postMessage({ type: 'group', key: t.dataset.group, on: t.checked });
     else if (t.matches('input[type=checkbox]')) vscode.postMessage({ type: 'toggle', id: t.dataset.id, on: t.checked });
     else if (t.dataset.open) { e.preventDefault(); vscode.postMessage({ type: 'open', id: t.dataset.open }); }
+    else if (t.dataset.stopOld) vscode.postMessage({ type: 'stop-old', id: t.dataset.stopOld });
     else if (t.dataset.act) vscode.postMessage({ type: t.dataset.act });
   });
 </script></body></html>`;
@@ -248,8 +265,9 @@ function shell(list, nonce) {
  * for this window's name, folders and the conversations it shows, and optionally isBackground(id, cwd), records() ->
  * the live session records, alive(pid), post(address, text) in place of stewards.post, changed(), called once the
  * table of stewards has been rewritten here, focusWindow(), which brings this window to the front, transcriptOf(id), and
- * deliver(id, text), which types text into the conversation's message input here (src/relay.js), and readState(id) for
- * a `claude --bg` session's state (src/background.js).
+ * deliver(id, text), which types text into the conversation's message input here (src/relay.js), readState(id) for
+ * a `claude --bg` session's state (src/background.js), duplicates() for the conversations run by several processes
+ * and stopDuplicate(id) to stop the old one (src/duplicates.js), and pageAt() for the time of a page's last heartbeat.
  */
 function create(vscode, deps) {
   deps = Object.assign({ isBackground: bgSessions.isBackground, records: () => liveRecords(), post: stewards.post, alive, readState,
@@ -297,6 +315,9 @@ function create(vscode, deps) {
   const publish = (now = Date.now()) => {
     if (!deps.canShare()) return;
     const entry = { pid: process.pid, name: deps.windowName(), folders: deps.windowFolders(), sessions: deps.shownList() };
+    // Omitted until the first heartbeat, so a host with no heartbeat counts as having its window (src/duplicates.js).
+    const heard = deps.pageAt ? deps.pageAt() : 0;
+    if (heard) entry.pageAt = heard;
     const text = JSON.stringify(entry);
     if (text === published && now - publishedAt < WINDOW_STALE_MS / 2) return;
     try {
@@ -332,15 +353,31 @@ function create(vscode, deps) {
     for (const id of list) if (last.get(id)) names[id] = last.get(id).title;
     return names;
   };
-  /* For each steward with "all" set whose conversation is open in this window, rewrites its list to match everyIds. */
-  const syncEvery = () => {
+  /*
+   * For each steward with "all" set whose conversation is open in this window, adds the conversations everyIds finds
+   * to its list. A conversation is removed only after GONE_MS outside every window. A window that has just woken up
+   * or reconnected publishes its list a little late, and removing its conversations at once made the steward's
+   * messages to them fail meanwhile.
+   */
+  const absentSince = new Map();
+  const syncEvery = (now = Date.now()) => {
     const table = stewards.read(deps.dir);
     let changed = false;
     for (const [steward, t] of Object.entries(table)) {
       if (!t.all || !deps.shownHere(steward)) continue;
-      const want = everyIds(steward, table);
+      const open = new Set(everyIds(steward, table));
+      const kept = t.manages.filter((id) => {
+        const k = steward + ' ' + id;
+        if (open.has(id)) { absentSince.delete(k); return true; }
+        if (table[id]) return false;
+        if (!absentSince.has(k)) absentSince.set(k, now);
+        return now - absentSince.get(k) < GONE_MS;
+      });
+      const want = kept.concat([...open].filter((id) => !kept.includes(id)));
       if (want.length === t.manages.length && want.every((id) => t.manages.includes(id))) continue;
-      stewards.setManaged(steward, want, titlesOf(want), { dir: deps.dir, every: true });
+      const names = titlesOf(want);
+      for (const id of want) if (!names[id] && t.names && t.names[id]) names[id] = t.names[id];
+      stewards.setManaged(steward, want, names, { dir: deps.dir, every: true });
       changed = true;
     }
     if (changed) deps.changed();
@@ -387,22 +424,36 @@ function create(vscode, deps) {
         workAt.set(steward, now);
         const t = toldOf(steward), running = {};
         for (const id of manages) {
-          const cur = watch.runningWork(id, live(), deps.dir);
-          for (const key of t.running[id] || []) {
+          const cur = watch.runningWork(id, live(), deps.dir), was = t.running[id] || {};
+          for (const key of Object.keys(was)) {
             if (cur.includes(key)) continue;
-            const why = watch.howEnded(key, id, { transcriptOf: deps.transcriptOf, readState: deps.readState });
+            const why = watch.howEnded(key, id, { transcriptOf: deps.transcriptOf, readState: deps.readState }, was[key]);
             if (why) list.push({ id, what: 'ended', why });
           }
-          if (cur.length) running[id] = cur;
+          if (!cur.length) continue;
+          running[id] = {};
+          for (const key of cur) {
+            const st = key.startsWith('job:') ? deps.readState(key.slice(4)) : null;
+            running[id][key] = (st && st.state) || '';
+          }
         }
         t.running = running;
+        // Conversations run by several processes, reported once per set of pids, and old processes stopped since.
+        const groups = (deps.duplicates && deps.duplicates()) || new Map(), twice = {};
+        for (const id of manages) {
+          const g = groups.get(id);
+          if (!g) continue;
+          twice[id] = g.map((p) => p.pid).join(' ');
+          if (t.twice[id] !== twice[id]) list.push({ id, what: 'twice', procs: g });
+        }
+        t.twice = twice;
+        for (const e of duplicates.stopped(deps.dir, t.stoppedAt, now)) {
+          if (manages.includes(e.session)) list.push({ id: e.session, what: 'stopped', stop: e });
+          t.stoppedAt = Math.max(t.stoppedAt, e.at);
+        }
         watch.save(deps.dir, steward, t);
       }
-      if (list.length) {
-        // Keep every ended job; of a conversation's state changes, keep only the newest.
-        pending.set(steward, (pending.get(steward) || [])
-          .filter((c) => !list.some((x) => x.id === c.id && (c.what !== 'ended' || x.why === c.why))).concat(list));
-      }
+      if (list.length) pending.set(steward, (pending.get(steward) || []).filter((c) => !list.some((x) => replaces(x, c))).concat(list));
     }
     states.clear();
     for (const [id, s] of after) states.set(id, s);
@@ -423,14 +474,15 @@ function create(vscode, deps) {
           asks: asks[c.id].filter((q) => !before.includes(q)),
           waitingOn: now.state === 'prompt' ? watch.waitingOn(deps.transcriptOf(c.id)) : '' };
       }
+      // Taken off before the post is awaited: a second pass running meanwhile would otherwise send the same notice.
+      pending.delete(steward);
+      sentAt.set(steward, now);
       const sent = rec ? await deps.post(rec.messagingSocketPath, stewards.noticeText(list, names, details)) : false;
       if (sent) {
         Object.assign(t.asked, asks);
         for (const id of Object.keys(t.asked)) if (!table[steward].manages.includes(id)) delete t.asked[id];
         watch.save(deps.dir, steward, t);
       }
-      pending.delete(steward);
-      sentAt.set(steward, now);
       deps.log(`steward ${steward}: ${list.length} change(s) ${sent ? 'sent' : 'not sent, no inbox reached'}`);
     }
   };
@@ -528,6 +580,12 @@ function create(vscode, deps) {
   const onMessage = async (m) => {
     const front = deps.activeChat();
     if (m && m.type === 'ready') { if (view) view.webview.postMessage({ type: 'body', html: shown || '' }); return; }
+    if (m && m.type === 'stop-old' && typeof m.id === 'string') {
+      const p = deps.stopDuplicate ? deps.stopDuplicate(m.id) : null;
+      vscode.window.showInformationMessage(p ? `Stopped process ${p.pid} of that conversation.`
+        : 'That conversation is no longer run by more than one process, or its old process could not be stopped.');
+      return;
+    }
     if (m && m.type === 'open' && typeof m.id === 'string') {
       if (await open(m.id) === 'nowhere') vscode.window.showInformationMessage('That conversation is not open in any VS Code window on this machine.');
       return;

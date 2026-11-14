@@ -168,6 +168,13 @@ function pinsProperty(data) {
   return `:root{--cce-pins:"${Buffer.from(JSON.stringify(data), 'utf8').toString('base64')}";}\n`;
 }
 
+/* The conversations run by several editor processes at once (src/duplicates.js), as [[session ID, count], ...] in
+   session ID order, for a mark on their rows in the session list - same encoding. Absent while there are none. */
+function duplicatesProperty(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  return `:root{--cce-dups:"${Buffer.from(JSON.stringify(list), 'utf8').toString('base64')}";}\n`;
+}
+
 /*
  * The session list's text colors, in the same encoding: [1, [[session ID, name], ...]] in session ID order. The leading
  * 1 keeps the property present when nothing is colored, and the page offers Text color only while the property is
@@ -277,6 +284,7 @@ function liveCss(opts = {}) {
   if (!off.includes('backgroundSessions')) css += backgroundProperty(opts.background);
   css += pinsProperty(opts.pins);
   if (!off.includes('sessionColors')) css += colorsProperty(opts.colors);
+  css += duplicatesProperty(opts.dups);
   return css;
 }
 

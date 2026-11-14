@@ -95,7 +95,8 @@ const EDITS = [
    * Messages from a panel meant for this extension: the panel's time zone, a conversation pinned or unpinned in the
    * session list, a text color chosen for conversations there, archived conversations to delete, whether an answer
    * from the Conversations tab was sent (src/page/91-answer.js), the info box asking for its conversation's
-   * process id (src/page/80-session-info.js), and the panel's page getting focus (src/page/92-focus.js).
+   * process id (src/page/80-session-info.js), the panel's page getting focus (src/page/92-focus.js), and the page
+   * saying it is still there (src/page/99-sweep.js, for src/duplicates.js).
    *
    * Every message a panel sends passes through the one function that logs it, before anything decides what the message
    * is, and Claude Code itself ignores all of these types. A global is how each reaches this extension - both run in one
@@ -120,7 +121,8 @@ const EDITS = [
       + `else if(${msg}&&${msg}.type==="cce_page_focus"&&typeof ${msg}.sessionId==="string"){`
       + `globalThis.__cceFocusHook&&globalThis.__cceFocusHook(${msg}.sessionId)}`
       + `else if(${msg}&&${msg}.type==="cce_open_session"&&typeof ${msg}.sessionId==="string"){`
-      + `globalThis.__cceOpenSessionHook&&globalThis.__cceOpenSessionHook(${msg}.sessionId)}}catch(e){}${rest}`,
+      + `globalThis.__cceOpenSessionHook&&globalThis.__cceOpenSessionHook(${msg}.sessionId)}`
+      + `else if(${msg}&&${msg}.type==="cce_alive"){globalThis.__cceAliveHook&&globalThis.__cceAliveHook()}}catch(e){}${rest}`,
   },
   /*
    * A conversation opened from the session list in the place asked for (src/page/86-open-in-tab-or-sidebar.js). The

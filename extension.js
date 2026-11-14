@@ -47,6 +47,7 @@ const sessionColors = require('./src/sessioncolors');
 const bgSessions = require('./src/bgsessions');
 const droppedTabs = require('./src/droppedtabs');
 const loadTabs = require('./src/load-tabs');
+const duplicates = require('./src/duplicates');
 const deleteSession = require('./src/deletesession');
 const recentClosed = require('./src/recentclosed');
 const ADAPTERS = require('./src/adapters');
@@ -377,6 +378,10 @@ function start(context, log, renamed, handing = false) {
   const pinMargin = () => cfg().get(PIN_MARGIN_SETTING, sessionPins.MARGIN_DAYS);
   const colorsFile = () => path.join(context.globalStorageUri.fsPath, sessionColors.FILE);
   const colorsOn = () => !removed() && !switchedOff().includes('sessionColors');
+  /* Conversations run by several editor processes (src/duplicates.js), refreshed with the background work, and the
+     time of the last heartbeat from a page of this window's panels (src/page/99-sweep.js). */
+  let dupGroups = new Map(), pageAt = 0;
+  const dupsList = (groups) => [...groups].map(([id, g]) => [id, g.length]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const options = () => {
     const off = switchedOff();
     return {
@@ -386,6 +391,7 @@ function start(context, log, renamed, handing = false) {
       background: off.includes('backgroundSessions') ? [] : background.collect(),
       pins: pinsOn() ? sessionPins.pageData(sessionPins.read(pinsFile()), sessionPins.retentionDays(), pinMargin()) : null,
       colors: off.includes('sessionColors') || removed() ? null : sessionColors.read(colorsFile()),
+      dups: removed() ? [] : dupsList(dupGroups),
     };
   };
   /* Never after Remove, which has just taken these files out of Claude Code's folder: a scan finishing afterwards would
@@ -765,6 +771,14 @@ function start(context, log, renamed, handing = false) {
   const panelList = (name) => { try { const f = globalThis[name]; return typeof f === 'function' ? f() || [] : []; } catch (_) { return []; } };
   const shownList = () => { const elsewhere = panelList('__cceSessionsElsewhere'); return panelList('__cceSessionsShown').filter((id) => !elsewhere.includes(id)); };
   const shownHere = (sessionId) => shownList().includes(sessionId);
+  globalThis.__cceAliveHook = () => { pageAt = Date.now(); };
+  context.subscriptions.push({ dispose: () => { if (globalThis.__cceAliveHook) delete globalThis.__cceAliveHook; } });
+  const stopDuplicate = (sessionId) => {
+    const group = dupGroups.get(sessionId);
+    if (!group) return null;
+    const p = duplicates.oldOne(group);
+    return duplicates.stop(sessionId, p, 'button', { dir: planDir() }) ? p : null;
+  };
   const steward = stewardView.create(vscode, {
     activeChat, freshAgents: () => claude.freshAgents(), readPlan, titles: readTitles.titles, since: readTitles.since,
     live: () => liveStates, unread: () => unreadKeys, reveal: (sessionId) => claude.source.reveal(sessionId), shownHere,
@@ -774,6 +788,7 @@ function start(context, log, renamed, handing = false) {
     changed: () => redrawStewards(),
     focusWindow: () => focusThisWindow(),
     deliver: (sessionId, text) => claude.source.deliverAnswer(sessionId, text, {}),
+    pageAt: () => pageAt, duplicates: () => dupGroups, stopDuplicate,
     windowName: () => vscode.workspace.name || '', windowFolders: () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push(steward);
@@ -942,12 +957,29 @@ function start(context, log, renamed, handing = false) {
    */
   let bgWorking = new Set();
   let bgReading = false;
+  /* Stops the processes src/duplicates.js allows to be stopped without asking. All windows do this from the same data;
+     stop() skips a process that another window has already stopped. */
+  const readDuplicates = () => {
+    try {
+      const was = JSON.stringify(dupsList(dupGroups));
+      dupGroups = removed() || !enabled() ? new Map() : duplicates.find({ records: background.liveRecords(), dir: planDir() });
+      if (!replaced() && !uninstalling() && !removed()) {
+        for (const [id, group] of dupGroups) {
+          for (const p of duplicates.autoStops(group)) {
+            if (duplicates.stop(id, p, 'auto', { dir: planDir() })) log.appendLine(`stopped process ${p.pid} of conversation ${id}: its window is gone and it was idle`);
+          }
+        }
+      }
+      if (JSON.stringify(dupsList(dupGroups)) !== was) writeLiveNow();
+    } catch (e) { log.appendLine('conversations run twice: ' + ((e && e.message) || e)); }
+  };
   const readBgWorking = async () => {
     if (bgReading) return;
     bgReading = true;
     let next;
     try {
       next = removed() || !enabled() ? new Set() : await background.workingNow({ write: !replaced() && !uninstalling() });
+      readDuplicates();
     } finally { bgReading = false; }
     if (next.size === bgWorking.size && [...next].every((id) => bgWorking.has(id))) return;
     bgWorking = next;
